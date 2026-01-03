@@ -6,6 +6,7 @@ import json
 import re
 import logging
 from typing import Dict, Any
+from datetime import datetime
 
 from openai import OpenAI
 
@@ -36,7 +37,7 @@ RED_FLAGS = [
     "outdated"         # 过时信息 (Soft)
 ]
 
-HARD_RED_FLAGS = {"pure_promotion", "ai_generated"}
+HARD_RED_FLAGS = {"ai_generated"}
 
 
 def build_scoring_prompt(title: str, summary: str, content: str) -> str:
@@ -49,7 +50,11 @@ def build_scoring_prompt(title: str, summary: str, content: str) -> str:
     else:
         content_snippet = content
 
+    today_str = datetime.now().strftime("%Y-%m-%d")
+
     return f"""{persona}
+
+当前日期：{today_str}
 
 请根据你的专业背景，按照以下步骤对文章进行深度评估：
 
@@ -58,14 +63,15 @@ def build_scoring_prompt(title: str, summary: str, content: str) -> str:
 - 这篇文章是讲什么的？解决了什么问题？
 - 是否有实质性的代码或独到见解，还是仅为搬运/洗稿？
 - 是否有过度的营销话术或误导性标题？
+- **时间检查**：对比"当前日期"，判断文章讨论的内容是否过时（例如2026年还在讨论2020年的旧闻）。
 
 ### 第二步：类型判断 & 负面检测
 1. **判断文章类型**：`news` (资讯), `tutorial` (教程), `opinion` (观点).
 2. **检测负面特征**：
-   - `pure_promotion`: 纯广告/软文 (Hard Flag)
+   - `pure_promotion`: 纯广告/卖课/推销产品 (Soft Flag). **注意：技术视角的工具推荐、新功能发布、开源项目介绍、投行报告摘要均不算广告。**
    - `clickbait`: 标题党 (Soft Flag)
    - `ai_generated`: 明显的 AI 生成痕迹/逻辑混乱 (Hard Flag)
-   - `outdated`: 严重过时 (Soft Flag)
+   - `outdated`: 严重过时 (Soft Flag) - **请基于{today_str}判断**
 
 ### 第三步：多维度打分 (1-5分，严谨评分)
 > 评分标准：
@@ -152,7 +158,7 @@ def parse_score_response(response_text: str) -> Dict[str, Any]:
             overall_score = calculate_weighted_score(scores, article_type, red_flags)
             
             # 生成一句话 Verdict
-            if overall_score >= 4.0:
+            if overall_score >= 3.8:  # User feedback: 3.9 is also high quality
                 verdict = "值得阅读"
             elif overall_score >= 3.0:
                 verdict = "一般，可选"
@@ -242,7 +248,7 @@ def format_score_result(score_result: Dict[str, Any]) -> str:
     overall = score_result.get("overall_score", 0.0)
     
     emoji = "😐"
-    if overall >= 4.0:
+    if overall >= 3.8:
         emoji = "🔥"
     elif overall <= 2.0:
         emoji = "🗑️" # 垃圾桶
