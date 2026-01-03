@@ -129,9 +129,25 @@ def main():
     logger.info("\n生成总体摘要...")
     overall_summary = generate_overall_summary(analyzed_articles)
     
-    with open('articles_summary.md', 'w', encoding='utf-8') as f:
+    # 创建输出目录
+    output_dir = "output"
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # 生成带时间戳的文件名
+    from datetime import datetime
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    summary_file = os.path.join(output_dir, f"summary_{timestamp}.md")
+    latest_file = os.path.join(output_dir, "summary_latest.md")
+    
+    # 保存摘要
+    with open(summary_file, 'w', encoding='utf-8') as f:
         f.write(overall_summary)
-    logger.info("总体摘要已保存到 articles_summary.md")
+    with open(latest_file, 'w', encoding='utf-8') as f:
+        f.write(overall_summary)
+    
+    logger.info(f"总体摘要已保存到:")
+    logger.info(f"  - {summary_file}")
+    logger.info(f"  - {latest_file}")
     
     logger.info("\n" + "="*50)
     logger.info("总体摘要:")
