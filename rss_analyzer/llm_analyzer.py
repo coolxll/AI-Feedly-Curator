@@ -125,8 +125,11 @@ def generate_overall_summary(analyzed_articles: list) -> str:
 - 在推荐文章时，请标注评分和结论（如：🔥 值得阅读 4.2/5.0）
 """
         
-        # 获取配置参数
-        model = get_config("OPENAI_SUMMARY_MODEL", "gpt-4o-mini", profile=summary_profile)
+        # 获取配置参数 - 优先使用 SUMMARY_MODEL，否则使用 profile 的通用 MODEL
+        model = (
+            get_config("OPENAI_SUMMARY_MODEL", profile=summary_profile) or 
+            get_config("OPENAI_MODEL", "gpt-4o-mini", profile=summary_profile)
+        )
         temperature = 0.7
         extra_body = {"enable_thinking": True}
         
