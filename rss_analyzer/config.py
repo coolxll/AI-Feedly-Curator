@@ -24,7 +24,6 @@ PROJ_CONFIG = {
     "summary_profile": "DEEPSEEK",      # 总结生成使用的 profile
     
     # 评分偏好设定 (Persona)
-    # 评分偏好设定 (Persona)
     "scoring_persona": """
 你是一名关注广泛的资深程序员。
 你的核心身份是：
