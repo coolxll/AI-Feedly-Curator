@@ -109,13 +109,20 @@ def main():
                 continue
             seen_titles.add(norm_title)
 
+        # 优先使用已有的 content (例如来自测试数据或 RSS 全文)
+        content = article.get('content', '')
         summary = article.get('summary', '')
-        if summary and len(summary) > 500:
+        
+        if content and len(content) > 200:
+             logger.info(f"  ✓ 使用已有正文 ({len(content)} 字符)")
+        elif summary and len(summary) > 500:
             logger.info(f"  ✓ 摘要较长 ({len(summary)} 字符)，跳过网页抓取")
             content = summary
         else:
             logger.info(f"  → 开始抓取网页内容...")
-            content = fetch_article_content(article['link'])
+            fetched_content = fetch_article_content(article['link'])
+            if fetched_content:
+                content = fetched_content
             logger.info(f"  ✓ 抓取完成: {len(content)} 字符")
             
         # 2. 长度过滤 (Pre-filtering)

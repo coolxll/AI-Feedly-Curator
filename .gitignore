@@ -45,6 +45,7 @@ output/
 
 # Logs
 *.log
+run_log.txt
 
 # Coverage
 .coverage
