@@ -116,9 +116,25 @@ def main():
         if article.get('id'):
             processed_ids.append(article['id'])
     
-    # 保存分析结果
+    # 生成带时间戳的文件名，按月份组织
+    from datetime import datetime
+    now = datetime.now()
+    month_dir = now.strftime("%Y-%m")  # 例如: 2026-01
+    output_dir = os.path.join("output", month_dir)
+    os.makedirs(output_dir, exist_ok=True)
+    
+    timestamp = now.strftime("%Y%m%d_%H%M%S")
+    
+    # 保存分析结果到归档目录
+    analyzed_file = os.path.join(output_dir, f"analyzed_articles_{timestamp}.json")
+    save_articles(analyzed_articles, analyzed_file)
+    
+    # 同时保存到根目录（为了兼容性和方便访问）
     save_articles(analyzed_articles, 'analyzed_articles.json')
-    logger.info("\n分析结果已保存到 analyzed_articles.json")
+    
+    logger.info(f"\n分析结果已保存到:")
+    logger.info(f"  - {analyzed_file}")
+    logger.info(f"  - analyzed_articles.json (最新版本)")
     
     # 标记已读
     if args.mark_read and processed_ids:
@@ -142,7 +158,7 @@ def main():
     # 同时保存到最新版本（在根 output 目录）
     latest_file = os.path.join("output", "summary_latest.md")
     
-    # 保存摘要
+    # 保存摘要（与 analyzed_articles 在同一目录）
     with open(summary_file, 'w', encoding='utf-8') as f:
         f.write(overall_summary)
     with open(latest_file, 'w', encoding='utf-8') as f:
@@ -151,6 +167,9 @@ def main():
     logger.info(f"总体摘要已保存到:")
     logger.info(f"  - {summary_file}")
     logger.info(f"  - {latest_file}")
+    logger.info(f"\n归档文件:")
+    logger.info(f"  - {analyzed_file}")
+    logger.info(f"  - {summary_file}")
     
     logger.info("\n" + "="*50)
     logger.info("总体摘要:")
