@@ -50,29 +50,41 @@ def main():
 
     # 刷新unread_news.json
     if args.refresh:
-        logger.info("正在从 Feedly 获取未读文章...")
+        logger.info("=" * 60)
+        logger.info("📥 从 Feedly 刷新文章")
+        logger.info("=" * 60)
+        logger.info(f"正在获取最新 {args.limit} 篇未读文章...")
         articles = feedly_fetch_unread(limit=args.limit)
         if articles is None:
-            logger.error("无法从 Feedly 获取文章，退出")
+            logger.error("❌ 无法从 Feedly 获取文章，退出")
             return
         
         output_file = "unread_news.json"
         save_articles(articles, output_file)
-        logger.info(f"已保存 {len(articles)} 篇未读文章到 {output_file}")
+        logger.info(f"✓ 已保存 {len(articles)} 篇未读文章到 {output_file}")
+        logger.info("")
         
         if args.input == PROJ_CONFIG["input_file"]:
             args.input = output_file
+    else:
+        logger.info("=" * 60)
+        logger.info("📂 使用本地文章数据（未刷新）")
+        logger.info("=" * 60)
+        logger.info(f"提示: 使用 --refresh 参数可从 Feedly 获取最新文章")
+        logger.info("")
 
     # 确定输入文件
     input_file = args.input
     if not os.path.exists(input_file):
-        logger.error(f"找不到输入文件: {input_file}")
+        logger.error(f"❌ 找不到输入文件: {input_file}")
         logger.info("提示: 使用 --refresh 参数从 Feedly 获取最新文章")
         return
 
     # 加载文章列表
     articles = load_articles(input_file)
-    logger.info(f"从 {input_file} 加载了 {len(articles)} 篇文章")
+    logger.info(f"📖 从 {input_file} 加载了 {len(articles)} 篇文章")
+    logger.info(f"🎯 将处理前 {min(args.limit, len(articles))} 篇文章")
+    logger.info("")
     
     analyzed_articles = []
     processed_ids = []
