@@ -15,13 +15,13 @@ PROJ_CONFIG = {
     "limit": 100,
     "mark_read": True,      # 是否默认标记已读
     "debug": False,         # 是否默认开启Debug
-    "refresh": False,       # 是否默认刷新
+    "refresh": True,       # 是否默认刷新
     "proxy": "http://127.0.0.1:7890",  # 代理服务器
     
     # API Profile 配置 (指定使用哪个 profile，使用大写)
     # 可选值: "LOCAL_QWEN", "ALIYUN", "DEEPSEEK", None (使用默认)
     "analysis_profile": "LOCAL_QWEN",   # 文章分析使用的 profile
-    "summary_profile": "DEEPSEEK",      # 总结生成使用的 profile
+    "summary_profile": "LOCAL_QWEN",      # 总结生成使用的 profile
 }
 # ==========================================
 
