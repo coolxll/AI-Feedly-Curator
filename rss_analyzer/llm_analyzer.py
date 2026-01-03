@@ -93,22 +93,37 @@ def generate_overall_summary(analyzed_articles: list) -> str:
             base_url=base_url,
         )
         
-        # 准备文章列表
+        # 准备文章列表 (过滤掉低质量文章以节省 Token)
         articles_info = []
+        skipped_count = 0
+        
         for article in analyzed_articles:
             analysis = article["analysis"]
+            score = analysis.get("score", 0.0)
+            red_flags = analysis.get("detailed_scores", {}).get("red_flags", [])
+            
+            # 过滤逻辑：
+            # 1. 分数 < 3.0 (不推荐)
+            # 2. 包含 Red Flags (软文/标题党等)
+            if score < 3.0 or red_flags:
+                skipped_count += 1
+                continue
+                
             articles_info.append({
                 "title": article["title"],
                 "link": article.get("link", ""),
-                "score": analysis.get("score", 0.0),
+                "score": score,
                 "verdict": analysis.get("verdict", "未知"),
-                "summary": analysis.get("summary", ""),  # 文章摘要/评价
+                "summary": analysis.get("summary", ""),
                 "detailed_scores": analysis.get("detailed_scores", {})
             })
         
-        prompt = f"""你是一位专业的内容编辑，请基于以下已评分的文章列表，生成一份详细的阅读推荐报告。
+        if not articles_info:
+            return "没有值得总结的高质量文章。"
 
-文章列表（共 {len(articles_info)} 篇）：
+        prompt = f"""你是一位专业的内容编辑，请基于以下已筛选的高质量文章列表（已过滤掉低分和垃圾内容），生成一份详细的阅读推荐报告。
+
+文章列表（共 {len(articles_info)} 篇，已跳过 {skipped_count} 篇低质量文章）：
 {json.dumps(articles_info, ensure_ascii=False, indent=2)}
 
 评分说明：
