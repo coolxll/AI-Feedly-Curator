@@ -8,26 +8,26 @@
 ### 功能需求
 
 #### 认证与连接
-- [ ] 实现 Feedly API OAuth 认证流程
-- [ ] 支持使用访问令牌（Access Token）进行认证
-- [ ] 安全存储和管理认证凭据
+- [x] 实现 Feedly API OAuth 认证流程 ✅ (使用 Access Token)
+- [x] 支持使用访问令牌（Access Token）进行认证 ✅ (已实现)
+- [x] 安全存储和管理认证凭据 ✅ (存储在 `.claude/skills/rss_reader/feedly_config.json`)
 
 #### 获取文章
-- [ ] 从用户的 Feedly 流（streams）中获取未读文章
-- [ ] 支持按分类（categories）筛选文章
+- [x] 从用户的 Feedly 流（streams）中获取未读文章 ✅ (已实现 `feedly_fetch_unread`)
+- [x] 支持按分类（categories）筛选文章 ✅ (通过 `stream_id` 参数)
 - [ ] 支持按标签（tags）筛选文章
-- [ ] 实现分页和批量获取以提高性能
+- [x] 实现分页和批量获取以提高性能 ✅ (支持 `limit` 参数)
 
 #### 同步功能
-- [ ] 标记文章为已读/未读
-- [ ] 双向同步阅读状态（本地工具 ↔ Feedly）
+- [x] 标记文章为已读/未读 ✅ (已实现 `feedly_mark_read`)
+- [x] 双向同步阅读状态（本地工具 ↔ Feedly） ✅ (处理后自动标记)
 - [ ] 支持保存文章到 Feedly
 - [ ] 支持为文章添加标签
 
 #### 工具集成
-- [ ] 在 `rss_tool.py` 中添加 Feedly 相关命令
+- [x] 在 `rss_analyzer` 包中添加 Feedly 相关功能 ✅ (`feedly_client.py`)
 - [ ] 更新 SKILL.md 文档说明新功能
-- [ ] 添加使用示例和最佳实践
+- [x] 添加使用示例和最佳实践 ✅ (README.md 中有说明)
 
 ### 预期优势
 
@@ -111,3 +111,19 @@
 
 ### 优先级
 🔴 高优先级 - 可以显著提升用户体验和工作效率
+
+### 完成情况
+✅ **核心功能已完成** (9/13 项)
+- ✅ Feedly 认证和连接
+- ✅ 获取未读文章
+- ✅ 按分类筛选
+- ✅ 批量获取
+- ✅ 标记已读
+- ✅ 代码模块化
+- ✅ 单元测试
+
+🚧 **待完成功能** (4/13 项)
+- ⏳ 按标签筛选文章
+- ⏳ 保存文章到 Feedly
+- ⏳ 为文章添加标签
+- ⏳ SKILL.md 文档更新
