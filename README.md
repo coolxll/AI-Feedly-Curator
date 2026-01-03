@@ -84,7 +84,7 @@ PROJ_CONFIG = {
 ```
 rss-opml/
 ├── article_analyzer.py   # 主程序入口
-├── src/                  # 源码目录
+├── rss_analyzer/         # 核心包
 │   ├── __init__.py
 │   ├── config.py         # 配置管理
 │   ├── feedly_client.py  # Feedly API 客户端

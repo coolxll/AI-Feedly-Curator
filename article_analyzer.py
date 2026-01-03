@@ -15,11 +15,11 @@ import argparse
 import logging
 
 # 导入模块
-from src.config import PROJ_CONFIG, setup_logging
-from src.feedly_client import feedly_fetch_unread, feedly_mark_read
-from src.article_fetcher import fetch_article_content
-from src.llm_analyzer import analyze_article_with_llm, generate_overall_summary
-from src.utils import load_articles, save_articles
+from rss_analyzer.config import PROJ_CONFIG, setup_logging
+from rss_analyzer.feedly_client import feedly_fetch_unread, feedly_mark_read
+from rss_analyzer.article_fetcher import fetch_article_content
+from rss_analyzer.llm_analyzer import analyze_article_with_llm, generate_overall_summary
+from rss_analyzer.utils import load_articles, save_articles
 
 logger = logging.getLogger(__name__)
 
