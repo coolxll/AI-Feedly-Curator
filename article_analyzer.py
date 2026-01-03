@@ -79,19 +79,21 @@ def main():
     
     # 处理每篇文章
     for idx, article in enumerate(articles[:args.limit], 1):
-        logger.info(f"处理第 {idx} 篇: {article['title']}")
+        logger.info(f"处理第 {idx}/{min(args.limit, len(articles))} 篇: {article['title']}")
         
         summary = article.get('summary', '')
         if summary and len(summary) > 500:
-            logger.info(f"  - 摘要较长({len(summary)}字符)，跳过抓取")
+            logger.info(f"  ✓ 摘要较长 ({len(summary)} 字符)，跳过网页抓取")
             content = summary
         else:
+            logger.info(f"  → 开始抓取网页内容...")
             content = fetch_article_content(article['link'])
-            logger.info(f"  - 获取内容: {len(content)} 字符")
+            logger.info(f"  ✓ 抓取完成: {len(content)} 字符")
         
         analysis = analyze_article_with_llm(article['title'], summary, content)
-        logger.info(f"  - 评分: {analysis['score']}/10")
-        logger.info(f"  - 摘要: {analysis['summary'][:50]}...")
+        logger.info(f"  ✓ 评分: {analysis['score']}/10")
+        logger.info(f"  ✓ 摘要: {analysis['summary'][:50]}...")
+
         
         analyzed_articles.append({**article, "analysis": analysis})
 
