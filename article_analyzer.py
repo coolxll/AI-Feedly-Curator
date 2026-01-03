@@ -88,6 +88,7 @@ def main():
     
     analyzed_articles = []
     processed_ids = []
+    seen_titles = set()
     
     # 处理每篇文章
     for idx, article in enumerate(articles[:args.limit], 1):
@@ -98,6 +99,15 @@ def main():
         if any(kw in article['title'] for kw in filter_keywords):
             logger.info(f"  🚫 标题包含过滤词，跳过")
             continue
+            
+        # 1.1 简单去重 (Redundancy Filter)
+        norm_title = "".join(filter(str.isalnum, article['title'].lower()))
+        # 检查是否太短（防止像 "Update" 这种通用标题误杀），但 filter_keywords 应该已经覆盖了一些
+        if len(norm_title) > 5: 
+            if norm_title in seen_titles:
+                logger.info(f"  🚫 标题重复 (Redundancy)，跳过")
+                continue
+            seen_titles.add(norm_title)
 
         summary = article.get('summary', '')
         if summary and len(summary) > 500:

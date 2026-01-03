@@ -5,9 +5,10 @@ AI 驱动的 RSS 文章分析器，自动从 Feedly 获取未读文章，使用 
 ## 功能特性
 
 - 📥 **Feedly 集成** - 自动从 Feedly 获取未读文章
-- 🤖 **AI 分析** - 使用 LLM 对每篇文章进行评分和摘要
-- 📊 **总体报告** - 生成包含趋势分析和推荐的 Markdown 报告
-- 🔄 **多 Profile 支持** - 灵活切换不同的 API 服务商
+- 🤖 **AI 多维度评分** - 基于相关性、信息量、深度等维度进行 1-5 分量化评分
+- 🚩 **负面特征检测** - 自动识别软文、标题党、AI 生成及过时信息
+- 📊 **总体报告** - 生成包含趋势分析和高质量推荐的 Markdown 报告
+- 🔄 **多 Profile 支持** - 灵活切换不同的 API 服务商（支持不同任务使用不同模型）
 - ✅ **自动标记已读** - 处理后自动同步 Feedly 阅读状态
 
 ## 快速开始
@@ -35,10 +36,10 @@ python article_analyzer.py --refresh
 # 分析已有的文章
 python article_analyzer.py --input unread_news.json
 
-# 限制处理数量
-python article_analyzer.py --refresh --limit 50
+# 限制处理数量并标记已读
+python article_analyzer.py --refresh --limit 50 --mark-read
 
-# 重新生成总体摘要（不重新分析文章）
+# 重新生成总体摘要（基于已分析的文章，不重新调用 API 评分）
 python regenerate_summary.py
 ```
 
@@ -54,7 +55,7 @@ python regenerate_summary.py
 
 ## 多 Profile 配置
 
-支持配置多个 API 服务商并灵活切换，**Profile 使用大写命名**：
+支持配置多个 API 服务商并灵活切换，**Profile 使用大写命名**。
 
 ### 在 `.env` 中定义 Profile
 
@@ -72,36 +73,40 @@ DEEPSEEK_OPENAI_MODEL=deepseek-v3.2
 
 ### 在代码中指定 Profile
 
-编辑 `src/config.py` 中的 `PROJ_CONFIG`：
+编辑 `rss_analyzer/config.py` 中的 `PROJ_CONFIG`：
 
 ```python
 PROJ_CONFIG = {
     # ...
-    "analysis_profile": "LOCAL_QWEN",   # 文章分析用本地模型
-    "summary_profile": "DEEPSEEK",      # 总结生成用 DeepSeek
+    "analysis_profile": "LOCAL_QWEN",   # 文章分析评分用本地模型
+    "summary_profile": "DEEPSEEK",      # 总体报告生成用更强的模型
 }
 ```
 
-## 项目结构
+## 评分系统
+
+系统使用结构化 Prompt 进行评估，包含：
+- **Persona 偏好**：可自定义关注点（如测试开发、DevOps 等）
+- **动态权重**：根据文章类型（新闻、教程、观点）自动调整评分权重
+- **惩罚机制**：发现 Red Flags（如 `clickbait`）时自动降低评分
+
+## 项目结构与输出
 
 ```
 rss-opml/
 ├── article_analyzer.py   # 主程序入口
-├── rss_analyzer/         # 核心包
-│   ├── __init__.py
-│   ├── config.py         # 配置管理
-│   ├── feedly_client.py  # Feedly API 客户端
-│   ├── article_fetcher.py# 文章内容抓取
-│   ├── llm_analyzer.py   # LLM 分析模块
-│   └── utils.py          # 工具函数
-├── .env                  # 环境变量 (不提交)
-├── .env.example          # 环境变量模板
-├── requirements.txt      # 依赖列表
-└── tests/                # 测试目录
-    ├── test_config.py
-    ├── test_utils.py
-    ├── test_article_fetcher.py
-    └── test_llm_analyzer.py
+├── regenerate_summary.py # 重新生成摘要脚本
+├── rss_analyzer/         # 核心代码
+│   ├── config.py         # 配置文件
+│   ├── scoring.py        # 评分逻辑
+│   ├── llm_analyzer.py   # LLM 交互
+│   └── ...
+├── output/               # 输出目录
+│   ├── 2026-01/          # 按月份归档
+│   │   ├── analyzed_articles_20260103_120000.json
+│   │   └── summary_20260103_120000.md
+│   └── summary_latest.md # 最新生成的摘要报告
+└── tests/                # 单元测试
 ```
 
 ## 测试
@@ -110,12 +115,6 @@ rss-opml/
 
 ```bash
 python -m unittest discover tests
-```
-
-运行单个测试文件：
-
-```bash
-python -m unittest tests.test_config
 ```
 
 ## License

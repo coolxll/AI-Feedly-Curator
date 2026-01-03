@@ -30,64 +30,88 @@ DEFAULT_WEIGHTS = PROJ_CONFIG.get("scoring_weights", {}).get("default", {
 
 # 负面清单配置
 RED_FLAGS = [
-    "pure_promotion",  # 纯推广/软文
-    "clickbait",       # 标题党
-    "ai_generated",    # AI 生成感过重
-    "outdated"         # 过时信息
+    "pure_promotion",  # 纯推广/软文 (Hard)
+    "clickbait",       # 标题党 (Soft)
+    "ai_generated",    # AI 生成感过重/逻辑混乱 (Hard)
+    "outdated"         # 过时信息 (Soft)
 ]
+
+HARD_RED_FLAGS = {"pure_promotion", "ai_generated"}
 
 
 def build_scoring_prompt(title: str, summary: str, content: str) -> str:
-    """构建结构化评分提示词"""
+    """构建结构化评分提示词 (含思维链 & 智能截断)"""
     persona = PROJ_CONFIG.get("scoring_persona", "")
     
+    # 智能截断：保留头部和尾部，中间截断
+    if len(content) > 10000:
+        content_snippet = content[:6000] + "\n\n...[内容过长，中间部分省略]...\n\n" + content[-3000:]
+    else:
+        content_snippet = content
+
     return f"""{persona}
 
-请根据你的专业背景和偏好，从以下三个方面评估这篇文章：
+请根据你的专业背景，按照以下步骤对文章进行深度评估：
 
-### 第一步：类型判断 & 负面检测
-1. **判断文章类型**：是 `news` (新闻/资讯)、`tutorial` (教程/实操)、还是 `opinion` (观点/深度分析)？
-2. **检测负面特征 (Red Flags)**：
-   - `pure_promotion`: 是否整篇只为卖课或卖产品？
-   - `clickbait`: 是否标题惊悚但内容空洞？
-   - `ai_generated`: 是否有明显的车轱辘话、逻辑断层？
-   - `outdated`: 是否讨论几年前的过时技术？
+### 第一步：分析与思考 (Chain of Thought)
+请先通读全文，分析文章的核心价值、技术深度和潜在缺陷。
+- 这篇文章是讲什么的？解决了什么问题？
+- 是否有实质性的代码或独到见解，还是仅为搬运/洗稿？
+- 是否有过度的营销话术或误导性标题？
 
-### 第二步：多维度打分 (1-5分)
+### 第二步：类型判断 & 负面检测
+1. **判断文章类型**：`news` (资讯), `tutorial` (教程), `opinion` (观点).
+2. **检测负面特征**：
+   - `pure_promotion`: 纯广告/软文 (Hard Flag)
+   - `clickbait`: 标题党 (Soft Flag)
+   - `ai_generated`: 明显的 AI 生成痕迹/逻辑混乱 (Hard Flag)
+   - `outdated`: 严重过时 (Soft Flag)
+
+### 第三步：多维度打分 (1-5分，严谨评分)
+> 评分标准：
+> - 5分：极佳。行业突破性见解、极其详尽的原创教程、极具启发性的深度好文。
+> - 4分：优秀。内容扎实，有代码或具体实践，值得细读。
+> - 3分：及格。普通资讯、简单的入门介绍、常见的八股文。大部分文章应在此分数段。
+> - 1-2分：差。无营养、重复废话、明显错误或纯广告。
+
+维度：
 1. **相关性**：是否紧扣【测试开发、DevOps、AI编程、Vibe Coding】。
-2. **信息量与准确性**：是否提供新工具、新见解。
-3. **深度与观点**：是否有启发性，拒绝简单归纳。
-4. **可读性**：代码/结构是否优雅 (Vibe Coding)。
-5. **原创性/水分度**：分数越高水分越少。
+2. **信息量与准确性**：信息密度如何，是否准确可靠。
+3. **深度与观点**：是否有独家见解或深入分析。
+4. **可读性**：结构清晰，代码优雅，阅读体验好。
+5. **原创性/水分度**：是否原创，是否水分太大。
 
-### 输出格式 (JSON)
+### 输出格式 (JSON Only)
+请只返回以下 JSON 格式，不要包含其他文本：
 {{
+  "analysis": "1-2句话的简要分析，说明打分理由",
   "article_type": "news/tutorial/opinion",
-  "red_flags": ["clickbait", ...],  // 如果没有则为空列表 []
+  "red_flags": ["clickbait", ...],  // 无则为空数组
   "scores": {{
-    "relevance": <分数>,
-    "informativeness_accuracy": <分数>,
-    "depth_opinion": <分数>,
-    "readability": <分数>,
-    "non_redundancy": <分数>
-  }},
-  "comment": "简短评价（包含主要优点/缺点）"
+    "relevance": <1-5>,
+    "informativeness_accuracy": <1-5>,
+    "depth_opinion": <1-5>,
+    "readability": <1-5>,
+    "non_redundancy": <1-5>
+  }}
 }}
 
-下面是文章内容：
+---
+文章信息：
 标题：{title}
 摘要：{summary[:200] if summary else '无'}
-正文：{content[:3000]}
+正文：
+{content_snippet}
 """
 
 
 def calculate_weighted_score(scores: Dict[str, int], article_type: str, red_flags: list) -> float:
-    """计算加权总分"""
-    # 1. 获取对应类型的权重
+    """计算加权总分 (含负面惩罚)"""
+    # 1. 获取权重
     weights_config = PROJ_CONFIG.get("scoring_weights", {})
     weights = weights_config.get(article_type, weights_config.get("default", DEFAULT_WEIGHTS))
     
-    # 2. 计算加权平均分
+    # 2. 计算基础加权分
     total_score = 0
     total_weight = 0
     
@@ -98,11 +122,15 @@ def calculate_weighted_score(scores: Dict[str, int], article_type: str, red_flag
     
     avg_score = total_score / total_weight if total_weight > 0 else 0
     
-    # 3. 负面清单惩罚 (Red Flags Penalty)
-    # 如果有 red_flags，最高分限制为 2.5 (不推荐)，或者直接扣分
+    # 3. 负面清单处理 (Tiered Penalty)
     if red_flags:
-        # 简单粗暴：有硬伤直接不及格
-        return min(avg_score, 2.5)
+        # Hard Flags: 直接打入冷宫 (最高 1.0 分)
+        if any(flag in HARD_RED_FLAGS for flag in red_flags):
+            return 1.0
+        
+        # Soft Flags: 每一项扣 1.0 分
+        penalty = len(red_flags) * 1.0
+        avg_score = max(1.0, avg_score - penalty)
         
     return round(avg_score, 1)
 
@@ -110,28 +138,29 @@ def calculate_weighted_score(scores: Dict[str, int], article_type: str, red_flag
 def parse_score_response(response_text: str) -> Dict[str, Any]:
     """解析响应并计算总分"""
     try:
+        # 尝试提取 JSON
         json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
         if json_match:
             data = json.loads(json_match.group())
             
-            # 兼容旧代码的字段映射
             scores = data.get("scores", {})
             article_type = data.get("article_type", "default")
             red_flags = data.get("red_flags", [])
+            analysis_text = data.get("analysis", "") # 获取分析文本
             
             # 计算加权总分
             overall_score = calculate_weighted_score(scores, article_type, red_flags)
             
-            # 生成结论
+            # 生成一句话 Verdict
             if overall_score >= 4.0:
                 verdict = "值得阅读"
             elif overall_score >= 3.0:
-                verdict = "一般，可选阅读"
+                verdict = "一般，可选"
             else:
-                verdict = "不太值得阅读"
+                verdict = "不值得读"
                 
             if red_flags:
-                verdict = f"不推荐 (含: {', '.join(red_flags)})"
+                verdict += f" (含: {', '.join(red_flags)})"
 
             return {
                 "relevance_score": scores.get("relevance", 0),
@@ -141,12 +170,14 @@ def parse_score_response(response_text: str) -> Dict[str, Any]:
                 "non_redundancy_score": scores.get("non_redundancy", 0),
                 "overall_score": overall_score,
                 "verdict": verdict,
-                "comment": data.get("comment", ""),
+                "reason": analysis_text, # 使用 analysis 字段作为 reason
+                "comment": data.get("comment", analysis_text), # 兼容 comment
                 "article_type": article_type,
-                "red_flags": red_flags
+                "red_flags": red_flags,
+                "detailed_scores": data # 保存完整原始数据
             }
             
-        return _default_error_result(f"无法解析: {response_text[:50]}")
+        return _default_error_result(f"无法解析JSON: {response_text[:100]}")
     except Exception as e:
         logger.error(f"解析失败: {e}")
         return _default_error_result(str(e))
@@ -156,26 +187,18 @@ def _default_error_result(msg: str):
     return {
         "overall_score": 0.0,
         "verdict": "解析错误",
+        "reason": msg,
         "comment": msg,
-        "red_flags": []
+        "red_flags": [],
+        "detailed_scores": {}
     }
-
 
 
 def score_article(title: str, summary: str, content: str) -> Dict[str, Any]:
     """
     对文章进行多维度评分
-    
-    Args:
-        title: 文章标题
-        summary: 文章摘要
-        content: 文章内容
-    
-    Returns:
-        评分结果字典
     """
     try:
-        # 使用配置中指定的 analysis_profile
         analysis_profile = PROJ_CONFIG.get("analysis_profile")
         
         client = OpenAI(
@@ -191,61 +214,38 @@ def score_article(title: str, summary: str, content: str) -> Dict[str, Any]:
             messages=[
                 {"role": "user", "content": prompt}
             ],
-            temperature=0.3,  # 降低温度以获得更一致的评分
-            max_tokens=1024
+            temperature=0.2,  # 稍微降低一点，更稳定
+            max_tokens=1500   # 增加 Token 上限以容纳 Analysis
         )
         
         response_text = response.choices[0].message.content
         log_debug("Scoring Response", response_text)
         
         if not response_text:
-            return {
-                "relevance_score": 0,
-                "informativeness_accuracy_score": 0,
-                "depth_opinion_score": 0,
-                "readability_score": 0,
-                "non_redundancy_score": 0,
-                "overall_score": 0.0,
-                "verdict": "不太值得阅读",
-                "comment": "模型未返回内容"
-            }
+            return _default_error_result("模型返回为空")
         
-        return parse_score_response(response_text)
+        result = parse_score_response(response_text)
+        
+        # 补全 score 字段，兼容旧的 article_analyzer 调用
+        result['score'] = result['overall_score']
+        
+        return result
         
     except Exception as e:
-        logger.error(f"评分失败: {e}")
-        import traceback
-        import sys
-        traceback.print_exc(file=sys.stderr)
-        return {
-            "relevance_score": 0,
-            "informativeness_accuracy_score": 0,
-            "depth_opinion_score": 0,
-            "readability_score": 0,
-            "non_redundancy_score": 0,
-            "overall_score": 0.0,
-            "verdict": "不太值得阅读",
-            "comment": f"评分失败: {str(e)}"
-        }
+        logger.error(f"评分过程异常: {e}")
+        return _default_error_result(f"Exception: {str(e)}")
 
 
 def format_score_result(score_result: Dict[str, Any]) -> str:
-    """
-    格式化评分结果为可读字符串
-    
-    Args:
-        score_result: 评分结果字典
-    
-    Returns:
-        格式化后的字符串
-    """
+    """格式化展示"""
     verdict = score_result.get("verdict", "未知")
     overall = score_result.get("overall_score", 0.0)
     
-    # 添加 emoji
     emoji = "😐"
     if overall >= 4.0:
         emoji = "🔥"
+    elif overall <= 2.0:
+        emoji = "🗑️" # 垃圾桶
     elif overall < 3.0:
         emoji = "👎"
     

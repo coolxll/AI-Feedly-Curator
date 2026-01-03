@@ -10,51 +10,42 @@ from rss_analyzer.llm_analyzer import analyze_article_with_llm
 class TestLLMAnalyzer(unittest.TestCase):
     """LLM 分析测试"""
     
-    @patch('rss_analyzer.llm_analyzer.OpenAI')
-    @patch('rss_analyzer.llm_analyzer.PROJ_CONFIG', {"analysis_profile": None})
-    def test_analyze_article_success(self, mock_openai_class):
+    @patch('rss_analyzer.scoring.score_article')
+    def test_analyze_article_success(self, mock_score_article):
         """测试成功分析文章"""
-        # Mock OpenAI 响应
-        mock_client = Mock()
-        mock_openai_class.return_value = mock_client
-        
-        mock_response = Mock()
-        mock_choice = Mock()
-        mock_message = Mock()
-        mock_message.content = '{"score": 8, "summary": "测试摘要", "reason": "测试理由"}'
-        mock_choice.message = mock_message
-        mock_response.choices = [mock_choice]
-        
-        mock_client.chat.completions.create.return_value = mock_response
+        # Mock score_article 的返回值
+        mock_score_article.return_value = {
+            "overall_score": 4.5,
+            "verdict": "值得阅读",
+            "comment": "测试总结",
+            "relevance_score": 4,
+            "informativeness_accuracy_score": 5,
+            "depth_opinion_score": 4,
+            "readability_score": 5,
+            "non_redundancy_score": 4,
+            "article_type": "tutorial",
+            "red_flags": []
+        }
         
         # 执行测试
         result = analyze_article_with_llm("测试标题", "测试摘要", "测试内容")
         
         # 验证结果
-        self.assertEqual(result["score"], 8)
-        self.assertEqual(result["summary"], "测试摘要")
-        self.assertEqual(result["reason"], "测试理由")
+        self.assertEqual(result["score"], 4.5)
+        self.assertEqual(result["summary"], "测试总结")
+        self.assertEqual(result["detailed_scores"]["relevance"], 4)
+        self.assertEqual(result["verdict"], "值得阅读")
     
-    @patch('rss_analyzer.llm_analyzer.OpenAI')
-    @patch('rss_analyzer.llm_analyzer.PROJ_CONFIG', {"analysis_profile": None})
-    def test_analyze_article_empty_response(self, mock_openai_class):
-        """测试空响应处理"""
-        mock_client = Mock()
-        mock_openai_class.return_value = mock_client
-        
-        mock_response = Mock()
-        mock_choice = Mock()
-        mock_message = Mock()
-        mock_message.content = None
-        mock_choice.message = mock_message
-        mock_response.choices = [mock_choice]
-        
-        mock_client.chat.completions.create.return_value = mock_response
+    @patch('rss_analyzer.scoring.score_article')
+    def test_analyze_article_failure(self, mock_score_article):
+        """测试分析失败"""
+        # Mock 抛出异常
+        mock_score_article.side_effect = Exception("API Error")
         
         result = analyze_article_with_llm("标题", "摘要", "内容")
         
-        self.assertEqual(result["score"], 0)
-        self.assertIn("失败", result["summary"])
+        self.assertEqual(result["score"], 0.0)
+        self.assertIn("分析失败", result["summary"])
 
 
 if __name__ == "__main__":

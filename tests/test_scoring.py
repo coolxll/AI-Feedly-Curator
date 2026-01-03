@@ -20,12 +20,37 @@ class TestScoring(unittest.TestCase):
         prompt = build_scoring_prompt("测试标题", "测试摘要", "测试内容")
         
         self.assertIn("判断文章类型", prompt)
-        self.assertIn("Red Flags", prompt)
+        self.assertIn("负面特征", prompt)
         self.assertIn("测试标题", prompt)
     
+    def test_parse_score_with_red_flags(self):
+        """测试包含负面特征的评分"""
+        response = """{
+            "analysis": "这显然是一篇软文",
+            "article_type": "news",
+            "red_flags": ["pure_promotion"],
+            "scores": {
+                "relevance": 5,
+                "informativeness_accuracy": 5,
+                "depth_opinion": 5,
+                "readability": 5,
+                "non_redundancy": 5
+            },
+            "comment": "虽然分高但是软文"
+        }"""
+        
+        result = parse_score_response(response)
+        
+        # 有 Red Flag (Hard)，分数应被限制为 1.0
+        self.assertEqual(result["overall_score"], 1.0)
+        # Verdict 应该是 "不值得读 (含: pure_promotion)"
+        self.assertIn("不值得读", result["verdict"])
+        self.assertIn("pure_promotion", result["verdict"])
+
     def test_parse_score_response_valid(self):
         """测试解析有效的评分响应"""
         response = """{
+            "analysis": "此文详实。",
             "article_type": "tutorial",
             "red_flags": [],
             "scores": {
@@ -41,50 +66,16 @@ class TestScoring(unittest.TestCase):
         result = parse_score_response(response)
         
         self.assertEqual(result["relevance_score"], 4)
-        # 教程类权重: readability=4, informative=3. 
-        # 简单验证分数计算是否非零
         self.assertTrue(result["overall_score"] > 0)
         self.assertEqual(result["verdict"], "值得阅读")
         self.assertEqual(result["article_type"], "tutorial")
-    
-    def test_parse_score_with_red_flags(self):
-        """测试包含负面特征的评分"""
-        response = """{
-            "article_type": "news",
-            "red_flags": ["pure_promotion"],
-            "scores": {
-                "relevance": 5,
-                "informativeness_accuracy": 5,
-                "depth_opinion": 5,
-                "readability": 5,
-                "non_redundancy": 5
-            },
-            "comment": "虽然分高但是软文"
-        }"""
-        
-        result = parse_score_response(response)
-        
-        # 有 Red Flag，分数应被限制
-        self.assertLessEqual(result["overall_score"], 2.5)
-        self.assertIn("不推荐", result["verdict"])
-        self.assertIn("pure_promotion", result["verdict"])
-        
+
     def test_parse_score_response_invalid(self):
         """测试解析无效响应"""
         result = parse_score_response("这不是JSON")
         
         self.assertEqual(result["overall_score"], 0.0)
         self.assertEqual(result["verdict"], "解析错误")
-    
-    def test_format_score_result(self):
-        """测试格式化评分结果"""
-        # score_result 现在的结构由 parse_score_response 决定，
-        # 但 format_score_result 暂时还没在 scoring.py 里更新（它被移除还是保留了？）
-        # 之前的代码里 format_score_result 似乎没有被用到 scoring.py 的导出里？
-        # 检查 scoring.py 发现之前没有定义 format_score_result，是在 llm_analyzer 里被 import 的吗？
-        # 不，之前的 commit 中有 export format_score_result。
-        # 但在刚才的 replace_file_content 中，我似乎覆盖了 scoring.py 的内容，需要检查 format_score_result 是否还存在。
-        pass
 
     @patch('rss_analyzer.scoring.OpenAI')
     @patch('rss_analyzer.scoring.PROJ_CONFIG', {"analysis_profile": None, "scoring_persona": "", "scoring_weights": {}})
@@ -97,6 +88,7 @@ class TestScoring(unittest.TestCase):
         mock_choice = Mock()
         mock_message = Mock()
         mock_message.content = """{
+            "analysis": "很有深度。",
             "article_type": "opinion",
             "red_flags": [],
             "scores": {
