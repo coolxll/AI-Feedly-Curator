@@ -129,15 +129,18 @@ def main():
     logger.info("\n生成总体摘要...")
     overall_summary = generate_overall_summary(analyzed_articles)
     
-    # 创建输出目录
-    output_dir = "output"
+    # 生成带时间戳的文件名，按月份组织
+    from datetime import datetime
+    now = datetime.now()
+    month_dir = now.strftime("%Y-%m")  # 例如: 2026-01
+    output_dir = os.path.join("output", month_dir)
     os.makedirs(output_dir, exist_ok=True)
     
-    # 生成带时间戳的文件名
-    from datetime import datetime
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    timestamp = now.strftime("%Y%m%d_%H%M%S")
     summary_file = os.path.join(output_dir, f"summary_{timestamp}.md")
-    latest_file = os.path.join(output_dir, "summary_latest.md")
+    
+    # 同时保存到最新版本（在根 output 目录）
+    latest_file = os.path.join("output", "summary_latest.md")
     
     # 保存摘要
     with open(summary_file, 'w', encoding='utf-8') as f:

@@ -26,12 +26,17 @@ def main():
     print("\n正在生成总体摘要...")
     overall_summary = generate_overall_summary(articles)
     
-    # 生成带时间戳的文件名
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    # 生成带时间戳的文件名，按月份组织
+    now = datetime.now()
+    month_dir = now.strftime("%Y-%m")  # 例如: 2026-01
+    output_dir = os.path.join("output", month_dir)
+    os.makedirs(output_dir, exist_ok=True)
+    
+    timestamp = now.strftime("%Y%m%d_%H%M%S")
     summary_file = os.path.join(output_dir, f"summary_{timestamp}.md")
     
-    # 同时保存到最新版本
-    latest_file = os.path.join(output_dir, "summary_latest.md")
+    # 同时保存到最新版本（在根 output 目录）
+    latest_file = os.path.join("output", "summary_latest.md")
     
     print("\n正在保存摘要...")
     with open(summary_file, 'w', encoding='utf-8') as f:
