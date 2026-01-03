@@ -232,10 +232,16 @@ def parse_score_response(response_text: str) -> Dict[str, Any]:
                 "detailed_scores": data # 保存完整原始数据
             }
             
-        return _default_error_result(f"无法解析JSON: {response_text[:100]}")
+        return _default_error_result(f"无法解析JSON: {response_text[:200]}")
+    except json.JSONDecodeError as e:
+        # JSON解析错误，记录更详细的信息
+        logger.error(f"JSON解析失败: {e}")
+        logger.error(f"原始响应内容: {response_text[:500]}...")
+        return _default_error_result(f"JSON解析错误: {e} | 响应片段: {response_text[:100]}")
     except Exception as e:
         logger.error(f"解析失败: {e}")
-        return _default_error_result(str(e))
+        logger.error(f"原始响应内容: {response_text[:500]}...")
+        return _default_error_result(f"解析异常: {e}")
 
 
 def _default_error_result(msg: str):
