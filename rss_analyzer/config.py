@@ -33,6 +33,19 @@ PROJ_CONFIG = {
 4. 代码的优雅性、架构的整洁度。
 5. 拒绝枯燥的 CRUD、过时的技术堆砌和毫无新意的八股文。
 """,
+    
+    # Pre-filtering (前置过滤)
+    "filter_keywords": ["推广", "广告", "特惠", "中奖", "开奖", "通知", "招聘"],
+    "filter_min_length": 200,  # 正文最少字符数
+    
+    # Dynamic Weighting (动态权重)
+    # 格式: {文章类型: {维度: 权重}}
+    "scoring_weights": {
+        "news": {"relevance": 2, "informativeness_accuracy": 4, "depth_opinion": 1, "readability": 2, "non_redundancy": 1},
+        "tutorial": {"relevance": 2, "informativeness_accuracy": 3, "depth_opinion": 1, "readability": 4, "non_redundancy": 1},
+        "opinion": {"relevance": 2, "informativeness_accuracy": 2, "depth_opinion": 4, "readability": 2, "non_redundancy": 2},
+        "default": {"relevance": 2, "informativeness_accuracy": 2, "depth_opinion": 2, "readability": 2, "non_redundancy": 1}
+    }
 }
 # ==========================================
 

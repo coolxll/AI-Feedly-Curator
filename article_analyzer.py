@@ -93,6 +93,12 @@ def main():
     for idx, article in enumerate(articles[:args.limit], 1):
         logger.info(f"处理第 {idx}/{min(args.limit, len(articles))} 篇: {article['title']}")
         
+        # 1. 关键词过滤 (Pre-filtering)
+        filter_keywords = PROJ_CONFIG.get("filter_keywords", [])
+        if any(kw in article['title'] for kw in filter_keywords):
+            logger.info(f"  🚫 标题包含过滤词，跳过")
+            continue
+
         summary = article.get('summary', '')
         if summary and len(summary) > 500:
             logger.info(f"  ✓ 摘要较长 ({len(summary)} 字符)，跳过网页抓取")
@@ -101,9 +107,25 @@ def main():
             logger.info(f"  → 开始抓取网页内容...")
             content = fetch_article_content(article['link'])
             logger.info(f"  ✓ 抓取完成: {len(content)} 字符")
+            
+        # 2. 长度过滤 (Pre-filtering)
+        min_length = PROJ_CONFIG.get("filter_min_length", 100)
+        if len(content) < min_length:
+            logger.info(f"  🚫 内容太短 ({len(content)} < {min_length})，跳过")
+            continue
         
         analysis = analyze_article_with_llm(article['title'], summary, content)
-        logger.info(f"  ✓ 评分: {analysis['score']:.1f}/5.0 - {analysis.get('verdict', '未知')}")
+        
+        # 格式化输出 Verdict
+        verdict = analysis.get('verdict', '未知')
+        score = analysis['score']
+        # 添加 Red Flag 标识
+        if 'red_flags' in analysis.get('detailed_scores', {}) and analysis['detailed_scores']['red_flags']:
+             red_flags = analysis['detailed_scores']['red_flags']
+             logger.info(f"  ⚠️ 发现 Red Flags: {red_flags}")
+             verdict = f"🚫 {verdict}"
+            
+        logger.info(f"  ✓ 评分: {score:.1f}/5.0 - {verdict}")
         logger.info(f"  ✓ 评价: {analysis.get('reason', '')}")
         if 'detailed_scores' in analysis:
             scores = analysis['detailed_scores']

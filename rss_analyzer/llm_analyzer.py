@@ -44,7 +44,9 @@ def analyze_article_with_llm(title: str, summary: str, content: str) -> dict:
                 "informativeness": score_result.get("informativeness_accuracy_score", 0),
                 "depth": score_result.get("depth_opinion_score", 0),
                 "readability": score_result.get("readability_score", 0),
-                "originality": score_result.get("non_redundancy_score", 0)
+                "originality": score_result.get("non_redundancy_score", 0),
+                "red_flags": score_result.get("red_flags", []),
+                "article_type": score_result.get("article_type", "default")
             }
         }
     except Exception as e:
