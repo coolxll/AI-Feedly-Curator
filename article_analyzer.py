@@ -139,16 +139,5 @@ def main():
     logger.info(f"\n{overall_summary}")
 
 
-def regenerate_summary():
-    """重新生成总体摘要"""
-    setup_logging()
-    articles = load_articles('analyzed_articles.json')
-    overall_summary = generate_overall_summary(articles)
-    
-    with open('articles_summary.md', 'w', encoding='utf-8') as f:
-        f.write(overall_summary)
-    print("总体摘要已重新生成并保存到 articles_summary.md")
-
-
 if __name__ == "__main__":
-    regenerate_summary()
+    main()

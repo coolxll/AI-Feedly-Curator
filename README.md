@@ -37,6 +37,9 @@ python article_analyzer.py --input unread_news.json
 
 # 限制处理数量
 python article_analyzer.py --refresh --limit 50
+
+# 重新生成总体摘要（不重新分析文章）
+python regenerate_summary.py
 ```
 
 ## 命令行参数
