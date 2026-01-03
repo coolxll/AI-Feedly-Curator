@@ -44,3 +44,7 @@ rss-summary-*.md
 
 # Logs
 *.log
+
+# Coverage
+.coverage
+htmlcov/
