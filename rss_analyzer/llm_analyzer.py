@@ -94,11 +94,14 @@ def generate_overall_summary(analyzed_articles: list) -> str:
         # 准备文章列表
         articles_info = []
         for article in analyzed_articles:
+            analysis = article["analysis"]
             articles_info.append({
                 "title": article["title"],
                 "link": article.get("link", ""),
-                "score": article["analysis"]["score"],
-                "summary": article["analysis"]["summary"]
+                "score": analysis.get("score", 0.0),
+                "verdict": analysis.get("verdict", "未知"),
+                "summary": analysis.get("summary", ""),
+                "detailed_scores": analysis.get("detailed_scores", {})
             })
         
         prompt = f"""基于以下已评分和摘要的文章列表,生成一份总体摘要报告：
@@ -106,15 +109,20 @@ def generate_overall_summary(analyzed_articles: list) -> str:
 文章列表：
 {json.dumps(articles_info, ensure_ascii=False, indent=2)}
 
+评分说明：
+- 评分范围：0-5.0 分
+- 分类标准：≥4.0 值得阅读，3.0-3.9 一般，<3.0 不推荐
+
 请提供：
 1. 整体趋势分析
-2. 高分文章（8分以上）的共同特点
+2. 高分文章（≥4.0分）的共同特点和推荐理由
 3. 主要话题分类
-4. 推荐阅读优先级
+4. 推荐阅读优先级（按评分排序）
 
 注意：
 - 请直接输出 Markdown 格式的内容，不要用代码块包裹
 - 提到文章时，请使用 Markdown 链接格式：[文章标题](link)
+- 在推荐文章时，请标注评分和结论（如：🔥 值得阅读 4.2/5.0）
 """
         
         # 获取配置参数
