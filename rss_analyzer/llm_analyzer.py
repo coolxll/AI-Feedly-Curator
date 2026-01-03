@@ -25,72 +25,47 @@ def analyze_article_with_llm(title: str, summary: str, content: str) -> dict:
         content: 文章内容
     
     Returns:
-        分析结果字典，包含 score, summary, reason
+        分析结果字典，包含详细评分和简短摘要
     """
+    from .scoring import score_article, format_score_result
+    
     try:
-        # 使用配置中指定的 analysis_profile
-        analysis_profile = PROJ_CONFIG.get("analysis_profile")
+        # 使用新的评分系统
+        score_result = score_article(title, summary, content)
         
-        client = OpenAI(
-            api_key=get_config("OPENAI_API_KEY", profile=analysis_profile),
-            base_url=get_config("OPENAI_BASE_URL", profile=analysis_profile)
-        )
-        
-        prompt = f"""请分析以下文章并提供：
-1. 评分（1-10分，10分最高）
-2. 简短摘要（50-100字）
-3. 评分理由
-
-文章标题：{title}
-文章摘要：{summary[:200] if summary else '无'}
-文章内容：{content[:2000]}
-
-请以JSON格式返回：
-{{
-  "score": <分数>,
-  "summary": "<摘要>",
-  "reason": "<评分理由>"
-}}
-"""
-        
-        log_debug("LLM Request Prompt", prompt)
-
-        response = client.chat.completions.create(
-            model=get_config("OPENAI_MODEL", "gpt-4o-mini", profile=analysis_profile),
-            messages=[
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.7,
-            max_tokens=1024
-        )
-        
-        response_text = response.choices[0].message.content
-        log_debug("LLM Response Raw", response_text)
-        
-        if not response_text:
-            return {
-                "score": 0,
-                "summary": "分析失败: 模型未返回内容",
-                "reason": "API响应内容为空 (可能是模型服务出错或被截断)"
+        # 转换为兼容的格式
+        return {
+            "score": score_result.get("overall_score", 0.0),
+            "verdict": score_result.get("verdict", "未知"),
+            "summary": score_result.get("comment", ""),
+            "reason": format_score_result(score_result),
+            "detailed_scores": {
+                "relevance": score_result.get("relevance_score", 0),
+                "informativeness": score_result.get("informativeness_accuracy_score", 0),
+                "depth": score_result.get("depth_opinion_score", 0),
+                "readability": score_result.get("readability_score", 0),
+                "originality": score_result.get("non_redundancy_score", 0)
             }
-
-        # 尝试提取JSON
-        json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
-        if json_match:
-            return json.loads(json_match.group())
-        else:
-            return {
-                "score": 5,
-                "summary": "无法解析LLM响应",
-                "reason": response_text[:200]
-            }
+        }
     except Exception as e:
+        logger.error(f"文章分析失败: {e}")
+        import traceback
+        import sys
         traceback.print_exc(file=sys.stderr)
         return {
-            "score": 0,
+            "score": 0.0,
+            "verdict": "不太值得阅读",
             "summary": f"分析失败: {str(e)}",
-            "reason": "API调用错误"
+            "reason": "API调用错误",
+            "detailed_scores": {
+                "relevance": 0,
+                "informativeness": 0,
+                "depth": 0,
+                "readability": 0,
+                "originality": 0
+            }
         }
+
 
 
 def generate_overall_summary(analyzed_articles: list) -> str:

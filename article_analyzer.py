@@ -103,8 +103,12 @@ def main():
             logger.info(f"  ✓ 抓取完成: {len(content)} 字符")
         
         analysis = analyze_article_with_llm(article['title'], summary, content)
-        logger.info(f"  ✓ 评分: {analysis['score']}/10")
-        logger.info(f"  ✓ 摘要: {analysis['summary'][:50]}...")
+        logger.info(f"  ✓ 评分: {analysis['score']:.1f}/5.0 - {analysis.get('verdict', '未知')}")
+        logger.info(f"  ✓ 评价: {analysis.get('reason', '')}")
+        if 'detailed_scores' in analysis:
+            scores = analysis['detailed_scores']
+            logger.info(f"     相关性:{scores['relevance']} 信息量:{scores['informativeness']} "
+                       f"深度:{scores['depth']} 可读性:{scores['readability']} 原创性:{scores['originality']}")
 
         
         analyzed_articles.append({**article, "analysis": analysis})
@@ -147,4 +151,4 @@ def regenerate_summary():
 
 
 if __name__ == "__main__":
-    main()
+    regenerate_summary()
