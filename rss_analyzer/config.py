@@ -20,7 +20,7 @@ PROJ_CONFIG = {
     
     # API Profile 配置 (指定使用哪个 profile，使用大写)
     # 可选值: "LOCAL_QWEN", "ALIYUN", "DEEPSEEK", None (使用默认)
-    "analysis_profile": "LOCAL_QWEN",   # 文章分析使用的 profile
+    "analysis_profile": "LOCAL_GEMINI_LITE",   # 文章分析使用的 profile
     "summary_profile": "DEEPSEEK",      # 总结生成使用的 profile
     
     # 评分偏好设定 (Persona)
@@ -39,15 +39,44 @@ PROJ_CONFIG = {
     # Pre-filtering (前置过滤)
     "filter_keywords": ["推广", "广告", "特惠", "中奖", "开奖", "通知", "招聘"],
     "filter_min_length": 200,  # 正文最少字符数
+    "filter_url_patterns": ["36kr.com/newsflashes/"],  # URL过滤模式（包含这些模式的URL会被跳过）
     
-    # Dynamic Weighting (动态权重)
-    # 格式: {文章类型: {维度: 权重}}
+    # Dynamic Weighting (动态权重 - 百分比形式)
+    # 格式: {文章类型: {维度: 权重百分比}}（总和为1.0）
     "scoring_weights": {
-        "news": {"relevance": 2, "informativeness_accuracy": 4, "depth_opinion": 1, "readability": 2, "non_redundancy": 1},
-        "tutorial": {"relevance": 2, "informativeness_accuracy": 3, "depth_opinion": 1, "readability": 4, "non_redundancy": 1},
-        "opinion": {"relevance": 2, "informativeness_accuracy": 2, "depth_opinion": 4, "readability": 2, "non_redundancy": 2},
-        "default": {"relevance": 2, "informativeness_accuracy": 2, "depth_opinion": 2, "readability": 2, "non_redundancy": 1}
-    }
+        "news": {
+            "relevance": 0.40,                    # 相关性最重要
+            "informativeness_accuracy": 0.35,     # 信息准确性次之
+            "depth_opinion": 0.05,                # 资讯不需要深度！大幅降低
+            "readability": 0.15,
+            "non_redundancy": 0.05
+        },
+        "tutorial": {
+            "relevance": 0.35,
+            "informativeness_accuracy": 0.25,
+            "depth_opinion": 0.10,
+            "readability": 0.20,                  # 教程需要清晰的步骤
+            "non_redundancy": 0.10                # 实用性 > 原创性
+        },
+        "opinion": {
+            "relevance": 0.30,
+            "informativeness_accuracy": 0.20,
+            "depth_opinion": 0.35,                # 观点文章核心看深度
+            "readability": 0.10,
+            "non_redundancy": 0.05
+        },
+        "default": {
+            "relevance": 0.35,
+            "informativeness_accuracy": 0.25,
+            "depth_opinion": 0.20,
+            "readability": 0.15,
+            "non_redundancy": 0.05
+        }
+    },
+    
+    # 相关性熔断阈值（一票否决机制）
+    # 如果相关性分数低于此阈值，总分将被限制在此阈值以下
+    "relevance_threshold": 2.5
 }
 # ==========================================
 

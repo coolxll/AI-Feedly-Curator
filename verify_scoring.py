@@ -15,6 +15,7 @@ sys.path.append('.')
 from rss_analyzer.article_fetcher import fetch_article_content
 from rss_analyzer.scoring import score_article
 from rss_analyzer.config import setup_logging
+from rss_analyzer.utils import strip_html_tags
 
 def process_article(article, index):
     title = article.get('title', 'No Title')
@@ -64,11 +65,31 @@ def process_article(article, index):
     if result.get('overall_score', 0) >= 3.8: emoji = "🔥"
     if result.get('overall_score', 0) < 3.0: emoji = "👎"
     
+    
     print("-" * 60)
-    print(f"� 摘要: {summary[:100]}..." if summary else "📝 摘要: (无)")
+    # 清理并展示更全面的摘要信息
+    clean_summary = strip_html_tags(summary) if summary else ""
+    
+    # 构建更有信息量的摘要展示
+    if clean_summary:
+        # 组合标题和摘要，提供更多上下文
+        comprehensive_summary = f"{title} - {clean_summary}"
+        # 限制长度，但保留足够信息
+        if len(comprehensive_summary) > 200:
+            comprehensive_summary = comprehensive_summary[:200] + "..."
+        print(f"📝 摘要: {comprehensive_summary}")
+    else:
+        print(f"📝 摘要: {title} (无详细摘要)")
     print("-" * 60)
     print(f"📊 总分: {result.get('overall_score')}/5.0 {emoji}")
     print(f"⚖️ 结论: {result.get('verdict')}")
+    
+    # 显示文章类型
+    article_type = result.get('article_type', 'unknown')
+    type_emoji = {"news": "📰", "tutorial": "📚", "opinion": "💭"}.get(article_type, "📄")
+    type_name = {"news": "资讯", "tutorial": "教程", "opinion": "观点"}.get(article_type, article_type)
+    print(f"{type_emoji} 类型: {type_name}")
+    
     print("-" * 30)
     print("评分维度:")
     print(f"  相关性: {result.get('relevance_score')} | 信息量: {result.get('informativeness_accuracy_score')} | 深度: {result.get('depth_opinion_score')} | 可读性: {result.get('readability_score')} | 原创性: {result.get('non_redundancy_score')}")

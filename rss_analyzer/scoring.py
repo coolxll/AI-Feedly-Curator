@@ -31,10 +31,9 @@ DEFAULT_WEIGHTS = PROJ_CONFIG.get("scoring_weights", {}).get("default", {
 
 # 负面清单配置
 RED_FLAGS = [
-    "pure_promotion",  # 纯推广/软文 (Hard)
+    "pure_promotion",  # 纯推广/软文 (Soft)
     "clickbait",       # 标题党 (Soft)
-    "ai_generated",    # AI 生成感过重/逻辑混乱 (Hard)
-    "outdated"         # 过时信息 (Soft)
+    "ai_generated"     # AI 生成感过重/逻辑混乱 (Hard)
 ]
 
 HARD_RED_FLAGS = {"ai_generated"}
@@ -59,11 +58,21 @@ def build_scoring_prompt(title: str, summary: str, content: str) -> str:
 请根据你的专业背景，按照以下步骤对文章进行深度评估：
 
 ### 第一步：分析与思考 (Chain of Thought)
-请先通读全文，分析文章的核心价值、技术深度和潜在缺陷。
-- 这篇文章是讲什么的？解决了什么问题？
-- 是否有实质性的代码或独到见解，还是仅为搬运/洗稿？
+请先通读全文，**首先判断文章类型**，然后根据类型特点进行评估：
+
+**类型识别指南**：
+- **news（资讯）**: 报道事件、数据、发布消息，重点是“是什么”
+- **tutorial（教程）**: 教授技能、展示步骤、提供代码，重点是“怎么做”
+- **opinion（观点）**: 分析问题、评论现象、提出见解，重点是“为什么”
+
+**针对性分析**：
+- 资讯类：关注时效性、准确性、数据完整性
+- 教程类：关注可复现性、步骤清晰度、实际解决问题
+- 观点类：关注论证深度、独到见解、逻辑自洽
+
+通用检查：
 - 是否有过度的营销话术或误导性标题？
-- **时间检查**：对比"当前日期"，判断文章讨论的内容是否过时（例如2026年还在讨论2020年的旧闻）。
+- 是否有明显的AI生成痕迹或逻辑混乱？
 
 ### 第二步：类型判断 & 负面检测
 1. **判断文章类型**：`news` (资讯), `tutorial` (教程), `opinion` (观点).
@@ -71,21 +80,41 @@ def build_scoring_prompt(title: str, summary: str, content: str) -> str:
    - `pure_promotion`: 纯广告/卖课/推销产品 (Soft Flag). **注意：技术视角的工具推荐、新功能发布、开源项目介绍、投行报告摘要均不算广告。**
    - `clickbait`: 标题党 (Soft Flag)
    - `ai_generated`: 明显的 AI 生成痕迹/逻辑混乱 (Hard Flag)
-   - `outdated`: 严重过时 (Soft Flag) - **请基于{today_str}判断**
 
-### 第三步：多维度打分 (1-5分，严谨评分)
-> 评分标准：
-> - 5分：极佳。行业突破性见解、极其详尽的原创教程、极具启发性的深度好文。
-> - 4分：优秀。内容扎实，有代码或具体实践，值得细读。
-> - 3分：及格。普通资讯、简单的入门介绍、常见的八股文。大部分文章应在此分数段。
-> - 1-2分：差。无营养、重复废话、明显错误或纯广告。
+### 第三步：多维度打分 (1-5分，根据类型灵活评分)
 
-维度：
-1. **相关性**：是否符合我的人设（Tech / 投资 / 国际政治）。
-2. **信息量与准确性**：信息密度如何，是否准确可靠。
-3. **深度与观点**：是否有独家见解或深入分析。
-4. **可读性**：结构清晰，代码优雅（如果是技术文）或逻辑顺畅。
-5. **原创性/水分度**：是否原创，是否水分太大。
+> **重要：不同类型文章的评分侧重点不同！**
+
+#### 通用评分标准
+- 5分：极佳
+- 4分：优秀
+- 3分：及格（大部分文章在此区间）
+- 1-2分：差
+
+#### 维度详解（请根据文章类型调整评分重点）
+
+1. **相关性**（所有类型的首要维度）
+   - 是否符合用户人设（Tech / 投资 / 国际政治）
+   - ⚠️ 如果相关性 < 2.5，即使其他维度再高，文章也不推荐
+
+2. **信息量与准确性**
+   - **news**: 核心维度！数据是否完整、来源是否可靠、是否有新增信息
+   - **tutorial**: 步骤是否详尽、代码是否可用、是否解决真实问题
+   - **opinion**: 论据是否充分、事实是否准确
+
+3. **深度与观点**（权重因类型而异）
+   - **news**: ⚠️ 不强求深度分析！如果是及时、准确的市场动态/行业资讯，即使只是数据汇总，也应给 ≥3分
+   - **tutorial**: 是否基于实践经验、是否覆盖常见坑点
+   - **opinion**: 核心维度！是否有独到见解、论证是否深刻
+
+4. **可读性**
+   - 结构是否清晰、逻辑是否顺畅
+   - tutorial类：步骤编号、代码格式是否清晰（权重更高）
+
+5. **原创性/水分度**
+   - news: 是否首发、是否洗稿
+   - tutorial: ⚠️ 对于troubleshooting（排错）类文章，即使方案常见但只要解决了具体问题，也应给 ≥3分
+   - opinion: 是否拄袖、是否泛泛而谈
 
 ### 输出格式 (JSON Only)
 请只返回以下 JSON 格式，不要包含其他文本：
@@ -112,33 +141,53 @@ def build_scoring_prompt(title: str, summary: str, content: str) -> str:
 
 
 def calculate_weighted_score(scores: Dict[str, int], article_type: str, red_flags: list) -> float:
-    """计算加权总分 (含负面惩罚)"""
-    # 1. 获取权重
+    """
+    计算加权总分 (动态权重 + 相关性熔断 + 负面惩罚)
+    
+    新算法特点:
+    1. 使用百分比权重（总和为1.0），不同类型文章权重不同
+    2. 相关性熔断机制：如果相关性过低，一票否决
+    3. 优化的惩罚机制：Soft Flags 惩罚降低至0.5/项
+    """
+    # 1. 获取权重配置（现在是百分比形式）
     weights_config = PROJ_CONFIG.get("scoring_weights", {})
-    weights = weights_config.get(article_type, weights_config.get("default", DEFAULT_WEIGHTS))
+    weights = weights_config.get(article_type, weights_config.get("default", {}))
     
-    # 2. 计算基础加权分
-    total_score = 0
-    total_weight = 0
-    
+    # 2. 计算加权分（百分比权重，总和为1.0）
+    weighted_score = 0.0
     for key, score in scores.items():
-        w = weights.get(key, 1)
-        total_score += score * w
-        total_weight += w
+        w = weights.get(key, 0.2)  # 默认20%权重
+        weighted_score += score * w
+        logger.debug(f"  {key}: {score} × {w} = {score * w}")
     
-    avg_score = total_score / total_weight if total_weight > 0 else 0
+    logger.debug(f"基础加权分: {weighted_score:.2f}")
     
-    # 3. 负面清单处理 (Tiered Penalty)
+    # 3. 相关性熔断机制（一票否决）
+    relevance_threshold = PROJ_CONFIG.get("relevance_threshold", 2.5)
+    relevance_score = scores.get("relevance", 5)
+    
+    if relevance_score < relevance_threshold:
+        original_score = weighted_score
+        weighted_score = min(weighted_score, relevance_threshold)
+        logger.info(
+            f"⚠️ 相关性熔断触发: relevance={relevance_score} < {relevance_threshold}, "
+            f"总分限制 {original_score:.1f} → {weighted_score:.1f}"
+        )
+    
+    # 4. 负面清单处理
     if red_flags:
-        # Hard Flags: 直接打入冷宫 (最高 1.0 分)
+        # Hard Flags: 直接打入冷宫（最高1.0分）
         if any(flag in HARD_RED_FLAGS for flag in red_flags):
+            logger.warning(f"🚫 Hard Flag触发: {red_flags}, 总分锁定为1.0")
             return 1.0
         
-        # Soft Flags: 每一项扣 1.0 分
-        penalty = len(red_flags) * 1.0
-        avg_score = max(1.0, avg_score - penalty)
+        # Soft Flags: 每项扣0.5分（原来是1.0，过于严格）
+        penalty = len(red_flags) * 0.5
+        original_score = weighted_score
+        weighted_score = max(1.0, weighted_score - penalty)
+        logger.info(f"🚩 Soft Flags惩罚: {red_flags}, 扣{penalty}分, {original_score:.1f} → {weighted_score:.1f}")
         
-    return round(avg_score, 1)
+    return round(weighted_score, 1)
 
 
 def parse_score_response(response_text: str) -> Dict[str, Any]:

@@ -99,8 +99,15 @@ def main():
         if any(kw in article['title'] for kw in filter_keywords):
             logger.info(f"  🚫 标题包含过滤词，跳过")
             continue
+        
+        # 1.2 URL模式过滤 (Pre-filtering)
+        filter_url_patterns = PROJ_CONFIG.get("filter_url_patterns", [])
+        article_url = article.get('link', '') or article.get('originId', '')
+        if any(pattern in article_url for pattern in filter_url_patterns):
+            logger.info(f"  🚫 URL匹配过滤规则 ({article_url})，跳过")
+            continue
             
-        # 1.1 简单去重 (Redundancy Filter)
+        # 1.3 简单去重 (Redundancy Filter)
         norm_title = "".join(filter(str.isalnum, article['title'].lower()))
         # 检查是否太短（防止像 "Update" 这种通用标题误杀），但 filter_keywords 应该已经覆盖了一些
         if len(norm_title) > 5: 
