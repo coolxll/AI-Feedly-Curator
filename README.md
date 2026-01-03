@@ -93,7 +93,26 @@ rss-opml/
 │   └── utils.py          # 工具函数
 ├── .env                  # 环境变量 (不提交)
 ├── .env.example          # 环境变量模板
-└── requirements.txt      # 依赖列表
+├── requirements.txt      # 依赖列表
+└── tests/                # 测试目录
+    ├── test_config.py
+    ├── test_utils.py
+    ├── test_article_fetcher.py
+    └── test_llm_analyzer.py
+```
+
+## 测试
+
+运行所有测试：
+
+```bash
+python -m unittest discover tests
+```
+
+运行单个测试文件：
+
+```bash
+python -m unittest tests.test_config
 ```
 
 ## License
