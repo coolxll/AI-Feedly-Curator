@@ -15,13 +15,24 @@ PROJ_CONFIG = {
     "limit": 100,
     "mark_read": True,      # 是否默认标记已读
     "debug": False,         # 是否默认开启Debug
-    "refresh": True,       # 是否默认刷新
+    "refresh": False,       # 是否默认刷新
     "proxy": "http://127.0.0.1:7890",  # 代理服务器
     
     # API Profile 配置 (指定使用哪个 profile，使用大写)
     # 可选值: "LOCAL_QWEN", "ALIYUN", "DEEPSEEK", None (使用默认)
     "analysis_profile": "LOCAL_QWEN",   # 文章分析使用的 profile
-    "summary_profile": "LOCAL_QWEN",      # 总结生成使用的 profile
+    "summary_profile": "DEEPSEEK",      # 总结生成使用的 profile
+    
+    # 评分偏好设定 (Persona)
+    "scoring_persona": """
+你是一名资深测试开发工程师，热衷于 Vibe Coding（追求编码的流畅感、创造力和美感，不仅仅是功能实现）。
+你的关注点包括：
+1. 测试开发、自动化测试、质量保障(QA)的前沿技术和实践。
+2. 提升研发效能的工具和方法（DevOps, CI/CD）。
+3. AI 辅助编程、智能测试生成等能带来"心流"体验的技术。
+4. 代码的优雅性、架构的整洁度。
+5. 拒绝枯燥的 CRUD、过时的技术堆砌和毫无新意的八股文。
+""",
 }
 # ==========================================
 
