@@ -10,7 +10,7 @@ import sys
 
 from openai import OpenAI
 
-from config import PROJ_CONFIG, get_config, log_debug
+from .config import PROJ_CONFIG, get_config, log_debug
 
 logger = logging.getLogger(__name__)
 

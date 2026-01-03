@@ -6,7 +6,7 @@ import os
 import logging
 import requests
 
-from config import PROJ_CONFIG
+from .config import PROJ_CONFIG
 
 logger = logging.getLogger(__name__)
 

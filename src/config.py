@@ -18,10 +18,10 @@ PROJ_CONFIG = {
     "refresh": False,       # 是否默认刷新
     "proxy": "http://127.0.0.1:7890",  # 代理服务器
     
-    # API Profile 配置 (指定使用哪个 profile)
-    # 可选值: "local", "aliyun", "deepseek", None (使用默认)
-    "analysis_profile": "local",   # 文章分析使用的 profile
-    "summary_profile": "deepseek", # 总结生成使用的 profile
+    # API Profile 配置 (指定使用哪个 profile，使用大写)
+    # 可选值: "LOCAL_QWEN", "ALIYUN", "DEEPSEEK", None (使用默认)
+    "analysis_profile": "LOCAL_QWEN",   # 文章分析使用的 profile
+    "summary_profile": "DEEPSEEK",      # 总结生成使用的 profile
 }
 # ==========================================
 
@@ -57,7 +57,7 @@ def get_config(key: str, default=None, profile: str = None):
     Args:
         key: 配置键名
         default: 默认值
-        profile: 指定使用的 profile (例如: "local", "aliyun")
+        profile: 指定使用的 profile (例如: "LOCAL_QWEN", "ALIYUN")
     
     Returns:
         配置值
@@ -66,8 +66,8 @@ def get_config(key: str, default=None, profile: str = None):
     active_profile = profile or os.getenv("ACTIVE_PROFILE")
     
     if active_profile:
-        # 尝试查找带前缀的配置
-        prefixed_key = f"{active_profile.upper()}_{key}"
+        # 尝试查找带前缀的配置 (profile 已经是大写)
+        prefixed_key = f"{active_profile}_{key}"
         val = os.getenv(prefixed_key)
         if val is not None:
             return val

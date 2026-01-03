@@ -26,18 +26,7 @@ pip install -r requirements.txt
 cp .env.example .env
 ```
 
-### 3. 配置 Feedly
-
-在 `.claude/skills/rss_reader/feedly_config.json` 中配置 Feedly 凭据：
-
-```json
-{
-  "token": "YOUR_FEEDLY_ACCESS_TOKEN",
-  "user_id": "YOUR_USER_ID"
-}
-```
-
-### 4. 运行
+### 3. 运行
 
 ```bash
 # 从 Feedly 获取文章并分析
@@ -62,41 +51,31 @@ python article_analyzer.py --refresh --limit 50
 
 ## 多 Profile 配置
 
-支持配置多个 API 服务商并灵活切换：
+支持配置多个 API 服务商并灵活切换，**Profile 使用大写命名**：
 
 ### 在 `.env` 中定义 Profile
 
 ```env
-# Default
-OPENAI_API_KEY=sk-default-key
-OPENAI_BASE_URL=http://localhost:8045/v1
-OPENAI_MODEL=gpt-4o-mini
-
-# Profile: LOCAL
-LOCAL_OPENAI_API_KEY=sk-local-key
-LOCAL_OPENAI_BASE_URL=http://127.0.0.1:8045/v1
-LOCAL_OPENAI_MODEL=gemini-2.5-flash-lite
-
-# Profile: ALIYUN
-ALIYUN_OPENAI_API_KEY=sk-aliyun-key
-ALIYUN_OPENAI_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
-ALIYUN_OPENAI_MODEL=qwen-flash
+# Profile: LOCAL_QWEN (本地 Qwen 代理)
+LOCAL_QWEN_OPENAI_API_KEY=sk-xxx
+LOCAL_QWEN_OPENAI_BASE_URL=http://127.0.0.1:8045/v1
+LOCAL_QWEN_OPENAI_MODEL=qwen-flash
 
 # Profile: DEEPSEEK
-DEEPSEEK_OPENAI_API_KEY=sk-deepseek-key
-DEEPSEEK_OPENAI_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+DEEPSEEK_OPENAI_API_KEY=sk-xxx
+DEEPSEEK_OPENAI_BASE_URL=https://api.deepseek.com/v1
 DEEPSEEK_OPENAI_MODEL=deepseek-v3.2
 ```
 
 ### 在代码中指定 Profile
 
-编辑 `config.py` 中的 `PROJ_CONFIG`：
+编辑 `src/config.py` 中的 `PROJ_CONFIG`：
 
 ```python
 PROJ_CONFIG = {
     # ...
-    "analysis_profile": "local",     # 文章分析用本地快速模型
-    "summary_profile": "deepseek",   # 总结生成用强大模型
+    "analysis_profile": "LOCAL_QWEN",   # 文章分析用本地模型
+    "summary_profile": "DEEPSEEK",      # 总结生成用 DeepSeek
 }
 ```
 
@@ -105,23 +84,17 @@ PROJ_CONFIG = {
 ```
 rss-opml/
 ├── article_analyzer.py   # 主程序入口
-├── config.py             # 配置管理
-├── feedly_client.py      # Feedly API 客户端
-├── article_fetcher.py    # 文章内容抓取
-├── llm_analyzer.py       # LLM 分析模块
-├── utils.py              # 工具函数
+├── src/                  # 源码目录
+│   ├── __init__.py
+│   ├── config.py         # 配置管理
+│   ├── feedly_client.py  # Feedly API 客户端
+│   ├── article_fetcher.py# 文章内容抓取
+│   ├── llm_analyzer.py   # LLM 分析模块
+│   └── utils.py          # 工具函数
 ├── .env                  # 环境变量 (不提交)
 ├── .env.example          # 环境变量模板
 └── requirements.txt      # 依赖列表
 ```
-
-## 输出文件
-
-| 文件 | 说明 |
-|------|------|
-| `unread_news.json` | 从 Feedly 获取的原始文章 |
-| `analyzed_articles.json` | 分析后的文章（含评分） |
-| `articles_summary.md` | 生成的总体摘要报告 |
 
 ## License
 
