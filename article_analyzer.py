@@ -90,6 +90,9 @@ def main():
     processed_ids = []
     seen_titles = set()
     
+    # 收集所有待处理文章的 ID（用于标记已读，包括跳过的）
+    all_article_ids = [a['id'] for a in articles[:args.limit] if a.get('id')]
+    
     # 处理每篇文章
     for idx, article in enumerate(articles[:args.limit], 1):
         logger.info(f"处理第 {idx}/{min(args.limit, len(articles))} 篇: {article['title']}")
@@ -182,10 +185,10 @@ def main():
     logger.info(f"  - {analyzed_file}")
     logger.info(f"  - analyzed_articles.json (最新版本)")
     
-    # 标记已读
-    if args.mark_read and processed_ids:
-        logger.info(f"\n正在标记 {len(processed_ids)} 篇文章为已读...")
-        feedly_mark_read(processed_ids)
+    # 标记已读（所有抓取的文章，包括被过滤/跳过的）
+    if args.mark_read and all_article_ids:
+        logger.info(f"\n正在标记 {len(all_article_ids)} 篇文章为已读...")
+        feedly_mark_read(all_article_ids)
     
     # 生成总体摘要
     logger.info("\n生成总体摘要...")
