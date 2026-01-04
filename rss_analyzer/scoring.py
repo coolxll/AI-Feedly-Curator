@@ -190,13 +190,64 @@ def calculate_weighted_score(scores: Dict[str, int], article_type: str, red_flag
     return round(weighted_score, 1)
 
 
+def extract_json_from_response(response_text: str) -> str | None:
+    """
+    从 LLM 响应中提取 JSON，支持多种格式：
+    1. 纯 JSON 响应
+    2. Markdown 代码块中的 JSON
+    3. 思维链后面跟着的 JSON
+    """
+    # 策略1: 尝试提取 Markdown 代码块中的 JSON
+    code_block_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', response_text, re.DOTALL)
+    if code_block_match:
+        return code_block_match.group(1)
+    
+    # 策略2: 找到所有完整的 JSON 对象，取最后一个（通常思维链在前，JSON在后）
+    # 使用非贪婪匹配，找每个独立的 {...} 块
+    json_objects = []
+    depth = 0
+    start_idx = None
+    
+    for i, char in enumerate(response_text):
+        if char == '{':
+            if depth == 0:
+                start_idx = i
+            depth += 1
+        elif char == '}':
+            depth -= 1
+            if depth == 0 and start_idx is not None:
+                candidate = response_text[start_idx:i+1]
+                # 验证是否是有效 JSON
+                try:
+                    json.loads(candidate)
+                    json_objects.append(candidate)
+                except json.JSONDecodeError:
+                    pass
+                start_idx = None
+    
+    if json_objects:
+        # 优先返回包含 "scores" 字段的 JSON（这是我们期望的格式）
+        for obj in reversed(json_objects):
+            if '"scores"' in obj:
+                return obj
+        # 否则返回最后一个有效 JSON
+        return json_objects[-1]
+    
+    # 策略3: 回退到原来的贪婪匹配（兼容性）
+    json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', response_text, re.DOTALL)
+    if json_match:
+        return json_match.group()
+    
+    return None
+
+
 def parse_score_response(response_text: str) -> Dict[str, Any]:
     """解析响应并计算总分"""
     try:
-        # 尝试提取 JSON
-        json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
-        if json_match:
-            data = json.loads(json_match.group())
+        # 使用改进的 JSON 提取方法
+        json_str = extract_json_from_response(response_text)
+        if json_str:
+            data = json.loads(json_str)
             
             scores = data.get("scores", {})
             article_type = data.get("article_type", "default")
