@@ -37,18 +37,12 @@ def is_newsflash(article: dict) -> bool:
     判断文章是否为快讯 (Newsflash)
     
     判断依据:
-    - URL包含 specific patterns (e.g. '36kr.com/newsflashes/')
+    - URL包含 '36kr.com/newsflashes/'
     """
-    url = article.get('canonicalUrl', '') or article.get('alternate', [{}])[0].get('href', '')
-    if not url:
-        # Fallback to id (often contains the url) or originId
-        url = article.get('id', '') or article.get('originId', '')
+    url = article.get('link', '')
     
     # 36kr 快讯 URL 特征: https://36kr.com/newsflashes/3623085116474372
-    if '36kr.com/newsflashes/' in url:
-        return True
-        
-    return False
+    return '36kr.com/newsflashes/' in url
 
 
 def load_articles(json_file: str) -> list:

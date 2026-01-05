@@ -105,27 +105,24 @@ def newsflash_filter(articles: list) -> FilterResult:
 
 
 def low_score_filter(articles: list, threshold: float = 2.5) -> FilterResult:
-    """低分过滤器"""
+    """低分过滤器（假设已预先过滤快讯）"""
     matched, remaining = [], []
     
     for i, article in enumerate(articles, 1):
         title = article.get('title', '')[:50]
-        
-        if is_newsflash(article):
-            remaining.append(article)
-            continue
-        
         score = _score_article(article)
-        logger.info(f"[{i}/{len(articles)}] {title}... → {score:.1f}" if score >= 0 else f"[{i}/{len(articles)}] {title}... → 跳过")
         
         if score < 0:
+            logger.info(f"[{i}/{len(articles)}] {title}... → ⚠️ 评分失败,保留")
             remaining.append(article)
-        elif score < threshold:
+        elif score <= threshold:
+            logger.info(f"[{i}/{len(articles)}] {title}... → {score:.1f} 🚫 标记已读")
             matched.append({**article, '_score': score})
         else:
+            logger.info(f"[{i}/{len(articles)}] {title}... → {score:.1f} ✅ 保留")
             remaining.append(article)
     
-    logger.info(f"🤖 低分: {len(matched)}/{len(articles)}")
+    logger.info(f"🤖 低分过滤: {len(matched)} 篇标记已读, {len(remaining)} 篇保留")
     return FilterResult(matched, remaining, "低分")
 
 
@@ -137,9 +134,7 @@ def _score_article(article: dict) -> float:
     if not (content and len(content) > 200):
         content = summary if len(summary) > 500 else _fetch_content(article) or summary
     
-    if len(content) < PROJ_CONFIG.get("filter_min_length", 100):
-        return -1.0
-    
+    # 即使内容较短也尝试评分，让 LLM 判断
     try:
         return analyze_article_with_llm(title, summary, content).get('score', 0.0)
     except Exception as e:
