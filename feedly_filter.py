@@ -104,25 +104,34 @@ def newsflash_filter(articles: list) -> FilterResult:
     return FilterResult(matched, remaining, "快讯")
 
 
-def low_score_filter(articles: list, threshold: float = 2.5) -> FilterResult:
-    """低分过滤器（假设已预先过滤快讯）"""
+def low_score_filter(articles: list, threshold: float = 2.5, dry_run: bool = False) -> FilterResult:
+    """低分过滤器（假设已预先过滤快讯），边评分边标记"""
     matched, remaining = [], []
     
     for i, article in enumerate(articles, 1):
         title = article.get('title', '')[:50]
+        prefix = f"[{i}/{len(articles)}]"
+        
+        logger.info(f"{prefix} 评分中: {title}...")
         score = _score_article(article)
         
         if score < 0:
-            logger.info(f"[{i}/{len(articles)}] {title}... → ⚠️ 评分失败,保留")
+            logger.info(f"{prefix} 结果: ⚠️ 评分失败 → 保留")
             remaining.append(article)
         elif score <= threshold:
-            logger.info(f"[{i}/{len(articles)}] {title}... → {score:.1f} 🚫 标记已读")
+            # 立即标记为已读
+            article_id = article.get('id')
+            if article_id and not dry_run:
+                feedly_mark_read([article_id])
+                logger.info(f"{prefix} 结果: {score:.1f} 🚫 → 已标记已读 ✓")
+            else:
+                logger.info(f"{prefix} 结果: {score:.1f} 🚫 → [DRY RUN] 将标记已读")
             matched.append({**article, '_score': score})
         else:
-            logger.info(f"[{i}/{len(articles)}] {title}... → {score:.1f} ✅ 保留")
+            logger.info(f"{prefix} 结果: {score:.1f} ✅ → 保留")
             remaining.append(article)
     
-    logger.info(f"🤖 低分过滤: {len(matched)} 篇标记已读, {len(remaining)} 篇保留")
+    logger.info(f"🤖 低分过滤完成: {len(matched)} 篇已标记, {len(remaining)} 篇保留")
     return FilterResult(matched, remaining, "低分")
 
 
@@ -181,9 +190,9 @@ def main():
     if args.cmd == 'newsflash':
         filters = [newsflash_filter]
     elif args.cmd == 'low-score':
-        filters = [lambda a: low_score_filter(a, args.threshold)]
+        filters = [lambda a: low_score_filter(a, args.threshold, args.dry_run)]
     else:  # all
-        filters = [newsflash_filter, lambda a: low_score_filter(a, args.threshold)]
+        filters = [newsflash_filter, lambda a: low_score_filter(a, args.threshold, args.dry_run)]
     
     return run_filters(articles, filters, args.dry_run)
 
