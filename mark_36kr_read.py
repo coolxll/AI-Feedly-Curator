@@ -17,6 +17,7 @@ from rss_analyzer.feedly_client import (
     get_feedly_headers,
     _get_proxy
 )
+from rss_analyzer.utils import is_newsflash
 import requests
 
 # 36kr Feed URL (从 rss.opml 中获取)
@@ -117,28 +118,9 @@ def filter_newsflash(articles: list) -> list:
     """
     过滤出快讯类文章
     
-    36kr 快讯特征：
-    - 标题通常包含"快讯"或以特定格式开头
-    - 内容通常较短
-    - origin 可能包含 newsflash 相关标识
+    使用 rss_analyzer.utils.is_newsflash 进行判断
     """
-    newsflash = []
-    for article in articles:
-        title = article.get('title', '')
-        summary = article.get('summary', '')
-        
-        # 快讯特征: 标题短、内容短
-        is_short_title = len(title) < 80
-        is_short_content = len(summary) < 500
-        
-        # 可能的快讯关键词
-        has_flash_keyword = any(kw in title for kw in ['快讯', '7x24', '要闻'])
-        
-        # 如果符合快讯特征，加入列表
-        if is_short_content and (is_short_title or has_flash_keyword):
-            newsflash.append(article)
-    
-    return newsflash
+    return [article for article in articles if is_newsflash(article)]
 
 
 def main():

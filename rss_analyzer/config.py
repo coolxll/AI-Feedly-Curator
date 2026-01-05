@@ -15,7 +15,7 @@ PROJ_CONFIG = {
     "limit": 100,
     "mark_read": True,      # 是否默认标记已读
     "debug": False,         # 是否默认开启Debug
-    "refresh": False,       # 是否默认刷新
+    "refresh": True,       # 是否默认刷新
     "proxy": "http://127.0.0.1:7890",  # 代理服务器
     
     # API Profile 配置 (指定使用哪个 profile，使用大写)

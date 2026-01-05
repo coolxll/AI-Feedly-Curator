@@ -19,7 +19,7 @@ from rss_analyzer.config import PROJ_CONFIG, setup_logging
 from rss_analyzer.feedly_client import feedly_fetch_unread, feedly_mark_read
 from rss_analyzer.article_fetcher import fetch_article_content
 from rss_analyzer.llm_analyzer import analyze_article_with_llm, generate_overall_summary
-from rss_analyzer.utils import load_articles, save_articles
+from rss_analyzer.utils import load_articles, save_articles, is_newsflash
 
 logger = logging.getLogger(__name__)
 
@@ -118,6 +118,11 @@ def main():
                 logger.info(f"  🚫 标题重复 (Redundancy)，跳过")
                 continue
             seen_titles.add(norm_title)
+
+        # 1.4 快讯过滤 (Newsflash Filter)
+        if is_newsflash(article):
+            logger.info(f"  🚫 识别为快讯 (Newsflash)，跳过")
+            continue
 
         # 优先使用已有的 content (例如来自测试数据或 RSS 全文)
         content = article.get('content', '')
