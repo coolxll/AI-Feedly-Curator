@@ -18,7 +18,7 @@ import logging
 from rss_analyzer.config import PROJ_CONFIG, setup_logging
 from rss_analyzer.feedly_client import feedly_fetch_unread, feedly_mark_read
 from rss_analyzer.article_fetcher import fetch_article_content
-from rss_analyzer.llm_analyzer import analyze_article_with_llm, generate_overall_summary
+from rss_analyzer.llm_analyzer import analyze_article_with_llm, analyze_articles_with_llm_batch, generate_overall_summary
 from rss_analyzer.utils import load_articles, save_articles, is_newsflash
 
 logger = logging.getLogger(__name__)
@@ -89,6 +89,29 @@ def main():
     analyzed_articles = []
     processed_ids = []
     seen_titles = set()
+    batch_scoring = PROJ_CONFIG.get("batch_scoring", False)
+    batch_size = max(1, int(PROJ_CONFIG.get("batch_size", 1)))
+    batch_queue = []
+
+    def record_analysis_result(article_item, analysis_result):
+        """将评分结果标准化记录到输出列表"""
+        verdict = analysis_result.get('verdict', '未知')
+        score = analysis_result['score']
+        if 'red_flags' in analysis_result.get('detailed_scores', {}) and analysis_result['detailed_scores']['red_flags']:
+            red_flags = analysis_result['detailed_scores']['red_flags']
+            logger.info(f"  ⚠️ 发现 Red Flags: {red_flags}")
+            verdict = f"🚫 {verdict}"
+
+        logger.info(f"  ✅评分: {score:.1f}/5.0 - {verdict}")
+        logger.info(f"  ✅评价: {analysis_result.get('reason', '')}")
+        if 'detailed_scores' in analysis_result:
+            scores = analysis_result['detailed_scores']
+            logger.info(f"     相关性:{scores['relevance']} 信息量:{scores['informativeness']} "
+                        f"深度:{scores['depth']} 可读性:{scores['readability']} 原创性:{scores['originality']}")
+
+        analyzed_articles.append({**article_item, "analysis": analysis_result})
+        if article_item.get('id'):
+            processed_ids.append(article_item['id'])
     
     # 收集所有待处理文章的 ID（用于标记已读，包括跳过的）
     all_article_ids = [a['id'] for a in articles[:args.limit] if a.get('id')]
@@ -146,31 +169,44 @@ def main():
             logger.info(f"  🚫 内容太短 ({len(content)} < {min_length})，跳过")
             continue
         
-        analysis = analyze_article_with_llm(article['title'], summary, content)
-        
-        # 格式化输出 Verdict
-        verdict = analysis.get('verdict', '未知')
-        score = analysis['score']
-        # 添加 Red Flag 标识
-        if 'red_flags' in analysis.get('detailed_scores', {}) and analysis['detailed_scores']['red_flags']:
-             red_flags = analysis['detailed_scores']['red_flags']
-             logger.info(f"  ⚠️ 发现 Red Flags: {red_flags}")
-             verdict = f"🚫 {verdict}"
-            
-        logger.info(f"  ✓ 评分: {score:.1f}/5.0 - {verdict}")
-        logger.info(f"  ✓ 评价: {analysis.get('reason', '')}")
-        if 'detailed_scores' in analysis:
-            scores = analysis['detailed_scores']
-            logger.info(f"     相关性:{scores['relevance']} 信息量:{scores['informativeness']} "
-                       f"深度:{scores['depth']} 可读性:{scores['readability']} 原创性:{scores['originality']}")
-
-        
-        analyzed_articles.append({**article, "analysis": analysis})
-
-        if article.get('id'):
-            processed_ids.append(article['id'])
+        if batch_scoring:
+            batch_queue.append({
+                'article': article,
+                'title': article.get('title', ''),
+                'summary': summary,
+                'content': content
+            })
+            if len(batch_queue) >= batch_size:
+                batch_payload = [
+                    {
+                        'title': item['title'],
+                        'summary': item['summary'],
+                        'content': item['content']
+                    } for item in batch_queue
+                ]
+                batch_results = analyze_articles_with_llm_batch(batch_payload)
+                for item, analysis in zip(batch_queue, batch_results):
+                    record_analysis_result(item['article'], analysis)
+                batch_queue = []
+        else:
+            analysis = analyze_article_with_llm(article['title'], summary, content)
+            record_analysis_result(article, analysis)
     
     # 生成带时间戳的文件名，按月份组织
+    if batch_scoring and batch_queue:
+        batch_payload = [
+            {
+                'title': item['title'],
+                'summary': item['summary'],
+                'content': item['content']
+            } for item in batch_queue
+        ]
+        batch_results = analyze_articles_with_llm_batch(batch_payload)
+        for item, analysis in zip(batch_queue, batch_results):
+            record_analysis_result(item['article'], analysis)
+        batch_queue = []
+
+
     from datetime import datetime
     now = datetime.now()
     month_dir = now.strftime("%Y-%m")  # 例如: 2026-01

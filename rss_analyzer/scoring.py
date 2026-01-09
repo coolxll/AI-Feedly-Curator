@@ -39,15 +39,19 @@ RED_FLAGS = [
 HARD_RED_FLAGS = {"ai_generated"}
 
 
+def _build_content_snippet(content: str) -> str:
+    """智能截断正文，保留头尾关键信息。"""
+    if len(content) > 10000:
+        return content[:6000] + "\n\n...[内容过长，中间部分省略]...\n\n" + content[-3000:]
+    return content
+
+
 def build_scoring_prompt(title: str, summary: str, content: str) -> str:
     """构建结构化评分提示词 (含思维链 & 智能截断)"""
     persona = PROJ_CONFIG.get("scoring_persona", "")
     
     # 智能截断：保留头部和尾部，中间截断
-    if len(content) > 10000:
-        content_snippet = content[:6000] + "\n\n...[内容过长，中间部分省略]...\n\n" + content[-3000:]
-    else:
-        content_snippet = content
+    content_snippet = _build_content_snippet(content)
 
     today_str = datetime.now().strftime("%Y-%m-%d")
 
@@ -137,6 +141,62 @@ def build_scoring_prompt(title: str, summary: str, content: str) -> str:
 摘要：{summary[:200] if summary else '无'}
 正文：
 {content_snippet}
+"""
+
+
+def build_batch_scoring_prompt(articles: list[dict]) -> str:
+    """构建批量评分提示词 (JSON 数组输出)"""
+    persona = PROJ_CONFIG.get("scoring_persona", "")
+    today_str = datetime.now().strftime("%Y-%m-%d")
+
+    items = []
+    for idx, article in enumerate(articles):
+        content_snippet = _build_content_snippet(article.get("content", ""))
+        items.append(
+            f"""
+### 文章 {idx}
+标题：{article.get("title", "")}
+摘要：{(article.get("summary") or "")[:200] if article.get("summary") else "无"}
+正文：
+{content_snippet}
+""".strip()
+        )
+
+    articles_block = "\n\n".join(items)
+
+    return f"""{persona}
+
+当前日期：{today_str}
+
+请根据你的专业背景，对下面多篇文章逐一评分。请严格按照以下要求：
+- 输出必须是 JSON 数组，数组内每个元素对应一篇文章
+- 每个元素必须包含 "index" 字段（与文章编号一致）
+- 不要输出任何额外文本
+
+评分流程与要求：
+1. 先判断文章类型：`news`（资讯）, `tutorial`（教程）, `opinion`（观点）
+2. 检测负面特征：`pure_promotion`, `clickbait`, `ai_generated`
+3. 按维度打分（1-5）：relevance, informativeness_accuracy, depth_opinion, readability, non_redundancy
+
+输出格式（JSON Only）：
+[
+  {{
+    "index": 0,
+    "analysis": "1-2句话的简要分析",
+    "article_type": "news/tutorial/opinion",
+    "red_flags": ["clickbait"],
+    "scores": {{
+      "relevance": 1-5,
+      "informativeness_accuracy": 1-5,
+      "depth_opinion": 1-5,
+      "readability": 1-5,
+      "non_redundancy": 1-5
+    }}
+  }}
+]
+
+---
+{articles_block}
 """
 
 
@@ -239,6 +299,74 @@ def extract_json_from_response(response_text: str) -> str | None:
         return json_match.group()
     
     return None
+
+
+def extract_json_array_from_response(response_text: str) -> str | None:
+    """从 LLM 响应中提取 JSON 数组。"""
+    code_block_match = re.search(r'```(?:json)?\s*(\[.*?\])\s*```', response_text, re.DOTALL)
+    if code_block_match:
+        return code_block_match.group(1)
+
+    json_arrays = []
+    depth = 0
+    start_idx = None
+
+    for i, char in enumerate(response_text):
+        if char == '[':
+            if depth == 0:
+                start_idx = i
+            depth += 1
+        elif char == ']':
+            depth -= 1
+            if depth == 0 and start_idx is not None:
+                candidate = response_text[start_idx:i + 1]
+                try:
+                    json.loads(candidate)
+                    json_arrays.append(candidate)
+                except json.JSONDecodeError:
+                    pass
+                start_idx = None
+
+    if json_arrays:
+        return json_arrays[-1]
+
+    return None
+
+
+def _score_from_data(data: Dict[str, Any]) -> Dict[str, Any]:
+    """从已解析的 JSON 数据生成评分结果。"""
+    scores = data.get("scores", {})
+    article_type = data.get("article_type", "default")
+    red_flags = data.get("red_flags", [])
+    analysis_text = data.get("analysis", "")
+
+    overall_score = calculate_weighted_score(scores, article_type, red_flags)
+
+    if overall_score >= 3.8:  # User feedback: 3.9 is also high quality
+        verdict = "值得阅读"
+    elif overall_score >= 3.0:
+        verdict = "一般，可选阅读"
+    else:
+        verdict = "不值得读"
+
+    if red_flags:
+        verdict += f" (含 {', '.join(red_flags)})"
+
+    return {
+        "relevance_score": scores.get("relevance", 0),
+        "informativeness_accuracy_score": scores.get("informativeness_accuracy", 0),
+        "depth_opinion_score": scores.get("depth_opinion", 0),
+        "readability_score": scores.get("readability", 0),
+        "non_redundancy_score": scores.get("non_redundancy", 0),
+        "overall_score": overall_score,
+        "verdict": verdict,
+        "reason": analysis_text,
+        "comment": data.get("comment", analysis_text),
+        "article_type": article_type,
+        "red_flags": red_flags,
+        "detailed_scores": data,
+        "score": overall_score
+    }
 
 
 def parse_score_response(response_text: str) -> Dict[str, Any]:
@@ -362,3 +490,79 @@ def format_score_result(score_result: Dict[str, Any]) -> str:
         emoji = "👎"
     
     return f"{emoji} {verdict} ({overall}/5.0)"
+
+
+def parse_batch_score_response(response_text: str, expected_count: int) -> list[Dict[str, Any]] | None:
+    """解析批量评分响应并返回结果列表，失败时返回 None。"""
+    try:
+        json_str = extract_json_array_from_response(response_text)
+        if not json_str:
+            return None
+
+        data = json.loads(json_str)
+        if not isinstance(data, list):
+            return None
+
+        results_by_index = {}
+        results_in_order = []
+
+        for item in data:
+            if not isinstance(item, dict):
+                continue
+            index = item.get("index")
+            score_result = _score_from_data(item)
+            if index is None:
+                results_in_order.append(score_result)
+            else:
+                results_by_index[index] = score_result
+
+        if results_by_index:
+            ordered = []
+            for i in range(expected_count):
+                if i in results_by_index:
+                    ordered.append(results_by_index[i])
+                else:
+                    ordered.append(_default_error_result(f"缺少 index={i} 的评分结果"))
+            return ordered
+
+        if len(results_in_order) == expected_count:
+            return results_in_order
+
+        return None
+    except Exception as e:
+        logger.error(f"批量解析失败: {e}")
+        return None
+
+
+def score_articles_batch(articles: list[dict]) -> list[Dict[str, Any]] | None:
+    """对多篇文章进行批量评分，失败时返回 None。"""
+    try:
+        analysis_profile = PROJ_CONFIG.get("analysis_profile")
+
+        client = OpenAI(
+            api_key=get_config("OPENAI_API_KEY", profile=analysis_profile),
+            base_url=get_config("OPENAI_BASE_URL", profile=analysis_profile)
+        )
+
+        prompt = build_batch_scoring_prompt(articles)
+        log_debug("Batch Scoring Prompt", prompt)
+
+        response = client.chat.completions.create(
+            model=get_config("OPENAI_MODEL", "gpt-4o-mini", profile=analysis_profile),
+            messages=[
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.2,
+            max_tokens=2000
+        )
+
+        response_text = response.choices[0].message.content
+        log_debug("Batch Scoring Response", response_text)
+
+        if not response_text:
+            return None
+
+        return parse_batch_score_response(response_text, len(articles))
+    except Exception as e:
+        logger.error(f"批量评分异常: {e}")
+        return None

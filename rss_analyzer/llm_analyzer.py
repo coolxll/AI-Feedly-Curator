@@ -70,6 +70,55 @@ def analyze_article_with_llm(title: str, summary: str, content: str) -> dict:
 
 
 
+def analyze_articles_with_llm_batch(articles: list[dict]) -> list[dict]:
+    """
+    ä½¿ç”¨ OpenAI å…¼å®¹ API æ‰¹é‡åˆ†æžæ–‡ç« 
+
+    Args:
+        articles: [{title, summary, content}, ...]
+    Returns:
+        åˆ†æžç»“æžœåˆ—è¡¨ï¼Œä¸Žè¾“å…¥é¡ºåºä¸€è‡´
+    """
+    from .scoring import score_articles_batch, format_score_result
+
+    try:
+        score_results = score_articles_batch(articles)
+        if not score_results or len(score_results) != len(articles):
+            raise ValueError("batch scoring failed or size mismatch")
+
+        analyzed = []
+        for score_result in score_results:
+            analyzed.append({
+                "score": score_result.get("overall_score", 0.0),
+                "verdict": score_result.get("verdict", "æœªçŸ¥"),
+                "summary": score_result.get("comment", ""),
+                "reason": format_score_result(score_result),
+                "detailed_scores": {
+                    "relevance": score_result.get("relevance_score", 0),
+                    "informativeness": score_result.get("informativeness_accuracy_score", 0),
+                    "depth": score_result.get("depth_opinion_score", 0),
+                    "readability": score_result.get("readability_score", 0),
+                    "originality": score_result.get("non_redundancy_score", 0),
+                    "red_flags": score_result.get("red_flags", []),
+                    "article_type": score_result.get("article_type", "default")
+                }
+            })
+
+        return analyzed
+    except Exception as e:
+        logger.warning(f"æ‰¹é‡è¯„åˆ†å¤±è´¥ï¼Œå›žé€€ä¸ºå•ç¯‡è¯„åˆ†: {e}")
+        fallback = []
+        for article in articles:
+            fallback.append(
+                analyze_article_with_llm(
+                    article.get("title", ""),
+                    article.get("summary", ""),
+                    article.get("content", "")
+                )
+            )
+        return fallback
+
+
 def generate_overall_summary(analyzed_articles: list) -> str:
     """
     生成总体摘要
