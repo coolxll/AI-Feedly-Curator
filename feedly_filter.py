@@ -112,7 +112,7 @@ def newsflash_filter(articles: list) -> FilterResult:
     return FilterResult(matched, remaining, "快讯")
 
 
-def low_score_filter(articles: list, threshold: float = 2.5, dry_run: bool = False) -> FilterResult:
+def low_score_filter(articles: list, threshold: float = 3.0, dry_run: bool = False) -> FilterResult:
     """低分文章过滤器，调用 LLM 对文章进行评分并根据阈值过滤"""
     matched, remaining = [], []
     batch_scoring = PROJ_CONFIG.get("batch_scoring", False)
@@ -240,7 +240,7 @@ def main():
     parser = argparse.ArgumentParser(description='Feedly 文章过滤器')
     parser.add_argument('--debug', action='store_true')
     parser.add_argument('--limit', '-l', type=int, default=500, help='获取文章数量')
-    parser.add_argument('--threshold', '-t', type=float, default=2.5, help='低分阈值')
+    parser.add_argument('--threshold', '-t', type=float, default=3.0, help='低分阈值')
     parser.add_argument('--dry-run', '-n', action='store_true', help='模拟模式')
     
     sub = parser.add_subparsers(dest='cmd')

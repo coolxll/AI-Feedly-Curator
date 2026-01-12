@@ -102,6 +102,8 @@ def main():
             logger.info(f"  ⚠️ 发现 Red Flags: {red_flags}")
             verdict = f"🚫 {verdict}"
 
+        title_str = article_item.get('title', 'Unknown Title')
+        logger.info(f"  ✅标题: {title_str}")
         logger.info(f"  ✅评分: {score:.1f}/5.0 - {verdict}")
         logger.info(f"  ✅评价: {analysis_result.get('reason', '')}")
         if 'detailed_scores' in analysis_result:
