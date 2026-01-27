@@ -165,3 +165,89 @@ def feedly_mark_read(article_ids: list | str) -> bool:
     except Exception as e:
         logger.error(f"标记已读异常: {str(e)}")
         return False
+
+
+def feedly_get_categories() -> list | None:
+    """
+    获取用户的所有分类
+    GET /v3/categories
+    """
+    config = load_feedly_config()
+    if not config:
+        return None
+
+    token = config['token']
+    base_url = "https://cloud.feedly.com/v3"
+
+    try:
+        response = requests.get(
+            f"{base_url}/categories",
+            headers=get_feedly_headers(token),
+            proxies=_get_proxy()
+        )
+        if response.status_code == 200:
+            return response.json()
+        else:
+            logger.error(f"获取分类失败: {response.status_code} - {response.text}")
+            return None
+    except Exception as e:
+        logger.error(f"获取分类异常: {str(e)}")
+        return None
+
+
+def feedly_get_subscriptions() -> list | None:
+    """
+    获取用户的所有订阅源
+    GET /v3/subscriptions
+    """
+    config = load_feedly_config()
+    if not config:
+        return None
+
+    token = config['token']
+    base_url = "https://cloud.feedly.com/v3"
+
+    try:
+        response = requests.get(
+            f"{base_url}/subscriptions",
+            headers=get_feedly_headers(token),
+            proxies=_get_proxy()
+        )
+        if response.status_code == 200:
+            return response.json()
+        else:
+            logger.error(f"获取订阅失败: {response.status_code} - {response.text}")
+            return None
+    except Exception as e:
+        logger.error(f"获取订阅异常: {str(e)}")
+        return None
+
+
+def feedly_get_unread_counts() -> dict | None:
+    """
+    获取未读计数
+    GET /v3/markers/counts
+    Returns:
+        Dict with 'unreadcounts' list
+    """
+    config = load_feedly_config()
+    if not config:
+        return None
+
+    token = config['token']
+    base_url = "https://cloud.feedly.com/v3"
+
+    try:
+        response = requests.get(
+            f"{base_url}/markers/counts",
+            headers=get_feedly_headers(token),
+            proxies=_get_proxy()
+        )
+        if response.status_code == 200:
+            return response.json()
+        else:
+            logger.error(f"获取未读计数失败: {response.status_code} - {response.text}")
+            return None
+    except Exception as e:
+        logger.error(f"获取未读计数异常: {str(e)}")
+        return None

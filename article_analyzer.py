@@ -36,8 +36,9 @@ def main():
                         help=f"Mark processed articles as read (default: {PROJ_CONFIG['mark_read']})")
     parser.add_argument("--debug", action="store_true", default=PROJ_CONFIG["debug"], 
                         help=f"Enable debug mode (default: {PROJ_CONFIG['debug']})")
-    parser.add_argument("--refresh", action="store_true", default=PROJ_CONFIG["refresh"], 
+    parser.add_argument("--refresh", action="store_true", default=PROJ_CONFIG["refresh"],
                         help=f"Refresh from Feedly before processing (default: {PROJ_CONFIG['refresh']})")
+    parser.add_argument("--stream-id", help="Feedly Stream ID to fetch from (Category/Feed)")
 
     args = parser.parse_args()
 
@@ -52,9 +53,11 @@ def main():
     if args.refresh:
         logger.info("=" * 60)
         logger.info("📥 从 Feedly 刷新文章")
+        if args.stream_id:
+            logger.info(f"Target Stream: {args.stream_id}")
         logger.info("=" * 60)
         logger.info(f"正在获取最新 {args.limit} 篇未读文章...")
-        articles = feedly_fetch_unread(limit=args.limit)
+        articles = feedly_fetch_unread(limit=args.limit, stream_id=args.stream_id)
         if articles is None:
             logger.error("❌ 无法从 Feedly 获取文章，退出")
             return

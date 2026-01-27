@@ -9,6 +9,7 @@ import os
 import feedly_filter
 import regenerate_summary
 import article_analyzer
+from rss_analyzer.feedly_client import feedly_get_categories, feedly_get_subscriptions, feedly_get_unread_counts
 from rich.console import Console
 from rich.panel import Panel
 from rich.logging import RichHandler
@@ -80,11 +81,17 @@ def simple_analyze_flow():
     
     refresh_str = get_input("Refresh from Feedly? (y/n)", default="y")
     refresh = refresh_str.lower().startswith('y')
-    
+
+    stream_id = None
+    if refresh:
+        sid = get_input("Stream ID (Optional, press Enter to skip)", default="")
+        if sid:
+            stream_id = sid
+
     mark_read_str = get_input("Mark as read after analysis? (y/n)", default="n")
     mark_read = mark_read_str.lower().startswith('y')
-    
-    execute_analyze(limit, refresh, mark_read)
+
+    execute_analyze(limit, refresh, mark_read, stream_id)
 
 def simple_filter_flow():
     """Fallback filter flow"""
@@ -122,6 +129,99 @@ def simple_filter_flow():
     dry_run = dr_str.lower().startswith('y')
     
     execute_filter(mode, limit, threshold, dry_run)
+
+def select_stream_interactive():
+    """Interactive stream selector"""
+    import questionary
+
+    console.print("[dim]Fetching Feedly directory info...[/dim]")
+
+    # Parallel fetch could be better but sequential is safer for now
+    categories = feedly_get_categories()
+    subscriptions = feedly_get_subscriptions()
+    counts_data = feedly_get_unread_counts()
+
+    if not categories or not subscriptions or not counts_data:
+        console.print("[red]Failed to fetch complete directory info.[/red]")
+        if questionary.confirm("Continue with default Global Stream?", default=True).ask():
+            return None
+        return None
+
+    # Map counts
+    # API returns: {"unreadcounts": [{"id": "...", "count": 123, "updated": ...}]}
+    count_map = {item['id']: item['count'] for item in counts_data.get('unreadcounts', [])}
+
+    choices = []
+
+    # 1. Global All
+    # We don't have the exact user ID readily available without loading config again or parsing stream IDs
+    # But usually one of the unreadcounts entries is for global.all
+    global_count = 0
+    for cid, count in count_map.items():
+        if 'global.all' in cid:
+            global_count = count
+            break
+
+    choices.append(questionary.Choice(f"Global All ({global_count} unread)", value=None))
+
+    # 2. Categories
+    cat_choices = []
+    for cat in categories:
+        cid = cat['id']
+        label = cat['label']
+        count = count_map.get(cid, 0)
+        if count > 0:
+            cat_choices.append((count, f"📁 Category: {label}", cid))
+
+    # Sort by count descending
+    cat_choices.sort(key=lambda x: x[0], reverse=True)
+
+    for count, label, cid in cat_choices:
+        choices.append(questionary.Choice(f"{label} ({count} unread)", value=cid))
+
+    # 3. Feeds (Top 20 by unread count)
+    feed_choices = []
+    for sub in subscriptions:
+        fid = sub['id']
+        title = sub['title']
+        count = count_map.get(fid, 0)
+        if count > 0:
+            feed_choices.append((count, f"📰 Feed: {title}", fid))
+
+    feed_choices.sort(key=lambda x: x[0], reverse=True)
+
+    # Add separator if we have feeds
+    if feed_choices:
+        choices.append(questionary.Separator("--- Feeds ---"))
+
+    for i, (count, label, fid) in enumerate(feed_choices):
+        if i >= 50: # Limit to top 50 to avoid clutter
+            break
+        choices.append(questionary.Choice(f"{label} ({count} unread)", value=fid))
+
+    choices.append(questionary.Separator("--- Other ---"))
+    choices.append(questionary.Choice("Enter Stream ID manually", value="MANUAL"))
+
+    stream_id = questionary.select(
+        "Select Stream to Process:",
+        choices=choices,
+        style=questionary.Style([
+            ('qmark', 'fg:cyan bold'),
+            ('question', 'fg:cyan bold'),
+            ('answer', 'fg:green bold'),
+            ('pointer', 'fg:cyan bold'),
+            ('highlighted', 'fg:cyan bold'),
+            ('selected', 'fg:green bold'),
+        ])
+    ).ask()
+
+    if stream_id == "MANUAL":
+        stream_id = questionary.text("Enter Stream ID:").ask()
+        if not stream_id:
+            return None
+
+    return stream_id
+
 
 def main_menu():
     """Fancy menu using questionary"""
@@ -196,32 +296,44 @@ def run_analyze_flow():
         limit = 100
     
     refresh = questionary.confirm("Refresh from Feedly?", default=True).ask()
-    mark_read = questionary.confirm("Mark as read after analysis?", default=False).ask()
-    
-    execute_analyze(limit, refresh, mark_read)
 
-def execute_analyze(limit, refresh, mark_read):
+    stream_id = None
+    if refresh:
+        # Only ask for stream if we are refreshing
+        use_stream = questionary.confirm("Select specific Category/Feed?", default=False).ask()
+        if use_stream:
+            stream_id = select_stream_interactive()
+
+    mark_read = questionary.confirm("Mark as read after analysis?", default=False).ask()
+
+    execute_analyze(limit, refresh, mark_read, stream_id)
+
+def execute_analyze(limit, refresh, mark_read, stream_id=None):
     """Shared analyze execution logic"""
     console.print(Panel(
         f"Analyzing Articles\n"
         f"Limit: {limit}\n"
         f"Refresh: {refresh}\n"
+        f"Stream: {stream_id or 'Global (All)'}\n"
         f"Mark Read: {mark_read}",
         title="Configuration",
         border_style="blue"
     ))
-    
+
     try:
         # Build command line arguments for article_analyzer
         import sys
         old_argv = sys.argv
-        
+
         sys.argv = ['article_analyzer.py', '--limit', str(limit)]
         if refresh:
             sys.argv.append('--refresh')
         if mark_read:
             sys.argv.append('--mark-read')
-        
+        if stream_id:
+            sys.argv.append('--stream-id')
+            sys.argv.append(stream_id)
+
         try:
             # Call article_analyzer.main() which will parse sys.argv
             article_analyzer.main()
@@ -236,24 +348,39 @@ def execute_analyze(limit, refresh, mark_read):
         logger.exception("An error occurred during analysis")
         console.print("[red]An error occurred. Check logs above.[/red]")
 
-def execute_filter(mode, limit, threshold, dry_run):
+def execute_filter(mode, limit, threshold, dry_run, stream_id=None):
     """Shared execution logic"""
-    console.print(Panel(f"Running Mode: [bold]{mode}[/bold]\nLimit: {limit}\nThreshold: {threshold}\nDry Run: {dry_run}", title="Configuration", border_style="blue"))
-    
+    console.print(Panel(
+        f"Running Mode: [bold]{mode}[/bold]\n"
+        f"Limit: {limit}\n"
+        f"Threshold: {threshold}\n"
+        f"Stream: {stream_id or 'Global (All)'}\n"
+        f"Dry Run: {dry_run}",
+        title="Configuration",
+        border_style="blue"
+    ))
+
     try:
         filters = []
         articles = []
-        
+
+        # Determine target stream (priority: explicitly passed stream_id > mode default)
+        target_stream = stream_id
+
         if mode == 'newsflash':
-            articles = feedly_filter.fetch_articles(limit, stream_id=feedly_filter.FEED_ID_36KR)
+            # For newsflash, usually we target 36kr, but if user provided a stream, use that
+            if not target_stream:
+                target_stream = feedly_filter.FEED_ID_36KR
+
+            articles = feedly_filter.fetch_articles(limit, stream_id=target_stream)
             filters = [feedly_filter.newsflash_filter]
         elif mode == 'low-score':
-            articles = feedly_filter.fetch_articles(limit)
+            articles = feedly_filter.fetch_articles(limit, stream_id=target_stream)
             filters = [lambda a: feedly_filter.low_score_filter(a, threshold, dry_run)]
         else:  # all
-            articles = feedly_filter.fetch_articles(limit)
+            articles = feedly_filter.fetch_articles(limit, stream_id=target_stream)
             filters = [
-                feedly_filter.newsflash_filter, 
+                feedly_filter.newsflash_filter,
                 lambda a: feedly_filter.low_score_filter(a, threshold, dry_run)
             ]
 
@@ -305,8 +432,14 @@ def run_filter_flow():
 
     dry_run = questionary.confirm("Dry Run? (Simulate only, no changes)", default=False).ask()
 
+    # 4. Stream Selection
+    stream_id = None
+    use_stream = questionary.confirm("Select specific Category/Feed?", default=False).ask()
+    if use_stream:
+        stream_id = select_stream_interactive()
+
     # 3. Execution
-    execute_filter(mode, limit, threshold, dry_run)
+    execute_filter(mode, limit, threshold, dry_run, stream_id)
 
 if __name__ == "__main__":
     try:

@@ -275,7 +275,8 @@ def main():
     parser.add_argument('--limit', '-l', type=int, default=1000, help='获取文章数量')
     parser.add_argument('--threshold', '-t', type=float, default=3.0, help='低分阈值')
     parser.add_argument('--dry-run', '-n', action='store_true', help='模拟模式')
-    
+    parser.add_argument('--stream-id', help='指定 Stream ID (Category/Feed)')
+
     sub = parser.add_subparsers(dest='cmd')
     sub.add_parser('newsflash', help='过滤快讯')
     sub.add_parser('low-score', help='过滤低分')
@@ -292,12 +293,13 @@ def main():
     
     # 策略路由
     if args.cmd == 'newsflash':
-        # 专门从 36kr 源获取
-        articles = fetch_articles(args.limit, stream_id=FEED_ID_36KR)
+        # 专门从 36kr 源获取，如果指定了 stream_id 则优先使用
+        target_stream = args.stream_id if args.stream_id else FEED_ID_36KR
+        articles = fetch_articles(args.limit, stream_id=target_stream)
         filters = [newsflash_filter]
     elif args.cmd == 'low-score':
-        # 从全局获取
-        articles = fetch_articles(args.limit)
+        # 从全局获取，或指定 stream_id
+        articles = fetch_articles(args.limit, stream_id=args.stream_id)
         filters = [lambda a: low_score_filter(a, args.threshold, args.dry_run)]
     else:  # all
         # 全量模式逻辑：
@@ -305,13 +307,13 @@ def main():
         # 2. 再跑全局
         # 为了简单且符合"all"的语义（处理所有未读），这里我们只做一次全局 fetch
         # 如果用户希望分开跑，应该分别调用 newsflash 和 low-score
-        
+
         # 修正：根据用户意图，可能希望 all 也能享受到针对性过滤的好处？
         # 但"all"通常意味着处理所有来源。如果只 fetch 36kr，就漏了别的。
         # 如果 fetch global，也包含 36kr。
         # 所以 all 模式维持原样（fetch global），但应用所有过滤器。
-        
-        articles = fetch_articles(args.limit)
+
+        articles = fetch_articles(args.limit, stream_id=args.stream_id)
         filters = [newsflash_filter, lambda a: low_score_filter(a, args.threshold, args.dry_run)]
 
     if not articles:
