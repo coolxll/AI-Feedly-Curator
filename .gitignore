@@ -25,6 +25,8 @@ wheels/
 
 # Environment variables
 .env
+feedly_config.json
+
 
 # IDE
 .idea/

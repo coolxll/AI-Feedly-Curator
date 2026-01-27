@@ -24,6 +24,7 @@ from rss_analyzer.feedly_client import feedly_fetch_unread, feedly_mark_read
 from rss_analyzer.article_fetcher import fetch_article_content
 from rss_analyzer.llm_analyzer import analyze_article_with_llm, analyze_articles_with_llm_batch
 from rss_analyzer.utils import is_newsflash
+from rss_analyzer.cache import get_cached_score, save_cached_score
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -122,6 +123,23 @@ def low_score_filter(articles: list, threshold: float = 3.0, dry_run: bool = Fal
     for i, article in enumerate(articles, 1):
         title = article.get('title', '')[:50]
         prefix = f"[{i}/{len(articles)}]"
+        article_id = article.get('id')
+
+        # 1. Check Cache
+        cached = get_cached_score(article_id)
+        if cached:
+            score = cached['score']
+            logger.info(f"{prefix} ♻️ 使用缓存评分: {title}")
+            _handle_scored_article(
+                article,
+                score,
+                prefix,
+                threshold,
+                dry_run,
+                matched,
+                remaining
+            )
+            continue
 
         logger.info(f"{prefix} 评分中: {title}...")
 
@@ -135,9 +153,13 @@ def low_score_filter(articles: list, threshold: float = 3.0, dry_run: bool = Fal
                 batch_payload = [item["payload"] for item in batch_queue]
                 batch_results = analyze_articles_with_llm_batch(batch_payload)
                 for item, analysis in zip(batch_queue, batch_results):
+                    score = analysis.get("score", 0.0)
+                    # Save to Cache
+                    save_cached_score(item["article"].get('id'), score, analysis)
+
                     _handle_scored_article(
                         item["article"],
-                        analysis.get("score", 0.0),
+                        score,
                         item["prefix"],
                         threshold,
                         dry_run,
@@ -146,7 +168,11 @@ def low_score_filter(articles: list, threshold: float = 3.0, dry_run: bool = Fal
                     )
                 batch_queue = []
         else:
-            score = _score_article(article)
+            score, analysis = _score_article(article)
+            # Save to Cache (if valid)
+            if score >= 0:
+                save_cached_score(article_id, score, analysis)
+
             _handle_scored_article(
                 article,
                 score,
@@ -161,9 +187,13 @@ def low_score_filter(articles: list, threshold: float = 3.0, dry_run: bool = Fal
         batch_payload = [item["payload"] for item in batch_queue]
         batch_results = analyze_articles_with_llm_batch(batch_payload)
         for item, analysis in zip(batch_queue, batch_results):
+            score = analysis.get("score", 0.0)
+            # Save to Cache
+            save_cached_score(item["article"].get('id'), score, analysis)
+
             _handle_scored_article(
                 item["article"],
-                analysis.get("score", 0.0),
+                score,
                 item["prefix"],
                 threshold,
                 dry_run,
@@ -176,20 +206,21 @@ def low_score_filter(articles: list, threshold: float = 3.0, dry_run: bool = Fal
     return FilterResult(matched, remaining, "低分")
 
 
-def _score_article(article: dict) -> float:
-    """对文章进行评分，出错返回 -1"""
+def _score_article(article: dict) -> tuple[float, dict]:
+    """对文章进行评分，返回 (score, analysis_data)"""
     payload = _prepare_article_scoring(article)
 
     # 调用配置的分析模型进行评分
     try:
-        return analyze_article_with_llm(
+        result = analyze_article_with_llm(
             payload.get("title", ""),
             payload.get("summary", ""),
             payload.get("content", "")
-        ).get('score', 0.0)
+        )
+        return result.get('score', 0.0), result
     except Exception as e:
         logger.debug(f"评分出错: {e}")
-        return -1.0
+        return -1.0, {}
 
 
 def _prepare_article_scoring(article: dict) -> dict:
@@ -210,6 +241,8 @@ def _prepare_article_scoring(article: dict) -> dict:
 def _handle_scored_article(article: dict, score: float, prefix: str, threshold: float, dry_run: bool,
                            matched: list, remaining: list) -> None:
     """处理评分后的文章，决定是标记已读还是保留"""
+    
+    title_str = article.get('title', 'Unknown Title')
     if score < 0:
         logger.info(f"{prefix} 结果: 跳过 (评分失败)")
         remaining.append(article)
@@ -217,11 +250,14 @@ def _handle_scored_article(article: dict, score: float, prefix: str, threshold: 
         article_id = article.get('id')
         if article_id and not dry_run:
             feedly_mark_read([article_id])
+            logger.info(f"{prefix} 结果: ❌标题: {title_str}")
             logger.info(f"{prefix} 结果: {score:.1f} 分 (低于阈值，已标记已读)")
         else:
+            logger.info(f"{prefix} 结果: ❌标题: {title_str}")
             logger.info(f"{prefix} 结果: {score:.1f} 分 (低于阈值，[DRY RUN] 跳过标记)")
         matched.append({**article, '_score': score})
     else:
+        logger.info(f"{prefix} 结果: ✅标题: {title_str}")
         logger.info(f"{prefix} 结果: {score:.1f} 分 (保留)")
         remaining.append(article)
 

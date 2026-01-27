@@ -6,13 +6,15 @@ import os
 import json
 import logging
 import requests
+from typing import Optional
 
 from .config import PROJ_CONFIG
 
+
 logger = logging.getLogger(__name__)
 
-# Feedly 配置文件路径
-FEEDLY_CONFIG_FILE = os.path.join(os.getcwd(), '.claude', 'skills', 'rss_reader', 'feedly_config.json')
+# Feedly 配置文件路径 (工作目录)
+FEEDLY_CONFIG_FILE = os.path.join(os.getcwd(), 'feedly_config.json')
 
 
 def load_feedly_config() -> dict | None:
@@ -36,7 +38,7 @@ def _get_proxy() -> dict | None:
     return {"http": proxy, "https": proxy} if proxy else None
 
 
-def feedly_fetch_unread(stream_id: str = None, limit: int = 999) -> list | None:
+def feedly_fetch_unread(stream_id: Optional[str] = None, limit: int = 999) -> list | None:
     """
     从 Feedly 获取未读文章
     
@@ -59,41 +61,59 @@ def feedly_fetch_unread(stream_id: str = None, limit: int = 999) -> list | None:
     target_stream = stream_id or f"user/{user_id}/category/global.all"
 
     try:
-        params = {
-            'streamId': target_stream,
-            'count': limit,
-            'unreadOnly': 'true'
-        }
-        
-        response = requests.get(
-            f"{base_url}/streams/contents", 
-            headers=get_feedly_headers(token), 
-            params=params,
-            proxies=_get_proxy()
-        )
-        
-        if response.status_code == 401:
-            logger.error("Feedly认证失败，请检查token")
-            return None
-        if response.status_code != 200:
-            logger.error(f"Feedly API错误: {response.status_code} - {response.text}")
-            return None
-
-        data = response.json()
         articles = []
-        if 'items' in data:
-            for entry in data['items']:
-                article = {
-                    'title': entry.get('title', 'No Title'),
-                    'link': entry.get('alternate', [{}])[0].get('href', '') if entry.get('alternate') else '',
-                    'published': entry.get('published', 0),
-                    'summary': entry.get('summary', {}).get('content', '') or entry.get('content', {}).get('content', ''),
-                    'id': entry.get('id', ''),
-                    'origin': entry.get('origin', {}).get('title', '')
-                }
-                articles.append(article)
+        continuation = None
         
-        return articles
+        while len(articles) < limit:
+            # Calculate remaining needed, but cap at 1000 per request (Feedly API limit usually)
+            remaining = limit - len(articles)
+            batch_size = min(remaining, 1000)
+            
+            params = {
+                'streamId': target_stream,
+                'count': batch_size,
+                'unreadOnly': 'true'
+            }
+            if continuation:
+                params['continuation'] = continuation
+            
+            response = requests.get(
+                f"{base_url}/streams/contents", 
+                headers=get_feedly_headers(token), 
+                params=params,
+                proxies=_get_proxy()
+            )
+            
+            if response.status_code == 401:
+                logger.error("Feedly认证失败，请检查token")
+                return None if not articles else articles
+            if response.status_code != 200:
+                logger.error(f"Feedly API错误: {response.status_code} - {response.text}")
+                return None if not articles else articles
+
+            data = response.json()
+            
+            if 'items' in data:
+                for entry in data['items']:
+                    article = {
+                        'title': entry.get('title', 'No Title'),
+                        'link': entry.get('alternate', [{}])[0].get('href', '') if entry.get('alternate') else '',
+                        'published': entry.get('published', 0),
+                        'summary': entry.get('summary', {}).get('content', '') or entry.get('content', {}).get('content', ''),
+                        'id': entry.get('id', ''),
+                        'origin': entry.get('origin', {}).get('title', '')
+                    }
+                    articles.append(article)
+            
+            # Check for continuation token
+            continuation = data.get('continuation')
+            if not continuation:
+                break
+                
+            logger.debug(f"Fetched {len(articles)}/{limit} articles... (Continuating)")
+        
+        # Trim to exact limit if we over-fetched (though unlikely with logic above)
+        return articles[:limit]
     except Exception as e:
         logger.error(f"获取Feedly未读文章异常: {str(e)}")
         import traceback

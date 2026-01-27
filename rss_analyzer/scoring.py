@@ -302,33 +302,60 @@ def extract_json_from_response(response_text: str) -> str | None:
 
 
 def extract_json_array_from_response(response_text: str) -> str | None:
-    """从 LLM 响应中提取 JSON 数组。"""
-    code_block_match = re.search(r'```(?:json)?\s*(\[.*?\])\s*```', response_text, re.DOTALL)
+    """从 LLM 响应中提取 JSON 数组，支持 markdown 代码块和智能边界识别。"""
+    # 策略1: 尝试提取 Markdown 代码块 (更宽松的正则)
+    # 匹配 ```json ... ``` 或 ``` ... ```
+    code_block_match = re.search(r'```(?:json)?\s*(.*?)```', response_text, re.DOTALL)
     if code_block_match:
-        return code_block_match.group(1)
+        content = code_block_match.group(1).strip()
+        if content.startswith('[') and content.endswith(']'):
+            return content
 
-    json_arrays = []
-    depth = 0
-    start_idx = None
+    # 策略2: 智能寻找最外层的 [] 对，且忽略字符串内的括号
+    # 这比简单的深度计数更健壮，能处理 [{"title": "文章[1]"}] 这种情况
 
-    for i, char in enumerate(response_text):
-        if char == '[':
-            if depth == 0:
-                start_idx = i
-            depth += 1
-        elif char == ']':
-            depth -= 1
-            if depth == 0 and start_idx is not None:
-                candidate = response_text[start_idx:i + 1]
-                try:
-                    json.loads(candidate)
-                    json_arrays.append(candidate)
-                except json.JSONDecodeError:
-                    pass
-                start_idx = None
+    candidates = []
 
-    if json_arrays:
-        return json_arrays[-1]
+    # 寻找所有的 '[' 作为潜在起点
+    start_indices = [m.start() for m in re.finditer(r'\[', response_text)]
+
+    for start in start_indices:
+        depth = 0
+        in_string = False
+        escape = False
+
+        for i in range(start, len(response_text)):
+            char = response_text[i]
+
+            if in_string:
+                if escape:
+                    escape = False
+                elif char == '\\':
+                    escape = True
+                elif char == '"':
+                    in_string = False
+            else:
+                if char == '"':
+                    in_string = True
+                elif char == '[':
+                    depth += 1
+                elif char == ']':
+                    depth -= 1
+                    if depth == 0:
+                        # 找到闭合的数组
+                        candidate = response_text[start:i+1]
+                        try:
+                            # 验证是否为有效 JSON
+                            json.loads(candidate)
+                            candidates.append(candidate)
+                            # 找到一个有效的就跳出内层循环，继续找下一个可能的起点（虽然通常只要找到最大的那个就行）
+                            break
+                        except json.JSONDecodeError:
+                            pass
+
+    if candidates:
+        # 返回最长的那个（通常是最外层的）
+        return max(candidates, key=len)
 
     return None
 
@@ -493,76 +520,179 @@ def format_score_result(score_result: Dict[str, Any]) -> str:
 
 
 def parse_batch_score_response(response_text: str, expected_count: int) -> list[Dict[str, Any]] | None:
-    """解析批量评分响应并返回结果列表，失败时返回 None。"""
+    """
+    解析批量评分响应并返回结果列表，失败时返回 None。
+    改进逻辑：
+    1. 即使 JSON 数组未闭合，也尝试提取已解析的对象。
+    2. 如果数量不足，返回部分结果（列表长度 < expected_count），由调用者负责补全。
+    """
     try:
+        # 1. 尝试完整解析
         json_str = extract_json_array_from_response(response_text)
-        if not json_str:
-            return None
+        data = None
+        if json_str:
+            try:
+                data = json.loads(json_str)
+            except json.JSONDecodeError:
+                pass
 
-        data = json.loads(json_str)
-        if not isinstance(data, list):
+        # 2. 如果完整解析失败，尝试流式提取（应对截断情况）
+        if not data:
+            data = _robust_parse_objects(response_text)
+
+        if not data or not isinstance(data, list):
+            logger.warning("Batch parse failed: No valid objects found")
             return None
 
         results_by_index = {}
-        results_in_order = []
-
         for item in data:
             if not isinstance(item, dict):
                 continue
             index = item.get("index")
             score_result = _score_from_data(item)
-            if index is None:
-                results_in_order.append(score_result)
-            else:
+            if index is not None:
                 results_by_index[index] = score_result
 
-        if results_by_index:
-            ordered = []
-            for i in range(expected_count):
-                if i in results_by_index:
-                    ordered.append(results_by_index[i])
-                else:
-                    ordered.append(_default_error_result(f"缺少 index={i} 的评分结果"))
-            return ordered
+        if not results_by_index:
+            return None
 
-        if len(results_in_order) == expected_count:
-            return results_in_order
+        # 3. 构造有序列表（包含 None 占位符）
+        ordered = []
+        valid_count = 0
+        for i in range(expected_count):
+            if i in results_by_index:
+                ordered.append(results_by_index[i])
+                valid_count += 1
+            else:
+                ordered.append(None) # 标记为缺失
 
-        return None
+        if valid_count == 0:
+            return None
+
+        # 只要有部分成功，就返回这个包含 None 的列表
+        return ordered
+
     except Exception as e:
         logger.error(f"批量解析失败: {e}")
         return None
 
 
-def score_articles_batch(articles: list[dict]) -> list[Dict[str, Any]] | None:
-    """对多篇文章进行批量评分，失败时返回 None。"""
-    try:
-        analysis_profile = PROJ_CONFIG.get("analysis_profile")
+def _robust_parse_objects(text: str) -> list[dict]:
+    """
+    从可能截断的文本中尽可能多地提取 JSON 对象。
+    原理：查找所有 {"index": ...} 模式的块，尝试解析。
+    """
+    objects = []
+    # 查找所有潜在的对象起始点
+    # 假设每个对象都以 {"index": 开头（受 prompt 约束）
+    # 或者通用的 { ... }
 
+    # 简单策略：按 '{"index":' 分割，或者使用非贪婪正则提取
+    # 注意：正则可能无法处理嵌套大括号，所以这里使用一个简单的栈式解析器扫描
+
+    start_indices = [m.start() for m in re.finditer(r'\{\s*"index"', text)]
+
+    for start in start_indices:
+        # 尝试从 start 开始向后寻找合法的闭合 }
+        depth = 0
+        in_string = False
+        escape = False
+
+        for i in range(start, len(text)):
+            char = text[i]
+            if in_string:
+                if escape: escape = False
+                elif char == '\\': escape = True
+                elif char == '"': in_string = False
+            else:
+                if char == '"': in_string = True
+                elif char == '{': depth += 1
+                elif char == '}':
+                    depth -= 1
+                    if depth == 0:
+                        # 找到一个完整的对象候选
+                        candidate = text[start:i+1]
+                        try:
+                            obj = json.loads(candidate)
+                            objects.append(obj)
+                        except:
+                            pass
+                        break # 跳出内层循环，处理下一个 start
+    return objects
+
+
+def score_articles_batch(articles: list[dict], max_retries: int = 3) -> list[Dict[str, Any]] | None:
+    """对多篇文章进行批量评分，支持重试和部分恢复，失败时返回 None。"""
+    analysis_profile = PROJ_CONFIG.get("analysis_profile")
+
+    try:
         client = OpenAI(
             api_key=get_config("OPENAI_API_KEY", profile=analysis_profile),
             base_url=get_config("OPENAI_BASE_URL", profile=analysis_profile)
         )
-
-        prompt = build_batch_scoring_prompt(articles)
-        log_debug("Batch Scoring Prompt", prompt)
-
-        response = client.chat.completions.create(
-            model=get_config("OPENAI_MODEL", "gpt-4o-mini", profile=analysis_profile),
-            messages=[
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.2,
-            max_tokens=2000
-        )
-
-        response_text = response.choices[0].message.content
-        log_debug("Batch Scoring Response", response_text)
-
-        if not response_text:
-            return None
-
-        return parse_batch_score_response(response_text, len(articles))
     except Exception as e:
-        logger.error(f"批量评分异常: {e}")
+        logger.error(f"Client init failed: {e}")
         return None
+
+    prompt = build_batch_scoring_prompt(articles)
+    log_debug("Batch Scoring Prompt", prompt)
+
+    for attempt in range(max_retries):
+        try:
+            logger.info(f"Batch scoring attempt {attempt + 1}/{max_retries}...")
+
+            response = client.chat.completions.create(
+                model=get_config("OPENAI_MODEL", "gpt-4o-mini", profile=analysis_profile),
+                messages=[
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.2,
+                max_tokens=4000
+            )
+
+            response_text = response.choices[0].message.content
+            log_debug(f"Batch Scoring Response (Attempt {attempt + 1})", response_text)
+
+            if not response_text:
+                logger.warning(f"Batch attempt {attempt + 1} failed: Empty response")
+                continue
+
+            # 解析结果（可能包含 None）
+            batch_results = parse_batch_score_response(response_text, len(articles))
+
+            if batch_results:
+                # 检查是否有缺失项 (None)
+                missing_indices = [i for i, r in enumerate(batch_results) if r is None]
+
+                if not missing_indices:
+                    return batch_results # 完美成功
+
+                logger.warning(f"Batch attempt {attempt + 1} partial success. Missing indices: {missing_indices}. Filling gaps...")
+
+                # 补全缺失项（单篇调用）
+                for i in missing_indices:
+                    logger.info(f"Filling gap for article {i} (single mode)...")
+                    article = articles[i]
+                    # 使用单篇评分补全
+                    try:
+                        score_result = score_article(
+                            article.get("title", ""),
+                            article.get("summary", ""),
+                            article.get("content", "")
+                        )
+                        batch_results[i] = score_result
+                    except Exception as e:
+                        logger.error(f"Failed to fill gap for article {i}: {e}")
+                        # 保持 None 或者填入错误占位符，这里填入默认错误
+                        batch_results[i] = _default_error_result(f"Fill gap failed: {e}")
+
+                return batch_results
+
+            logger.warning(f"Batch attempt {attempt + 1} failed: Parse error or no valid objects found")
+            # logger.warning(f"Failed Response Snippet: {response_text[:1000]}")
+
+        except Exception as e:
+            logger.warning(f"Batch attempt {attempt + 1} exception: {e}")
+
+    logger.error("All batch scoring attempts failed.")
+    return None
