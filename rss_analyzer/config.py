@@ -22,7 +22,7 @@ PROJ_CONFIG = {
     
     # API Profile 配置 (指定使用哪个 profile，使用大写)
     # 可选值: "LOCAL_QWEN", "ALIYUN", "DEEPSEEK", None (使用默认)
-    "analysis_profile": "LOCAL_GEMINI_LITE",   # 文章分析使用的 profile
+    "analysis_profile": "LOCAL_QWEN",   # 文章分析使用的 profile
     "summary_profile": "DEEPSEEK",      # 总结生成使用的 profile
     
     # 评分偏好设定 (Persona)

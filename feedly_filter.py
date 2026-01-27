@@ -272,7 +272,7 @@ def _fetch_content(article: dict) -> str:
 def main():
     parser = argparse.ArgumentParser(description='Feedly 文章过滤器')
     parser.add_argument('--debug', action='store_true')
-    parser.add_argument('--limit', '-l', type=int, default=500, help='获取文章数量')
+    parser.add_argument('--limit', '-l', type=int, default=1000, help='获取文章数量')
     parser.add_argument('--threshold', '-t', type=float, default=3.0, help='低分阈值')
     parser.add_argument('--dry-run', '-n', action='store_true', help='模拟模式')
     
