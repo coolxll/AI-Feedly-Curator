@@ -120,6 +120,30 @@ def low_score_filter(articles: list, threshold: float = 3.0, dry_run: bool = Fal
     batch_size = max(1, int(PROJ_CONFIG.get("batch_size", 1)))
     batch_queue = []
 
+    def flush_batch():
+        """提交当前 batch_queue 中的文章进行评分"""
+        nonlocal batch_queue
+        if not batch_queue:
+            return
+
+        batch_payload = [item["payload"] for item in batch_queue]
+        batch_results = analyze_articles_with_llm_batch(batch_payload)
+        for item, analysis in zip(batch_queue, batch_results):
+            score = analysis.get("score", 0.0)
+            # Save to Cache
+            save_cached_score(item["article"].get('id'), score, analysis)
+
+            _handle_scored_article(
+                item["article"],
+                score,
+                item["prefix"],
+                threshold,
+                dry_run,
+                matched,
+                remaining
+            )
+        batch_queue = []
+
     for i, article in enumerate(articles, 1):
         title = article.get('title', '')[:50]
         prefix = f"[{i}/{len(articles)}]"
@@ -128,6 +152,10 @@ def low_score_filter(articles: list, threshold: float = 3.0, dry_run: bool = Fal
         # 1. Check Cache
         cached = get_cached_score(article_id)
         if cached:
+            # 遇到缓存命中时，先提交之前积累的 batch
+            if batch_scoring and batch_queue:
+                flush_batch()
+
             score = cached['score']
             logger.info(f"{prefix} ♻️ 使用缓存评分: {title}")
             _handle_scored_article(
@@ -150,23 +178,7 @@ def low_score_filter(articles: list, threshold: float = 3.0, dry_run: bool = Fal
                 "payload": _prepare_article_scoring(article)
             })
             if len(batch_queue) >= batch_size:
-                batch_payload = [item["payload"] for item in batch_queue]
-                batch_results = analyze_articles_with_llm_batch(batch_payload)
-                for item, analysis in zip(batch_queue, batch_results):
-                    score = analysis.get("score", 0.0)
-                    # Save to Cache
-                    save_cached_score(item["article"].get('id'), score, analysis)
-
-                    _handle_scored_article(
-                        item["article"],
-                        score,
-                        item["prefix"],
-                        threshold,
-                        dry_run,
-                        matched,
-                        remaining
-                    )
-                batch_queue = []
+                flush_batch()
         else:
             score, analysis = _score_article(article)
             # Save to Cache (if valid)
@@ -183,24 +195,9 @@ def low_score_filter(articles: list, threshold: float = 3.0, dry_run: bool = Fal
                 remaining
             )
 
+    # 处理剩余的 batch
     if batch_scoring and batch_queue:
-        batch_payload = [item["payload"] for item in batch_queue]
-        batch_results = analyze_articles_with_llm_batch(batch_payload)
-        for item, analysis in zip(batch_queue, batch_results):
-            score = analysis.get("score", 0.0)
-            # Save to Cache
-            save_cached_score(item["article"].get('id'), score, analysis)
-
-            _handle_scored_article(
-                item["article"],
-                score,
-                item["prefix"],
-                threshold,
-                dry_run,
-                matched,
-                remaining
-            )
-        batch_queue = []
+        flush_batch()
 
     logger.info(f"📊 过滤结果: {len(matched)} 篇过滤, {len(remaining)} 篇保留")
     return FilterResult(matched, remaining, "低分")

@@ -18,7 +18,7 @@ PROJ_CONFIG = {
     "refresh": True,       # 是否默认刷新
     "proxy": "http://127.0.0.1:7890",  # 代理服务器
     "batch_scoring": True,  # 是否启用分析批量评分
-    "batch_size": 20,       # 单次 LLM 评分的文章数
+    "batch_size": 10,       # 单次 LLM 评分的文章数
     
     # API Profile 配置 (指定使用哪个 profile，使用大写)
     # 可选值: "LOCAL_QWEN", "ALIYUN", "DEEPSEEK", None (使用默认)

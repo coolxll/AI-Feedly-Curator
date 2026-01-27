@@ -647,7 +647,7 @@ def score_articles_batch(articles: list[dict], max_retries: int = 3) -> list[Dic
                     {"role": "user", "content": prompt}
                 ],
                 temperature=0.2,
-                max_tokens=4000
+                max_tokens=16000  # Explicitly set high limit for Gemini
             )
 
             response_text = response.choices[0].message.content
@@ -689,7 +689,9 @@ def score_articles_batch(articles: list[dict], max_retries: int = 3) -> list[Dic
                 return batch_results
 
             logger.warning(f"Batch attempt {attempt + 1} failed: Parse error or no valid objects found")
-            # logger.warning(f"Failed Response Snippet: {response_text[:1000]}")
+            logger.warning(f"Response length: {len(response_text)} chars")
+            logger.warning(f"Response starts with: {response_text[:200] if response_text else 'EMPTY'}")
+            logger.warning(f"Response ends with: {response_text[-200:] if response_text else 'EMPTY'}")
 
         except Exception as e:
             logger.warning(f"Batch attempt {attempt + 1} exception: {e}")
