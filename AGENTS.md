@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-**rss-opml** is an AI-powered tool designed to streamline RSS feed consumption. It integrates with Feedly to fetch unread articles, uses Large Language Models (LLMs) to analyze, score, and summarize content, and generates comprehensive Markdown reports.
+**AI-Feedly-Curator** is an AI-powered tool designed to streamline RSS feed consumption. It integrates with Feedly to fetch unread articles, uses Large Language Models (LLMs) to analyze, score, and summarize content, and generates comprehensive Markdown reports.
 
 **Key Features:**
 *   **Feedly Integration:** Automatically fetches unread articles.

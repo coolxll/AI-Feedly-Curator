@@ -179,7 +179,7 @@
 
 ```bash
 # 1. 进入工作目录
-cd /path/to/rss-opml
+cd /path/to/AI-Feedly-Curator
 
 # 2. 启动AI助手
 claude-minimax  # 或其他AI工具

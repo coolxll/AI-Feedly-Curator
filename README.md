@@ -1,4 +1,4 @@
-# RSS Article Analyzer
+# AI-Feedly-Curator
 
 AI 驱动的 RSS 文章分析器，自动从 Feedly 获取未读文章，使用 LLM 进行内容分析评分，并生成总体摘要报告。
 
@@ -93,7 +93,7 @@ PROJ_CONFIG = {
 ## 项目结构与输出
 
 ```
-rss-opml/
+AI-Feedly-Curator/
 ├── article_analyzer.py   # 主程序入口
 ├── regenerate_summary.py # 重新生成摘要脚本
 ├── rss_analyzer/         # 核心代码

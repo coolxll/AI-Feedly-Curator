@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Feedly AI Filter TUI Runner
+AI-Feedly-Curator TUI Runner
 Interactive menu for running Feedly filters.
 """
 import sys

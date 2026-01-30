@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-RSS 文章分析器
+AI-Feedly-Curator
 使用 AI 分析 RSS 订阅文章，生成评分和摘要
 
 使用方法：
