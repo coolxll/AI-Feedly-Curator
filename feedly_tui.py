@@ -53,11 +53,12 @@ def simple_menu():
         console.print("1. Run Filter")
         console.print("2. Analyze Articles")
         console.print("3. Regenerate Summary")
-        console.print("4. Exit")
-        
+        console.print("4. Export Articles")
+        console.print("5. Exit")
+
         choice = get_input("Select an option")
-        
-        if choice == "4":
+
+        if choice == "5":
             console.print("[cyan]Goodbye![/cyan]")
             sys.exit()
         elif choice == "1":
@@ -66,6 +67,8 @@ def simple_menu():
             simple_analyze_flow()
         elif choice == "3":
             run_summary_flow()
+        elif choice == "4":
+            simple_export_flow()
         else:
             console.print("[red]Invalid choice[/red]")
 
@@ -92,6 +95,74 @@ def simple_analyze_flow():
     mark_read = mark_read_str.lower().startswith('y')
 
     execute_analyze(limit, refresh, mark_read, stream_id)
+
+def simple_export_flow():
+    """Fallback export flow"""
+    console.print("\n[bold]Export Configuration:[/bold]")
+
+    sid = get_input("Stream ID (Optional, press Enter for Global)", default="")
+    stream_id = sid if sid else None
+
+    limit_str = get_input("Limit", default="100")
+    try:
+        limit = int(limit_str)
+    except ValueError:
+        limit = 100
+
+    from datetime import datetime
+    default_filename = f"export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+    filename = get_input("Output Filename", default=default_filename)
+
+    execute_export(limit, stream_id, filename)
+
+def run_export_flow():
+    """Interactive export flow"""
+    import questionary
+    from datetime import datetime
+
+    # 1. Select Stream
+    stream_id = select_stream_interactive()
+
+    # 2. Limit
+    limit_str = questionary.text("Article Limit:", default="100").ask()
+    try:
+        limit = int(limit_str)
+    except ValueError:
+        limit = 100
+
+    # 3. Output Filename
+    default_filename = f"export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+    filename = questionary.text("Output Filename:", default=default_filename).ask()
+
+    execute_export(limit, stream_id, filename)
+
+def execute_export(limit, stream_id, filename):
+    console.print(Panel(
+        f"Exporting Articles\n"
+        f"Limit: {limit}\n"
+        f"Stream: {stream_id or 'Global (All)'}\n"
+        f"Output: {filename}",
+        title="Export Configuration",
+        border_style="blue"
+    ))
+
+    try:
+        import sys
+        old_argv = sys.argv
+
+        sys.argv = ['article_analyzer.py', '--limit', str(limit), '--export', filename]
+        if stream_id:
+            sys.argv.append('--stream-id')
+            sys.argv.append(stream_id)
+
+        try:
+            article_analyzer.main()
+            console.print(Panel(f"Export Complete! File saved to {filename}", style="bold green"))
+        finally:
+            sys.argv = old_argv
+    except Exception as e:
+        logger.exception("Error exporting")
+        console.print("[red]Export failed.[/red]")
 
 def simple_filter_flow():
     """Fallback filter flow"""
@@ -243,6 +314,7 @@ def main_menu():
                 questionary.Choice("Run Filter", value="run"),
                 questionary.Choice("Analyze Articles", value="analyze"),
                 questionary.Choice("Regenerate Summary", value="summary"),
+                questionary.Choice("Export Articles", value="export"),
                 questionary.Choice("Exit", value="exit")
             ],
             style=questionary.Style([
@@ -270,6 +342,11 @@ def main_menu():
             console.print(Panel.fit("Feedly AI Filter TUI", style="bold cyan", subtitle="Interactive Runner"))
         elif action == "summary":
             run_summary_flow()
+            input("\nPress Enter to return to menu...")
+            console.clear()
+            console.print(Panel.fit("Feedly AI Filter TUI", style="bold cyan", subtitle="Interactive Runner"))
+        elif action == "export":
+            run_export_flow()
             input("\nPress Enter to return to menu...")
             console.clear()
             console.print(Panel.fit("Feedly AI Filter TUI", style="bold cyan", subtitle="Interactive Runner"))

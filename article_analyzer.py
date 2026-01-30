@@ -39,15 +39,35 @@ def main():
     parser.add_argument("--refresh", action="store_true", default=PROJ_CONFIG["refresh"],
                         help=f"Refresh from Feedly before processing (default: {PROJ_CONFIG['refresh']})")
     parser.add_argument("--stream-id", help="Feedly Stream ID to fetch from (Category/Feed)")
+    parser.add_argument("--export", help="Export fetched articles to JSON file without analysis")
 
     args = parser.parse_args()
 
     # 设置日志级别
     debug_mode = args.debug or os.getenv("DEBUG", "").lower() in ("true", "1", "yes")
     setup_logging(debug_mode)
-    
+
     if debug_mode:
         logger.info("Debug模式已启用")
+
+    # 导出模式 (Export Mode)
+    if args.export:
+        logger.info("=" * 60)
+        logger.info(f"📤 导出模式: 将抓取文章导出到 {args.export}")
+        if args.stream_id:
+            logger.info(f"Target Stream: {args.stream_id}")
+        logger.info("=" * 60)
+
+        logger.info(f"正在获取最新 {args.limit} 篇未读文章...")
+        articles = feedly_fetch_unread(limit=args.limit, stream_id=args.stream_id)
+
+        if articles is None:
+             logger.error("❌ 无法从 Feedly 获取文章，退出")
+             return
+
+        save_articles(articles, args.export)
+        logger.info(f"✓ 成功导出 {len(articles)} 篇文章到 {args.export}")
+        return
 
     # 刷新unread_news.json
     if args.refresh:
