@@ -94,7 +94,13 @@ def simple_analyze_flow():
     mark_read_str = get_input("Mark as read after analysis? (y/n)", default="n")
     mark_read = mark_read_str.lower().startswith('y')
 
-    execute_analyze(limit, refresh, mark_read, stream_id)
+    threads_str = get_input("Number of threads (Default: 3)", default="3")
+    try:
+        threads = int(threads_str)
+    except ValueError:
+        threads = 3
+
+    execute_analyze(limit, refresh, mark_read, stream_id, threads)
 
 def simple_export_flow():
     """Fallback export flow"""
@@ -383,16 +389,24 @@ def run_analyze_flow():
 
     mark_read = questionary.confirm("Mark as read after analysis?", default=False).ask()
 
-    execute_analyze(limit, refresh, mark_read, stream_id)
+    threads_str = questionary.text("Number of threads:", default="3").ask()
+    try:
+        threads = int(threads_str)
+    except ValueError:
+        console.print("[red]Invalid thread count, using default 3[/red]")
+        threads = 3
 
-def execute_analyze(limit, refresh, mark_read, stream_id=None):
+    execute_analyze(limit, refresh, mark_read, stream_id, threads)
+
+def execute_analyze(limit, refresh, mark_read, stream_id=None, threads=3):
     """Shared analyze execution logic"""
     console.print(Panel(
         f"Analyzing Articles\n"
         f"Limit: {limit}\n"
         f"Refresh: {refresh}\n"
         f"Stream: {stream_id or 'Global (All)'}\n"
-        f"Mark Read: {mark_read}",
+        f"Mark Read: {mark_read}\n"
+        f"Threads: {threads}",
         title="Configuration",
         border_style="blue"
     ))
@@ -410,6 +424,9 @@ def execute_analyze(limit, refresh, mark_read, stream_id=None):
         if stream_id:
             sys.argv.append('--stream-id')
             sys.argv.append(stream_id)
+        if threads:
+            sys.argv.append('--threads')
+            sys.argv.append(str(threads))
 
         try:
             # Call article_analyzer.main() which will parse sys.argv

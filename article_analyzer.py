@@ -13,6 +13,7 @@ AI-Feedly-Curator
 import os
 import argparse
 import logging
+import concurrent.futures
 
 # 导入模块
 from rss_analyzer.config import PROJ_CONFIG, setup_logging
@@ -40,6 +41,7 @@ def main():
                         help=f"Refresh from Feedly before processing (default: {PROJ_CONFIG['refresh']})")
     parser.add_argument("--stream-id", help="Feedly Stream ID to fetch from (Category/Feed)")
     parser.add_argument("--export", help="Export fetched articles to JSON file without analysis")
+    parser.add_argument("--threads", type=int, help="Number of threads for concurrent batch scoring")
 
     args = parser.parse_args()
 
@@ -116,6 +118,27 @@ def main():
     batch_size = max(1, int(PROJ_CONFIG.get("batch_size", 1)))
     batch_queue = []
 
+    # 并发处理相关
+    max_workers = args.threads or int(PROJ_CONFIG.get("max_workers", 3))
+    executor = concurrent.futures.ThreadPoolExecutor(max_workers=max_workers)
+    pending_futures = []  # List of (future, batch_items)
+
+    def process_completed_futures():
+        """检查并处理已完成的 Future"""
+        nonlocal pending_futures
+        still_pending = []
+        for future, batch_items in pending_futures:
+            if future.done():
+                try:
+                    batch_results = future.result()
+                    for item, analysis in zip(batch_items, batch_results):
+                        record_analysis_result(item['article'], analysis)
+                except Exception as e:
+                    logger.error(f"Batch processing failed: {e}")
+            else:
+                still_pending.append((future, batch_items))
+        pending_futures = still_pending
+
     def record_analysis_result(article_item, analysis_result):
         """将评分结果标准化记录到输出列表"""
         verdict = analysis_result.get('verdict', '未知')
@@ -142,94 +165,116 @@ def main():
     all_article_ids = [a['id'] for a in articles[:args.limit] if a.get('id')]
     
     # 处理每篇文章
-    for idx, article in enumerate(articles[:args.limit], 1):
-        logger.info(f"处理第 {idx}/{min(args.limit, len(articles))} 篇: {article['title']}")
-        
-        # 1. 关键词过滤 (Pre-filtering)
-        filter_keywords = PROJ_CONFIG.get("filter_keywords", [])
-        if any(kw in article['title'] for kw in filter_keywords):
-            logger.info(f"  🚫 标题包含过滤词，跳过")
-            continue
-        
-        # 1.2 URL模式过滤 (Pre-filtering)
-        filter_url_patterns = PROJ_CONFIG.get("filter_url_patterns", [])
-        article_url = article.get('link', '') or article.get('originId', '')
-        if any(pattern in article_url for pattern in filter_url_patterns):
-            logger.info(f"  🚫 URL匹配过滤规则 ({article_url})，跳过")
-            continue
-            
-        # 1.3 简单去重 (Redundancy Filter)
-        norm_title = "".join(filter(str.isalnum, article['title'].lower()))
-        # 检查是否太短（防止像 "Update" 这种通用标题误杀），但 filter_keywords 应该已经覆盖了一些
-        if len(norm_title) > 5: 
-            if norm_title in seen_titles:
-                logger.info(f"  🚫 标题重复 (Redundancy)，跳过")
+    try:
+        for idx, article in enumerate(articles[:args.limit], 1):
+            logger.info(f"处理第 {idx}/{min(args.limit, len(articles))} 篇: {article['title']}")
+
+            # 1. 关键词过滤 (Pre-filtering)
+            filter_keywords = PROJ_CONFIG.get("filter_keywords", [])
+            if any(kw in article['title'] for kw in filter_keywords):
+                logger.info(f"  🚫 标题包含过滤词，跳过")
                 continue
-            seen_titles.add(norm_title)
 
-        # 1.4 快讯过滤 (Newsflash Filter)
-        if is_newsflash(article):
-            logger.info(f"  🚫 识别为快讯 (Newsflash)，跳过")
-            continue
+            # 1.2 URL模式过滤 (Pre-filtering)
+            filter_url_patterns = PROJ_CONFIG.get("filter_url_patterns", [])
+            article_url = article.get('link', '') or article.get('originId', '')
+            if any(pattern in article_url for pattern in filter_url_patterns):
+                logger.info(f"  🚫 URL匹配过滤规则 ({article_url})，跳过")
+                continue
 
-        # 优先使用已有的 content (例如来自测试数据或 RSS 全文)
-        content = article.get('content', '')
-        summary = article.get('summary', '')
-        
-        if content and len(content) > 200:
-             logger.info(f"  ✓ 使用已有正文 ({len(content)} 字符)")
-        elif summary and len(summary) > 500:
-            logger.info(f"  ✓ 摘要较长 ({len(summary)} 字符)，跳过网页抓取")
-            content = summary
-        else:
-            logger.info(f"  → 开始抓取网页内容...")
-            fetched_content = fetch_article_content(article['link'])
-            if fetched_content:
-                content = fetched_content
-            logger.info(f"  ✓ 抓取完成: {len(content)} 字符")
-            
-        # 2. 长度过滤 (Pre-filtering)
-        min_length = PROJ_CONFIG.get("filter_min_length", 100)
-        if len(content) < min_length:
-            logger.info(f"  🚫 内容太短 ({len(content)} < {min_length})，跳过")
-            continue
-        
+            # 1.3 简单去重 (Redundancy Filter)
+            norm_title = "".join(filter(str.isalnum, article['title'].lower()))
+            # 检查是否太短（防止像 "Update" 这种通用标题误杀），但 filter_keywords 应该已经覆盖了一些
+            if len(norm_title) > 5:
+                if norm_title in seen_titles:
+                    logger.info(f"  🚫 标题重复 (Redundancy)，跳过")
+                    continue
+                seen_titles.add(norm_title)
+
+            # 1.4 快讯过滤 (Newsflash Filter)
+            if is_newsflash(article):
+                logger.info(f"  🚫 识别为快讯 (Newsflash)，跳过")
+                continue
+
+            # 优先使用已有的 content (例如来自测试数据或 RSS 全文)
+            content = article.get('content', '')
+            summary = article.get('summary', '')
+
+            if content and len(content) > 200:
+                 logger.info(f"  ✓ 使用已有正文 ({len(content)} 字符)")
+            elif summary and len(summary) > 500:
+                logger.info(f"  ✓ 摘要较长 ({len(summary)} 字符)，跳过网页抓取")
+                content = summary
+            else:
+                logger.info(f"  → 开始抓取网页内容...")
+                fetched_content = fetch_article_content(article['link'])
+                if fetched_content:
+                    content = fetched_content
+                logger.info(f"  ✓ 抓取完成: {len(content)} 字符")
+
+            # 2. 长度过滤 (Pre-filtering)
+            min_length = PROJ_CONFIG.get("filter_min_length", 100)
+            if len(content) < min_length:
+                logger.info(f"  🚫 内容太短 ({len(content)} < {min_length})，跳过")
+                continue
+
+            if batch_scoring:
+                batch_queue.append({
+                    'article': article,
+                    'title': article.get('title', ''),
+                    'summary': summary,
+                    'content': content
+                })
+                if len(batch_queue) >= batch_size:
+                    batch_payload = [
+                        {
+                            'title': item['title'],
+                            'summary': item['summary'],
+                            'content': item['content']
+                        } for item in batch_queue
+                    ]
+                    # 提交任务到线程池
+                    logger.info(f"  >>> 提交批量评分任务 (Batch Size: {len(batch_payload)})")
+                    future = executor.submit(analyze_articles_with_llm_batch, batch_payload)
+                    pending_futures.append((future, list(batch_queue)))
+                    batch_queue = []
+
+                # 检查是否有完成的任务
+                process_completed_futures()
+
+            else:
+                analysis = analyze_article_with_llm(article['title'], summary, content)
+                record_analysis_result(article, analysis)
+
+        # 处理剩余的队列
+        if batch_scoring and batch_queue:
+            batch_payload = [
+                {
+                    'title': item['title'],
+                    'summary': item['summary'],
+                    'content': item['content']
+                } for item in batch_queue
+            ]
+            logger.info(f"  >>> 提交最后批量评分任务 (Batch Size: {len(batch_payload)})")
+            future = executor.submit(analyze_articles_with_llm_batch, batch_payload)
+            pending_futures.append((future, list(batch_queue)))
+            batch_queue = []
+
+        # 等待所有任务完成
         if batch_scoring:
-            batch_queue.append({
-                'article': article,
-                'title': article.get('title', ''),
-                'summary': summary,
-                'content': content
-            })
-            if len(batch_queue) >= batch_size:
-                batch_payload = [
-                    {
-                        'title': item['title'],
-                        'summary': item['summary'],
-                        'content': item['content']
-                    } for item in batch_queue
-                ]
-                batch_results = analyze_articles_with_llm_batch(batch_payload)
-                for item, analysis in zip(batch_queue, batch_results):
-                    record_analysis_result(item['article'], analysis)
-                batch_queue = []
-        else:
-            analysis = analyze_article_with_llm(article['title'], summary, content)
-            record_analysis_result(article, analysis)
-    
-    # 生成带时间戳的文件名，按月份组织
-    if batch_scoring and batch_queue:
-        batch_payload = [
-            {
-                'title': item['title'],
-                'summary': item['summary'],
-                'content': item['content']
-            } for item in batch_queue
-        ]
-        batch_results = analyze_articles_with_llm_batch(batch_payload)
-        for item, analysis in zip(batch_queue, batch_results):
-            record_analysis_result(item['article'], analysis)
-        batch_queue = []
+            logger.info("等待所有评分任务完成...")
+            # 阻塞等待剩余的任务
+            for future, batch_items in pending_futures:
+                try:
+                    batch_results = future.result()
+                    for item, analysis in zip(batch_items, batch_results):
+                        record_analysis_result(item['article'], analysis)
+                except Exception as e:
+                    logger.error(f"Batch processing failed: {e}")
+
+    finally:
+        executor.shutdown(wait=True)
+
 
 
     from datetime import datetime

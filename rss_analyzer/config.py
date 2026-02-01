@@ -16,13 +16,14 @@ PROJ_CONFIG = {
     "mark_read": True,      # 是否默认标记已读
     "debug": False,         # 是否默认开启Debug
     "refresh": True,       # 是否默认刷新
-    "proxy": "http://127.0.0.1:7890",  # 代理服务器
+    "proxy": "127.0.0.1:7890",  # 代理服务器
     "batch_scoring": True,  # 是否启用分析批量评分
     "batch_size": 10,       # 单次 LLM 评分的文章数
-    
+    "max_workers": 3,       # 批量评分的并发线程数
+
     # API Profile 配置 (指定使用哪个 profile，使用大写)
     # 可选值: "LOCAL_QWEN", "ALIYUN", "DEEPSEEK", None (使用默认)
-    "analysis_profile": "LOCAL_QWEN",   # 文章分析使用的 profile
+    "analysis_profile": "LOCAL_GEMINI_LITE",   # 文章分析使用的 profile
     "summary_profile": "DEEPSEEK",      # 总结生成使用的 profile
     
     # 评分偏好设定 (Persona)

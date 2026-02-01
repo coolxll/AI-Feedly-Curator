@@ -4,11 +4,13 @@
 """
 import json
 import re
+import time
+import random
 import logging
 from typing import Dict, Any
 from datetime import datetime
 
-from openai import OpenAI
+from openai import OpenAI, RateLimitError, APIError
 
 from .config import PROJ_CONFIG, get_config, log_debug
 
@@ -468,9 +470,12 @@ def score_article(title: str, summary: str, content: str) -> Dict[str, Any]:
     try:
         analysis_profile = PROJ_CONFIG.get("analysis_profile")
         
+        base_url = get_config("OPENAI_BASE_URL", profile=analysis_profile)
+        logger.info(f"Single Scoring - Connecting to: {base_url}")
+
         client = OpenAI(
             api_key=get_config("OPENAI_API_KEY", profile=analysis_profile),
-            base_url=get_config("OPENAI_BASE_URL", profile=analysis_profile)
+            base_url=base_url
         )
         
         prompt = build_scoring_prompt(title, summary, content)
@@ -626,9 +631,12 @@ def score_articles_batch(articles: list[dict], max_retries: int = 3) -> list[Dic
     analysis_profile = PROJ_CONFIG.get("analysis_profile")
 
     try:
+        base_url = get_config("OPENAI_BASE_URL", profile=analysis_profile)
+        logger.info(f"Batch Scoring - Connecting to: {base_url}")
+
         client = OpenAI(
             api_key=get_config("OPENAI_API_KEY", profile=analysis_profile),
-            base_url=get_config("OPENAI_BASE_URL", profile=analysis_profile)
+            base_url=base_url
         )
     except Exception as e:
         logger.error(f"Client init failed: {e}")
@@ -694,7 +702,18 @@ def score_articles_batch(articles: list[dict], max_retries: int = 3) -> list[Dic
             logger.warning(f"Response ends with: {response_text[-200:] if response_text else 'EMPTY'}")
 
         except Exception as e:
-            logger.warning(f"Batch attempt {attempt + 1} exception: {e}")
+            # 智能退避策略 (Exponential Backoff)
+            is_rate_limit = isinstance(e, RateLimitError) or "429" in str(e)
+
+            if is_rate_limit:
+                # 指数退避: 1s, 2s, 4s... + 随机抖动
+                delay = (2 ** attempt) * 1.5 + random.uniform(0, 1)
+                logger.warning(f"⚠️ Batch attempt {attempt + 1} hit Rate Limit (429). Cooling down for {delay:.2f}s...")
+                time.sleep(delay)
+            else:
+                logger.warning(f"Batch attempt {attempt + 1} exception: {e}")
+                # 对于非 429 错误，也稍微等待一下避免死循环轰炸
+                time.sleep(1)
 
     logger.error("All batch scoring attempts failed.")
     return None
