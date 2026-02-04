@@ -291,11 +291,11 @@ def main():
     
     # 同时保存到根目录（为了兼容性和方便访问）
     save_articles(analyzed_articles, 'analyzed_articles.json')
-    
+
     logger.info("\n分析结果已保存到:")
     logger.info(f"  - {analyzed_file}")
     logger.info("  - analyzed_articles.json (最新版本)")
-    
+
     # 标记已读（所有抓取的文章，包括被过滤/跳过的）
     if args.mark_read and all_article_ids:
         logger.info(f"\n正在标记 {len(all_article_ids)} 篇文章为已读...")
@@ -323,7 +323,7 @@ def main():
         f.write(overall_summary)
     with open(latest_file, 'w', encoding='utf-8') as f:
         f.write(overall_summary)
-    
+
     logger.info("总体摘要已保存到:")
     logger.info(f"  - {summary_file}")
     logger.info(f"  - {latest_file}")
