@@ -72,7 +72,17 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return;
   }
 
-  const ids = Array.isArray(msg.ids) ? msg.ids : [];
+  // Support both old (ids array) and new (items array) formats
+  let ids = [];
+  let itemsMap = new Map();
+
+  if (msg.items && Array.isArray(msg.items)) {
+      ids = msg.items.map(i => i.id);
+      msg.items.forEach(i => itemsMap.set(i.id, i));
+  } else {
+      ids = Array.isArray(msg.ids) ? msg.ids : [];
+  }
+
   console.log("Processing get_scores for", ids.length, "articles");
 
   if (ids.length === 0) {
@@ -96,7 +106,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   } else {
     // Native Host 模式
     console.log("[NATIVE MODE] Fetching scores from Native Host for", missing.length, "articles");
-    sendNativeMessage({ type: "get_scores", ids: missing }).then((resp) => {
+
+    // Construct items list for native host, including metadata if available
+    const missingItems = missing.map(id => itemsMap.get(id) || { id: id });
+
+    sendNativeMessage({ type: "get_scores", items: missingItems }).then((resp) => {
       console.log("Native Host Response:", JSON.stringify(resp, null, 2));
       const fetched = resp && resp.items ? resp.items : {};
       mergeCache(fetched);
@@ -104,6 +118,43 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     });
   }
 
+  return true;
+});
+
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (!msg || msg.type !== "analyze_article") {
+    return;
+  }
+
+  console.log("Processing analyze_article for", msg.id);
+
+  if (USE_MOCK) {
+     // Mock analysis
+     setTimeout(() => {
+         const score = 4.5;
+         const verdict = "值得阅读";
+         const result = {
+             id: msg.id,
+             score: score,
+             data: {
+                 verdict: verdict,
+                 summary: "这是实时分析的Mock结果。",
+                 reason: `实时AI评分: ${score}/5.0 - ${verdict}`
+             },
+             found: true
+         };
+         mergeCache({[msg.id]: result});
+         sendResponse(result);
+     }, 1500);
+  } else {
+      sendNativeMessage(msg).then(resp => {
+          console.log("Native Analysis Response:", resp);
+          if (resp && !resp.error) {
+              mergeCache({[msg.id]: resp});
+          }
+          sendResponse(resp);
+      });
+  }
   return true;
 });
 

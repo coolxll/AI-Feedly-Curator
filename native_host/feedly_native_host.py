@@ -35,9 +35,10 @@ try:
     os.environ["RSS_SCORES_DB"] = DB_PATH
     logging.info(f"设置 RSS_SCORES_DB: {DB_PATH}")
 
-    from rss_analyzer.cache import get_cached_score
+    from rss_analyzer.cache import get_cached_score, save_cached_score
+    from rss_analyzer.llm_analyzer import analyze_article_with_llm
 
-    logging.info("成功导入 rss_analyzer.cache")
+    logging.info("成功导入 rss_analyzer 模块")
 except Exception:
     logging.exception("导入模块失败！")
     sys.exit(1)
@@ -119,6 +120,34 @@ def _handle_get_scores(msg: dict) -> dict:
     return {"items": items}
 
 
+def _handle_analyze_article(msg: dict) -> dict:
+    article_id = msg.get("id")
+    title = msg.get("title")
+    summary = msg.get("summary", "")
+    content = msg.get("content", "")
+
+    if not article_id or not title:
+        return {"error": "missing_id_or_title"}
+
+    logging.info(f"Analyzing article: {article_id} - {title}")
+
+    try:
+        # Call LLM
+        analysis = analyze_article_with_llm(title, summary, content)
+
+        # Save to cache
+        save_cached_score(article_id, analysis.get("score"), analysis)
+
+        # Return formatted result
+        # Note: We don't have the updated_at from DB yet unless we re-read, but it's fine to pass None or just let the client handle it.
+        # However, _normalize_item expects a cached dict structure if we were reading from cache.
+        # Let's construct a compatible structure.
+        return _normalize_item(article_id, {"score": analysis.get("score"), "data": analysis, "updated_at": None})
+    except Exception as e:
+        logging.error(f"Analysis failed: {e}")
+        return {"error": str(e)}
+
+
 def _handle_health(_: dict) -> dict:
     return {"ok": True}
 
@@ -129,6 +158,8 @@ def _handle_message(msg: dict) -> dict:
         return _handle_get_score(msg)
     if msg_type == "get_scores":
         return _handle_get_scores(msg)
+    if msg_type == "analyze_article":
+        return _handle_analyze_article(msg)
     if msg_type == "health":
         return _handle_health(msg)
     return {"error": "unknown_type"}

@@ -79,6 +79,43 @@ if (!document.getElementById(STYLE_ID)) {
     /* 深色模式适配 */
     [data-theme="dark"] .ai-summary-panel { background: #1f2937; border-color: #374151; color: #d1d5db; }
     [data-theme="dark"] .ai-summary-title { color: #f3f4f6; }
+
+    /* 分析按钮样式 */
+    .ai-analyze-btn {
+      margin-right: 8px;
+      font-size: 11px;
+      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: 4px;
+      background: #2563eb;
+      color: #fff;
+      border: none;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      transition: background 0.2s;
+      vertical-align: middle;
+    }
+    .ai-analyze-btn:hover {
+      background: #1d4ed8;
+    }
+    .ai-analyze-btn:disabled {
+      background: #9ca3af;
+      cursor: not-allowed;
+    }
+    .ai-analyze-btn .spinner {
+      width: 10px;
+      height: 10px;
+      border: 2px solid #ffffff;
+      border-top-color: transparent;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+      margin-right: 4px;
+      display: none;
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
   `;
   document.head.appendChild(style);
 }
@@ -234,7 +271,72 @@ function renderItem(el, item) {
   const container = ensureBadgeContainer(el);
   container.innerHTML = '';
 
+  // 如果没有找到评分，显示"Analyze"按钮
   if (!item || !item.found) {
+    const btn = document.createElement('button');
+    btn.className = 'ai-analyze-btn';
+    btn.innerHTML = '<span class="spinner"></span>Analyze AI';
+
+    btn.onclick = (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+
+      const id = getEntryId(el);
+      if (!id) return;
+
+      const spinner = btn.querySelector('.spinner');
+
+      // 更新按钮状态
+      btn.disabled = true;
+      spinner.style.display = 'inline-block';
+      btn.childNodes[1].textContent = 'Analyzing...';
+
+      // 提取内容
+      const titleEl = el.querySelector('.EntryTitleLink, .entry-title-link, .entry__title, .ArticleTitle');
+      const summaryEl = el.querySelector('.EntrySummary, .entry__summary, .content, .entryContent');
+      const contentEl = el.querySelector('.EntryBody, .content, .entryContent, .entryBody'); // 尝试获取全文
+
+      // 优先使用全文，其次摘要
+      const contentText = contentEl ? contentEl.innerText : (summaryEl ? summaryEl.textContent.trim() : '');
+      const titleText = titleEl ? titleEl.textContent.trim() : 'Unknown Title';
+
+      console.log(`[Feedly AI] Analyzing article: ${id} - ${titleText}`);
+
+      chrome.runtime.sendMessage({
+        type: 'analyze_article',
+        id: id,
+        title: titleText,
+        summary: summaryEl ? summaryEl.textContent.trim() : '',
+        content: contentText
+      }, (resp) => {
+        if (chrome.runtime.lastError) {
+          console.error("Analysis error:", chrome.runtime.lastError);
+          btn.disabled = false;
+          spinner.style.display = 'none';
+          btn.childNodes[1].textContent = 'Error';
+          return;
+        }
+
+        console.log("[Feedly AI] Analysis result:", resp);
+        if (resp && (resp.found || resp.score !== undefined)) {
+            // 缓存并重新渲染
+            const resultItem = {
+                id: id,
+                found: true,
+                score: resp.score,
+                data: resp.data || resp // 兼容不同返回格式
+            };
+            STATE.itemCache.set(id, resultItem);
+            renderItem(el, resultItem);
+        } else {
+            btn.disabled = false;
+            spinner.style.display = 'none';
+            btn.childNodes[1].textContent = 'Failed';
+        }
+      });
+    };
+
+    container.appendChild(btn);
     return;
   }
 
@@ -285,7 +387,7 @@ function scanEntries() {
   STATE.scheduled = false;
   const entries = Array.from(document.querySelectorAll(SELECTORS.entry));
 
-  const ids = [];
+  const itemsToFetch = [];
   const map = new Map();
 
   for (const entry of entries) {
@@ -297,11 +399,7 @@ function scanEntries() {
 
     // Check if this specific DOM element already has a badge
     if (entry.querySelector('.ai-score-badge')) {
-        // Even if it has a badge, check if we need to add the summary panel (e.g. user expanded the article)
-        // We can't easily do this without the item data, so we might need to refetch or cache locally.
-        // For now, let's trust that if the badge exists, the main job is done.
-        // BUT: if the user expanded the view, the .EntryBody might be new.
-        const item = STATE.itemCache?.get(id); // We'll need to add a local item cache
+        const item = STATE.itemCache?.get(id);
         if (item) {
              const summary = item.data?.summary || item.data?.reason;
              const verdict = item.data?.verdict;
@@ -310,24 +408,40 @@ function scanEntries() {
         continue;
     }
 
-    ids.push(id);
+    // Extract metadata for real-time analysis
+    const titleEl = entry.querySelector('.EntryTitleLink, .entry-title-link, .entry__title, .ArticleTitle');
+    const summaryEl = entry.querySelector('.EntrySummary, .entry__summary, .content, .entryContent');
+    const link = titleEl ? titleEl.getAttribute('href') : null;
+
+    // Fix relative URLs
+    const url = link ? (link.startsWith('http') ? link : window.location.origin + link) : null;
+
+    itemsToFetch.push({
+      id: id,
+      title: titleEl ? titleEl.textContent.trim() : 'Unknown Title',
+      url: url,
+      summary: summaryEl ? summaryEl.textContent.trim() : ''
+    });
+
     map.set(id, entry);
     STATE.pending.set(id, entry);
   }
 
-  if (ids.length === 0) return;
+  if (itemsToFetch.length === 0) return;
 
-  console.log("[Feedly AI Overlay] Fetching scores for", ids.length, "new articles");
+  console.log("[Feedly AI Overlay] Fetching scores for", itemsToFetch.length, "new articles");
 
-  chrome.runtime.sendMessage({ type: 'get_scores', ids }, (resp) => {
+  // Send items object containing metadata
+  chrome.runtime.sendMessage({ type: 'get_scores', items: itemsToFetch }, (resp) => {
     if (chrome.runtime.lastError) {
       console.error("[Feedly AI Overlay] Error:", chrome.runtime.lastError);
-      for (const id of ids) STATE.pending.delete(id);
+      for (const item of itemsToFetch) STATE.pending.delete(item.id);
       return;
     }
 
     const items = resp?.items || {};
-    for (const id of ids) {
+    for (const item of itemsToFetch) {
+      const id = item.id;
       const entry = map.get(id) || STATE.pending.get(id);
       if (items[id]) {
         STATE.itemCache.set(id, items[id]); // Cache the item data
