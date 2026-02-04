@@ -1,5 +1,5 @@
 // ============ 配置开关 ============
-const USE_MOCK = false;  // true = 使用 Mock 数据, false = 使用 Native Host
+const USE_MOCK = true;  // true = 使用 Mock 数据, false = 使用 Native Host
 // ==================================
 
 const HOST_NAME = "feedly.ai.overlay";
@@ -97,6 +97,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     // Native Host 模式
     console.log("[NATIVE MODE] Fetching scores from Native Host for", missing.length, "articles");
     sendNativeMessage({ type: "get_scores", ids: missing }).then((resp) => {
+      console.log("Native Host Response:", JSON.stringify(resp, null, 2));
       const fetched = resp && resp.items ? resp.items : {};
       mergeCache(fetched);
       sendResponse({ items: { ...items, ...fetched } });
