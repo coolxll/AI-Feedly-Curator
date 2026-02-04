@@ -95,7 +95,7 @@ def main():
         logger.info("=" * 60)
         logger.info("📂 使用本地文章数据（未刷新）")
         logger.info("=" * 60)
-        logger.info(f"提示: 使用 --refresh 参数可从 Feedly 获取最新文章")
+        logger.info("提示: 使用 --refresh 参数可从 Feedly 获取最新文章")
         logger.info("")
 
     # 确定输入文件
@@ -172,7 +172,7 @@ def main():
             # 1. 关键词过滤 (Pre-filtering)
             filter_keywords = PROJ_CONFIG.get("filter_keywords", [])
             if any(kw in article['title'] for kw in filter_keywords):
-                logger.info(f"  🚫 标题包含过滤词，跳过")
+                logger.info("  🚫 标题包含过滤词，跳过")
                 continue
 
             # 1.2 URL模式过滤 (Pre-filtering)
@@ -187,13 +187,13 @@ def main():
             # 检查是否太短（防止像 "Update" 这种通用标题误杀），但 filter_keywords 应该已经覆盖了一些
             if len(norm_title) > 5:
                 if norm_title in seen_titles:
-                    logger.info(f"  🚫 标题重复 (Redundancy)，跳过")
+                    logger.info("  🚫 标题重复 (Redundancy)，跳过")
                     continue
                 seen_titles.add(norm_title)
 
             # 1.4 快讯过滤 (Newsflash Filter)
             if is_newsflash(article):
-                logger.info(f"  🚫 识别为快讯 (Newsflash)，跳过")
+                logger.info("  🚫 识别为快讯 (Newsflash)，跳过")
                 continue
 
             # 优先使用已有的 content (例如来自测试数据或 RSS 全文)
@@ -206,7 +206,7 @@ def main():
                 logger.info(f"  ✓ 摘要较长 ({len(summary)} 字符)，跳过网页抓取")
                 content = summary
             else:
-                logger.info(f"  → 开始抓取网页内容...")
+                logger.info("  → 开始抓取网页内容...")
                 fetched_content = fetch_article_content(article['link'])
                 if fetched_content:
                     content = fetched_content
@@ -291,11 +291,11 @@ def main():
     
     # 同时保存到根目录（为了兼容性和方便访问）
     save_articles(analyzed_articles, 'analyzed_articles.json')
-    
-    logger.info(f"\n分析结果已保存到:")
+
+    logger.info("\n分析结果已保存到:")
     logger.info(f"  - {analyzed_file}")
-    logger.info(f"  - analyzed_articles.json (最新版本)")
-    
+    logger.info("  - analyzed_articles.json (最新版本)")
+
     # 标记已读（所有抓取的文章，包括被过滤/跳过的）
     if args.mark_read and all_article_ids:
         logger.info(f"\n正在标记 {len(all_article_ids)} 篇文章为已读...")
@@ -323,11 +323,11 @@ def main():
         f.write(overall_summary)
     with open(latest_file, 'w', encoding='utf-8') as f:
         f.write(overall_summary)
-    
-    logger.info(f"总体摘要已保存到:")
+
+    logger.info("总体摘要已保存到:")
     logger.info(f"  - {summary_file}")
     logger.info(f"  - {latest_file}")
-    logger.info(f"\n归档文件:")
+    logger.info("\n归档文件:")
     logger.info(f"  - {analyzed_file}")
     logger.info(f"  - {summary_file}")
     
