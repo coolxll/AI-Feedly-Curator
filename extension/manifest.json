@@ -3,7 +3,7 @@
   "name": "Feedly AI Overlay",
   "version": "0.3.0",
   "description": "Overlay local AI scores in Feedly web UI",
-  "permissions": ["storage", "scripting", "nativeMessaging", "sidePanel"],
+  "permissions": ["storage", "nativeMessaging", "sidePanel"],
   "host_permissions": [
     "https://feedly.com/*",
     "https://cloud.feedly.com/*",
