@@ -198,7 +198,7 @@ def execute_export(limit, stream_id, filename, stream_label=None):
             console.print(Panel(f"Export Complete! File saved to {filename}", style="bold green"))
         finally:
             sys.argv = old_argv
-    except Exception as e:
+    except Exception:
         logger.exception("Error exporting")
         console.print("[red]Export failed.[/red]")
 
