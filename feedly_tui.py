@@ -656,7 +656,7 @@ def execute_analyze(limit, refresh, mark_read, stream_id=None, threads=3, stream
         
     except KeyboardInterrupt:
         console.print("\n[red]Operation cancelled by user.[/red]")
-    except Exception as e:
+    except Exception:
         logger.exception("An error occurred during analysis")
         console.print("[red]An error occurred. Check logs above.[/red]")
 
@@ -713,7 +713,7 @@ def execute_filter(mode, limit, threshold, dry_run, mark_read, stream_id=None, s
         
     except KeyboardInterrupt:
         console.print("\n[red]Operation cancelled by user.[/red]")
-    except Exception as e:
+    except Exception:
         logger.exception("An error occurred during execution")
         console.print("[red]An error occurred. Check logs above.[/red]")
 

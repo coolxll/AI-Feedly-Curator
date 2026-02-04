@@ -257,7 +257,7 @@ def generate_overall_summary(analyzed_articles: list) -> str:
 
         # 打印使用统计
         if hasattr(response, 'usage') and response.usage:
-            print(f"\nToken 使用统计:")
+            print("\nToken 使用统计:")
             print(f"  - Prompt Tokens: {response.usage.prompt_tokens if hasattr(response.usage, 'prompt_tokens') else 'N/A'}")
             print(f"  - Completion Tokens: {response.usage.completion_tokens if hasattr(response.usage, 'completion_tokens') else 'N/A'}")
             print(f"  - Total Tokens: {response.usage.total_tokens if hasattr(response.usage, 'total_tokens') else 'N/A'}")

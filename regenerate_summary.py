@@ -39,7 +39,7 @@ def generate_summary_from_articles(articles):
     with open(latest_file, 'w', encoding='utf-8') as f:
         f.write(overall_summary)
 
-    print(f"✓ 总体摘要已保存到:")
+    print("✓ 总体摘要已保存到:")
     print(f"  - {summary_file}")
     print(f"  - {latest_file}")
 
