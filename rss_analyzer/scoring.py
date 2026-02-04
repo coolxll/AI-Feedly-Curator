@@ -477,12 +477,15 @@ def score_article(title: str, summary: str, content: str) -> Dict[str, Any]:
             api_key=get_config("OPENAI_API_KEY", profile=analysis_profile),
             base_url=base_url
         )
-        
+
+        model = get_config("OPENAI_MODEL", "gpt-4o-mini", profile=analysis_profile)
+        logger.info(f"Single Scoring - Using Model: {model}")
+
         prompt = build_scoring_prompt(title, summary, content)
         log_debug("Scoring Prompt", prompt)
-        
+
         response = client.chat.completions.create(
-            model=get_config("OPENAI_MODEL", "gpt-4o-mini", profile=analysis_profile),
+            model=model,
             messages=[
                 {"role": "user", "content": prompt}
             ],
@@ -497,10 +500,11 @@ def score_article(title: str, summary: str, content: str) -> Dict[str, Any]:
             return _default_error_result("模型返回为空")
         
         result = parse_score_response(response_text)
-        
+
         # 补全 score 字段，兼容旧的 article_analyzer 调用
         result['score'] = result['overall_score']
-        
+        result['model'] = model
+
         return result
         
     except Exception as e:
@@ -649,8 +653,11 @@ def score_articles_batch(articles: list[dict], max_retries: int = 3) -> list[Dic
         try:
             logger.info(f"Batch scoring attempt {attempt + 1}/{max_retries}...")
 
+            model = get_config("OPENAI_MODEL", "gpt-4o-mini", profile=analysis_profile)
+            logger.info(f"Batch Scoring - Using Model: {model}")
+
             response = client.chat.completions.create(
-                model=get_config("OPENAI_MODEL", "gpt-4o-mini", profile=analysis_profile),
+                model=model,
                 messages=[
                     {"role": "user", "content": prompt}
                 ],
@@ -671,6 +678,11 @@ def score_articles_batch(articles: list[dict], max_retries: int = 3) -> list[Dic
             if batch_results:
                 # 检查是否有缺失项 (None)
                 missing_indices = [i for i, r in enumerate(batch_results) if r is None]
+
+                # 为所有成功的结果添加模型信息
+                for res in batch_results:
+                    if res:
+                        res['model'] = model
 
                 if not missing_indices:
                     return batch_results # 完美成功

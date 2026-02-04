@@ -39,6 +39,7 @@ def analyze_article_with_llm(title: str, summary: str, content: str) -> dict:
             "verdict": score_result.get("verdict", "未知"),
             "summary": score_result.get("comment", ""),
             "reason": format_score_result(score_result),
+            "model": score_result.get("model", "unknown"),
             "detailed_scores": {
                 "relevance": score_result.get("relevance_score", 0),
                 "informativeness": score_result.get("informativeness_accuracy_score", 0),
@@ -93,6 +94,7 @@ def analyze_articles_with_llm_batch(articles: list[dict]) -> list[dict]:
                 "verdict": score_result.get("verdict", "未知"),
                 "summary": score_result.get("comment", ""),
                 "reason": format_score_result(score_result),
+                "model": score_result.get("model", "unknown"),
                 "detailed_scores": {
                     "relevance": score_result.get("relevance_score", 0),
                     "informativeness": score_result.get("informativeness_accuracy_score", 0),
