@@ -613,17 +613,8 @@ function scanEntries() {
     // Check if this specific DOM element already has a badge OR an analyze button
     // This prevents re-fetching/re-rendering items that already have a status
     if (entry.querySelector('.ai-score-badge') || entry.querySelector('.ai-analyze-btn')) {
-        // Even if it has a badge, we might need to update the summary panel if it's a new DOM node (e.g. expanded view)
-        const item = STATE.itemCache?.get(id);
-        if (item && item.found) {
-             const summary = item.data?.summary || item.data?.reason;
-             const verdict = item.data?.verdict;
-             if (summary) ensureSummaryPanel(entry, summary, verdict);
-        }
         continue;
     }
-
-    // Extract metadata for real-time analysis
     const titleEl = entry.querySelector('.EntryTitleLink, .entry-title-link, .entry__title, .ArticleTitle');
     const summaryEl = entry.querySelector('.EntrySummary, .entry__summary, .content, .entryContent');
     const link = titleEl ? titleEl.getAttribute('href') : null;

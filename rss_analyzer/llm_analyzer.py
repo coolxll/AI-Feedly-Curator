@@ -144,7 +144,9 @@ def summarize_single_article(text: str, profile_name: str = None) -> str:
         profile = profile_name or "analysis_profile"
 
         api_key = get_config("OPENAI_API_KEY", profile=profile)
-        base_url = get_config("OPENAI_BASE_URL", "https://api.openai.com/v1", profile=profile)
+        base_url = get_config(
+            "OPENAI_BASE_URL", "https://api.openai.com/v1", profile=profile
+        )
         model = get_config("OPENAI_MODEL", "gpt-3.5-turbo", profile=profile)
 
         client = OpenAI(
@@ -176,7 +178,7 @@ Output Format: Markdown.
             model=model,
             messages=[
                 {"role": "system", "content": prompt},
-                {"role": "user", "content": f"Article Content:\n\n{text}"}
+                {"role": "user", "content": f"Article Content:\n\n{text}"},
             ],
             temperature=0.5,
         )
@@ -189,7 +191,6 @@ Output Format: Markdown.
     except Exception as e:
         logger.error(f"Summarization failed: {e}")
         return f"Summarization failed: {str(e)}"
-
 
 
 def generate_overall_summary(analyzed_articles: list) -> str:

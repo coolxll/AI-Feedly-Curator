@@ -48,22 +48,24 @@ async function getSettings() {
   });
 }
 
-// Call OpenAI-compatible API directly
-async function callOpenAI(content, title) {
+// Call OpenAI-compatible API with streaming support
+async function callOpenAIStream(content, title, onChunk, onComplete, onError) {
   const settings = await getSettings();
 
   if (!settings.apiKey) {
-    return { error: 'API key not configured. Please set it in extension options.' };
+    onError('API key not configured. Please set it in extension options.');
+    return;
   }
 
   if (!content || content.length < 50) {
-    return { error: 'Article content is empty or too short to summarize.' };
+    onError('Article content is empty or too short to summarize.');
+    return;
   }
 
   const endpoint = settings.apiEndpoint.replace(/\/$/, '') + '/chat/completions';
 
   try {
-    console.log(`[Feedly AI] Calling OpenAI API with ${content.length} chars of content`);
+    console.log(`[Feedly AI] Calling OpenAI API (Stream) with ${content.length} chars`);
 
     const response = await fetch(endpoint, {
       method: 'POST',
@@ -77,27 +79,58 @@ async function callOpenAI(content, title) {
           { role: 'system', content: settings.summaryPrompt },
           { role: 'user', content: `文章标题: ${title}\n\n文章内容:\n\n${content}` }
         ],
-        temperature: 0.5
+        temperature: 0.5,
+        stream: true
       })
     });
 
     if (!response.ok) {
       const errorText = await response.text();
       console.error('OpenAI API error:', response.status, errorText);
-      return { error: `API error: ${response.status} - ${errorText.substring(0, 200)}` };
+      onError(`API error: ${response.status} - ${errorText.substring(0, 200)}`);
+      return;
     }
 
-    const data = await response.json();
-    const summary = data.choices?.[0]?.message?.content;
-
-    if (!summary) {
-      return { error: 'No content in API response' };
+    if (!response.body) {
+      onError('ReadableStream not supported in this browser.');
+      return;
     }
 
-    return { summary };
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder("utf-8");
+    let fullText = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      const chunk = decoder.decode(value, { stream: true });
+      const lines = chunk.split('\n');
+
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          const dataStr = line.slice(6);
+          if (dataStr === '[DONE]') continue;
+
+          try {
+            const data = JSON.parse(dataStr);
+            const content = data.choices?.[0]?.delta?.content;
+            if (content) {
+              fullText += content;
+              onChunk(fullText);
+            }
+          } catch (e) {
+            console.warn('Error parsing stream chunk', e);
+          }
+        }
+      }
+    }
+
+    onComplete(fullText);
+
   } catch (err) {
-    console.error('OpenAI API call failed:', err);
-    return { error: `Request failed: ${err.message}` };
+    console.error('OpenAI API stream failed:', err);
+    onError(`Request failed: ${err.message}`);
   }
 }
 
@@ -335,24 +368,53 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       }, 1500);
   } else {
       // If content is too short, try to fetch from URL first
-      (async () => {
-          let content = msg.content || '';
+    (async () => {
+        let content = msg.content || '';
 
-          if (content.length < 100 && msg.url) {
-              console.log('[Feedly AI] Content too short, fetching from URL...');
-              const fetched = await fetchArticleContent(msg.url);
-              if (fetched && fetched.length > content.length) {
-                  content = fetched;
-              }
-          }
+        if (content.length < 100 && msg.url) {
+            console.log('[Feedly AI] Content too short, fetching from URL...');
+            const fetched = await fetchArticleContent(msg.url);
+            if (fetched && fetched.length > content.length) {
+                content = fetched;
+            }
+        }
 
-          const result = await callOpenAI(content, msg.title);
-          console.log("OpenAI Summarize Response:", result);
-          sendResponse({
-              id: msg.id,
-              summary: result.summary || result.error
-          });
-      })();
+        // Use streaming API
+        await callOpenAIStream(
+            content,
+            msg.title,
+            (partialSummary) => {
+                // onChunk
+                chrome.runtime.sendMessage({
+                    type: 'update_sidepanel',
+                    title: msg.title,
+                    content: partialSummary,
+                    status: 'streaming'
+                }).catch(() => {}); // Ignore errors if side panel closed
+            },
+            (fullSummary) => {
+                // onComplete
+                console.log("Stream complete");
+                // Send one last update with 'complete' status if needed, or just let it stay
+                // The last chunk update already contained the full text.
+                sendResponse({
+                    id: msg.id,
+                    summary: fullSummary
+                });
+            },
+            (errorMsg) => {
+                // onError
+                console.error("Stream error:", errorMsg);
+                chrome.runtime.sendMessage({
+                    type: 'update_sidepanel',
+                    title: msg.title,
+                    content: errorMsg,
+                    status: 'error'
+                });
+                sendResponse({ error: errorMsg });
+            }
+        );
+    })();
   }
   return true;
 });

@@ -22,7 +22,7 @@ function updatePanel(title, content, status) {
     `;
   } else if (status === 'error') {
     contentEl.innerHTML = `<div class="error">${content}</div>`;
-  } else if (content) {
+  } else if (status === 'streaming' || content) {
     contentEl.innerHTML = `<div class="summary-content">${formatMarkdown(content)}</div>`;
   }
 }

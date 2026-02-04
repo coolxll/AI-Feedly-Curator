@@ -37,7 +37,11 @@ try:
 
     from rss_analyzer.cache import get_cached_score, save_cached_score
     from rss_analyzer.article_fetcher import fetch_article_content
-    from rss_analyzer.llm_analyzer import analyze_article_with_llm, summarize_single_article, analyze_articles_with_llm_batch
+    from rss_analyzer.llm_analyzer import (
+        analyze_article_with_llm,
+        summarize_single_article,
+        analyze_articles_with_llm_batch,
+    )
 
     logging.info("成功导入 rss_analyzer 模块")
 except Exception:
@@ -83,7 +87,9 @@ def _send_message(payload: dict):
         logging.exception("Send message exception")
 
 
-def _perform_analysis(article_id: str, title: str, url: str | None, summary: str, content: str | None) -> dict:
+def _perform_analysis(
+    article_id: str, title: str, url: str | None, summary: str, content: str | None
+) -> dict:
     """执行实时分析并保存缓存"""
     logging.info(f"Performing real-time analysis for {article_id}: {title}")
 
@@ -107,11 +113,7 @@ def _perform_analysis(article_id: str, title: str, url: str | None, summary: str
         save_cached_score(article_id, score, analysis)
         logging.info(f"Analysis complete. Score: {score}")
 
-        return {
-            "score": score,
-            "data": analysis,
-            "updated_at": None
-        }
+        return {"score": score, "data": analysis, "updated_at": None}
     except Exception as e:
         logging.error(f"Analysis failed: {e}")
         return None
@@ -143,15 +145,15 @@ def _handle_get_score(msg: dict) -> dict:
     if not cached:
         # 如果请求中包含了元数据，尝试实时计算
         if msg.get("title"):
-             result = _perform_analysis(
-                 article_id,
-                 msg.get("title"),
-                 msg.get("url"),
-                 msg.get("summary", ""),
-                 msg.get("content")
-             )
-             if result:
-                 cached = result
+            result = _perform_analysis(
+                article_id,
+                msg.get("title"),
+                msg.get("url"),
+                msg.get("summary", ""),
+                msg.get("content"),
+            )
+            if result:
+                cached = result
 
     logging.info(f"Cache result: {'Found' if cached else 'Not Found'}")
     return _normalize_item(article_id, cached)
@@ -188,9 +190,9 @@ def _handle_get_scores(msg: dict) -> dict:
 
         # 如果缓存未命中，且有标题，则标记为需要分析
         if not cached and item.get("title"):
-             missing_items.append(item)
+            missing_items.append(item)
         else:
-             results[article_id] = _normalize_item(article_id, cached)
+            results[article_id] = _normalize_item(article_id, cached)
 
     # 2. 决定批处理还是单篇处理
     missing_count = len(missing_items)
@@ -215,14 +217,15 @@ def _handle_get_scores(msg: dict) -> dict:
                     score = analyzed.get("score", 0)
                     save_cached_score(article_id, score, analyzed)
 
-                    results[article_id] = _normalize_item(article_id, {
-                        "score": score,
-                        "data": analyzed,
-                        "updated_at": None
-                    })
+                    results[article_id] = _normalize_item(
+                        article_id,
+                        {"score": score, "data": analyzed, "updated_at": None},
+                    )
                 logging.info("Batch analysis completed successfully")
             else:
-                logging.error("Batch analysis returned mismatching results, fallback to failed")
+                logging.error(
+                    "Batch analysis returned mismatching results, fallback to failed"
+                )
                 # 标记为失败，避免卡死
                 for item in missing_items:
                     article_id = item.get("id")
@@ -248,7 +251,7 @@ def _handle_get_scores(msg: dict) -> dict:
                 item.get("title"),
                 item.get("url"),
                 item.get("summary", ""),
-                item.get("content")
+                item.get("content"),
             )
 
             # 如果分析失败（返回None），analyzed就是None，_normalize_item会处理
@@ -269,7 +272,7 @@ def _handle_analyze_article(msg: dict) -> dict:
         msg.get("title", "Unknown"),
         msg.get("url"),
         msg.get("summary", ""),
-        msg.get("content")
+        msg.get("content"),
     )
 
     if result:
@@ -297,7 +300,7 @@ def _handle_summarize_article(msg: dict) -> dict:
             logging.info(f"Fetched {len(fetched)} chars for summary")
 
     if not final_content:
-         return {"error": "no_content", "message": "Could not retrieve article content"}
+        return {"error": "no_content", "message": "Could not retrieve article content"}
 
     summary = summarize_single_article(final_content)
 
@@ -313,10 +316,7 @@ def _handle_summarize_article(msg: dict) -> dict:
         save_cached_score(article_id, score, data)
         logging.info(f"Updated cache for {article_id} with new summary")
 
-    return {
-        "id": article_id,
-        "summary": summary
-    }
+    return {"id": article_id, "summary": summary}
 
 
 def _handle_health(_: dict) -> dict:
