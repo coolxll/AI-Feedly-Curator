@@ -16,6 +16,7 @@ Feedly 文章过滤器
 import argparse
 import logging
 import sys
+import os
 from dataclasses import dataclass
 from typing import Callable
 
@@ -29,9 +30,6 @@ from rss_analyzer.llm_analyzer import (
 from rss_analyzer.utils import is_newsflash
 from rss_analyzer.cache import get_cached_score, save_cached_score
 
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
-)
 logger = logging.getLogger(__name__)
 
 
@@ -326,8 +324,13 @@ def main():
 
     args = parser.parse_args()
 
+    # 优先使用 --debug，其次使用环境变量，最后默认 INFO
     if args.debug:
         setup_logging(True)
+    else:
+        env_level = os.environ.get("RSS_NATIVE_LOG_LEVEL", "INFO").upper()
+        is_debug = env_level == "DEBUG"
+        setup_logging(is_debug)
 
     # 默认使用 all 命令
     if not args.cmd:

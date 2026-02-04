@@ -76,7 +76,11 @@ def main():
     args = parser.parse_args()
 
     # 设置日志级别
-    debug_mode = args.debug or os.getenv("DEBUG", "").lower() in ("true", "1", "yes")
+    debug_mode = (
+        args.debug
+        or os.getenv("DEBUG", "").lower() in ("true", "1", "yes")
+        or os.getenv("RSS_NATIVE_LOG_LEVEL", "").upper() == "DEBUG"
+    )
     setup_logging(debug_mode)
 
     if debug_mode:

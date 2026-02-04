@@ -23,8 +23,11 @@ from rich.traceback import install as install_rich_traceback
 install_rich_traceback()
 
 # Re-configure logging to use RichHandler
+log_level_str = os.environ.get("RSS_NATIVE_LOG_LEVEL", "INFO").upper()
+log_level = getattr(logging, log_level_str, logging.INFO)
+
 logging.basicConfig(
-    level=logging.INFO,
+    level=log_level,
     format="%(message)s",
     datefmt="[%X]",
     handlers=[RichHandler(rich_tracebacks=True, markup=True, show_path=False)],

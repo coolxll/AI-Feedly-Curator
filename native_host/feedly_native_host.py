@@ -7,6 +7,7 @@ import traceback
 import logging
 from logging.handlers import TimedRotatingFileHandler
 
+
 def setup_native_logging():
     """配置 Native Host 的日志系统：按日轮转，降噪，支持环境变量覆盖"""
     # 1. 确定日志目录和文件
@@ -27,11 +28,7 @@ def setup_native_logging():
 
     # 3. 配置 Handler (按日轮转，保留 7 天)
     handler = TimedRotatingFileHandler(
-        log_file,
-        when="midnight",
-        interval=1,
-        backupCount=7,
-        encoding="utf-8"
+        log_file, when="midnight", interval=1, backupCount=7, encoding="utf-8"
     )
     formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
     handler.setFormatter(formatter)
@@ -50,6 +47,7 @@ def setup_native_logging():
     logging.getLogger("openai").setLevel(logging.WARNING)
 
     return log_file
+
 
 # 在最开始调用
 LOG_FILE = setup_native_logging()
