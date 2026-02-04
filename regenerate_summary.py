@@ -3,6 +3,7 @@
 重新生成总体摘要
 从 analyzed_articles.json 读取已分析的文章，重新生成总体摘要
 """
+
 import os
 from datetime import datetime
 
@@ -33,10 +34,10 @@ def generate_summary_from_articles(articles):
     latest_file = os.path.join("output", "summary_latest.md")
 
     print("\n正在保存摘要...")
-    with open(summary_file, 'w', encoding='utf-8') as f:
+    with open(summary_file, "w", encoding="utf-8") as f:
         f.write(overall_summary)
 
-    with open(latest_file, 'w', encoding='utf-8') as f:
+    with open(latest_file, "w", encoding="utf-8") as f:
         f.write(overall_summary)
 
     print("✓ 总体摘要已保存到:")
@@ -51,7 +52,7 @@ def main():
     setup_logging()
 
     print("正在加载已分析的文章...")
-    articles = load_articles('analyzed_articles.json')
+    articles = load_articles("analyzed_articles.json")
     print(f"已加载 {len(articles)} 篇文章")
 
     generate_summary_from_articles(articles)

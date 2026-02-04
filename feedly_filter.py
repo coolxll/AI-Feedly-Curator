@@ -22,20 +22,26 @@ from typing import Callable
 from rss_analyzer.config import PROJ_CONFIG, setup_logging
 from rss_analyzer.feedly_client import feedly_fetch_unread, feedly_mark_read
 from rss_analyzer.article_fetcher import fetch_article_content
-from rss_analyzer.llm_analyzer import analyze_article_with_llm, analyze_articles_with_llm_batch
+from rss_analyzer.llm_analyzer import (
+    analyze_article_with_llm,
+    analyze_articles_with_llm_batch,
+)
 from rss_analyzer.utils import is_newsflash
 from rss_analyzer.cache import get_cached_score, save_cached_score
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
+)
 logger = logging.getLogger(__name__)
 
 
 @dataclass
 class FilterResult:
     """过滤结果"""
-    matched: list      # 匹配的文章（将被标记为已读）
-    remaining: list    # 剩余文章（未匹配）
-    label: str         # 标签（用于日志）
+
+    matched: list  # 匹配的文章（将被标记为已读）
+    remaining: list  # 剩余文章（未匹配）
+    label: str  # 标签（用于日志）
 
 
 # 36kr Feed 源 ID
@@ -46,11 +52,12 @@ FEED_ID_36KR = "feed/http://www.36kr.com/feed"
 # Core Functions
 # ============================================================================
 
+
 def fetch_articles(limit: int, stream_id: str = None) -> list:
     """获取 Feedly 未读文章"""
     source_label = "36kr源" if stream_id == FEED_ID_36KR else "所有未读"
     logger.info(f"📥 从 [{source_label}] 获取未读文章 (limit={limit})...")
-    
+
     articles = feedly_fetch_unread(stream_id=stream_id, limit=limit) or []
     logger.info(f"✅ 获取到 {len(articles)} 篇")
     return articles
@@ -65,28 +72,30 @@ def mark_as_read(articles: list, label: str, dry_run: bool, mark_read: bool) -> 
         logger.info(f"跳过标记 {len(articles)} 篇{label}文章 (mark_read 关闭)")
         return True
 
-    ids = [a['id'] for a in articles if a.get('id')]
+    ids = [a["id"] for a in articles if a.get("id")]
 
     if dry_run:
         logger.info(f"[DRY RUN] 将标记 {len(ids)} 篇{label}文章:")
         for a in articles[:5]:
-            score = a.get('_score')
+            score = a.get("_score")
             prefix = f"[{score:.1f}] " if score else ""
             logger.info(f"  - {prefix}{a.get('title', '')[:50]}")
         if len(articles) > 5:
             logger.info(f"  ... 还有 {len(articles) - 5} 篇")
         return True
-    
+
     for i in range(0, len(ids), 500):
-        if not feedly_mark_read(ids[i:i+500]):
-            logger.error(f"标记失败: {i+1}-{i+500}")
+        if not feedly_mark_read(ids[i : i + 500]):
+            logger.error(f"标记失败: {i + 1}-{i + 500}")
             return False
-    
+
     logger.info(f"✅ 已标记 {len(ids)} 篇{label}文章")
     return True
 
 
-def run_filters(articles: list, filters: list[Callable], dry_run: bool, mark_read: bool) -> int:
+def run_filters(
+    articles: list, filters: list[Callable], dry_run: bool, mark_read: bool
+) -> int:
     """依次运行多个过滤器"""
     remaining = articles
     total_matched = 0
@@ -107,6 +116,7 @@ def run_filters(articles: list, filters: list[Callable], dry_run: bool, mark_rea
 # Filters
 # ============================================================================
 
+
 def newsflash_filter(articles: list) -> FilterResult:
     """快讯过滤器"""
     # 既然已经指定了源，可能大部分都是快讯，但为了保险起见，还是保留 is_newsflash 检查
@@ -117,7 +127,12 @@ def newsflash_filter(articles: list) -> FilterResult:
     return FilterResult(matched, remaining, "快讯")
 
 
-def low_score_filter(articles: list, threshold: float = 3.0, dry_run: bool = False, mark_read: bool = True) -> FilterResult:
+def low_score_filter(
+    articles: list,
+    threshold: float = 3.0,
+    dry_run: bool = False,
+    mark_read: bool = True,
+) -> FilterResult:
     """低分文章过滤器，调用 LLM 对文章进行评分并根据阈值过滤"""
     matched, remaining = [], []
     batch_scoring = PROJ_CONFIG.get("batch_scoring", False)
@@ -135,7 +150,7 @@ def low_score_filter(articles: list, threshold: float = 3.0, dry_run: bool = Fal
         for item, analysis in zip(batch_queue, batch_results):
             score = analysis.get("score", 0.0)
             # Save to Cache
-            save_cached_score(item["article"].get('id'), score, analysis)
+            save_cached_score(item["article"].get("id"), score, analysis)
 
             _handle_scored_article(
                 item["article"],
@@ -145,14 +160,14 @@ def low_score_filter(articles: list, threshold: float = 3.0, dry_run: bool = Fal
                 dry_run,
                 matched,
                 remaining,
-                mark_read
+                mark_read,
             )
         batch_queue = []
 
     for i, article in enumerate(articles, 1):
-        title = article.get('title', '')[:50]
+        title = article.get("title", "")[:50]
         prefix = f"[{i}/{len(articles)}]"
-        article_id = article.get('id')
+        article_id = article.get("id")
 
         # 1. Check Cache
         cached = get_cached_score(article_id)
@@ -161,7 +176,7 @@ def low_score_filter(articles: list, threshold: float = 3.0, dry_run: bool = Fal
             if batch_scoring and batch_queue:
                 flush_batch()
 
-            score = cached['score']
+            score = cached["score"]
             logger.info(f"{prefix} ♻️ 使用缓存评分: {title}")
             _handle_scored_article(
                 article,
@@ -171,18 +186,20 @@ def low_score_filter(articles: list, threshold: float = 3.0, dry_run: bool = Fal
                 dry_run,
                 matched,
                 remaining,
-                mark_read
+                mark_read,
             )
             continue
 
         logger.info(f"{prefix} 评分中: {title}...")
 
         if batch_scoring:
-            batch_queue.append({
-                "article": article,
-                "prefix": prefix,
-                "payload": _prepare_article_scoring(article)
-            })
+            batch_queue.append(
+                {
+                    "article": article,
+                    "prefix": prefix,
+                    "payload": _prepare_article_scoring(article),
+                }
+            )
             if len(batch_queue) >= batch_size:
                 flush_batch()
         else:
@@ -199,7 +216,7 @@ def low_score_filter(articles: list, threshold: float = 3.0, dry_run: bool = Fal
                 dry_run,
                 matched,
                 remaining,
-                mark_read
+                mark_read,
             )
 
     # 处理剩余的 batch
@@ -219,9 +236,9 @@ def _score_article(article: dict) -> tuple[float, dict]:
         result = analyze_article_with_llm(
             payload.get("title", ""),
             payload.get("summary", ""),
-            payload.get("content", "")
+            payload.get("content", ""),
         )
-        return result.get('score', 0.0), result
+        return result.get("score", 0.0), result
     except Exception as e:
         logger.debug(f"评分出错: {e}")
         return -1.0, {}
@@ -229,29 +246,33 @@ def _score_article(article: dict) -> tuple[float, dict]:
 
 def _prepare_article_scoring(article: dict) -> dict:
     """准备文章评分所需的 Payload"""
-    title, summary = article.get('title', ''), article.get('summary', '')
-    content = article.get('content', '')
+    title, summary = article.get("title", ""), article.get("summary", "")
+    content = article.get("content", "")
 
     if not (content and len(content) > 200):
         content = summary if len(summary) > 500 else _fetch_content(article) or summary
 
-    return {
-        "title": title,
-        "summary": summary,
-        "content": content
-    }
+    return {"title": title, "summary": summary, "content": content}
 
 
-def _handle_scored_article(article: dict, score: float, prefix: str, threshold: float, dry_run: bool,
-                           matched: list, remaining: list, mark_read: bool) -> None:
+def _handle_scored_article(
+    article: dict,
+    score: float,
+    prefix: str,
+    threshold: float,
+    dry_run: bool,
+    matched: list,
+    remaining: list,
+    mark_read: bool,
+) -> None:
     """处理评分后的文章，决定是标记已读还是保留"""
 
-    title_str = article.get('title', 'Unknown Title')
+    title_str = article.get("title", "Unknown Title")
     if score < 0:
         logger.info(f"{prefix} 结果: 跳过 (评分失败)")
         remaining.append(article)
     elif score <= threshold:
-        article_id = article.get('id')
+        article_id = article.get("id")
         if mark_read and article_id and not dry_run:
             feedly_mark_read([article_id])
             logger.info(f"{prefix} 结果: ❌标题: {title_str}")
@@ -259,10 +280,12 @@ def _handle_scored_article(article: dict, score: float, prefix: str, threshold: 
         else:
             logger.info(f"{prefix} 结果: ❌标题: {title_str}")
             if mark_read:
-                logger.info(f"{prefix} 结果: {score:.1f} 分 (低于阈值，[DRY RUN] 跳过标记)")
+                logger.info(
+                    f"{prefix} 结果: {score:.1f} 分 (低于阈值，[DRY RUN] 跳过标记)"
+                )
             else:
                 logger.info(f"{prefix} 结果: {score:.1f} 分 (低于阈值，mark_read 关闭)")
-        matched.append({**article, '_score': score})
+        matched.append({**article, "_score": score})
     else:
         logger.info(f"{prefix} 结果: ✅标题: {title_str}")
         logger.info(f"{prefix} 结果: {score:.1f} 分 (保留)")
@@ -271,7 +294,9 @@ def _handle_scored_article(article: dict, score: float, prefix: str, threshold: 
 
 def _fetch_content(article: dict) -> str:
     """抓取文章内容"""
-    link = article.get('canonicalUrl') or article.get('alternate', [{}])[0].get('href', '')
+    link = article.get("canonicalUrl") or article.get("alternate", [{}])[0].get(
+        "href", ""
+    )
     return fetch_article_content(link) if link else ""
 
 
@@ -279,40 +304,47 @@ def _fetch_content(article: dict) -> str:
 # CLI
 # ============================================================================
 
-def main():
-    parser = argparse.ArgumentParser(description='Feedly 文章过滤器')
-    parser.add_argument('--debug', action='store_true')
-    parser.add_argument('--limit', '-l', type=int, default=1000, help='获取文章数量')
-    parser.add_argument('--threshold', '-t', type=float, default=3.0, help='低分阈值')
-    parser.add_argument('--dry-run', '-n', action='store_true', help='模拟模式')
-    parser.add_argument('--stream-id', help='指定 Stream ID (Category/Feed)')
-    parser.add_argument('--mark-read', action='store_true', default=PROJ_CONFIG["mark_read"],
-                        help=f"是否标记已读 (default: {PROJ_CONFIG['mark_read']})")
 
-    sub = parser.add_subparsers(dest='cmd')
-    sub.add_parser('newsflash', help='过滤快讯')
-    sub.add_parser('low-score', help='过滤低分')
-    sub.add_parser('all', help='全量过滤')
-    
+def main():
+    parser = argparse.ArgumentParser(description="Feedly 文章过滤器")
+    parser.add_argument("--debug", action="store_true")
+    parser.add_argument("--limit", "-l", type=int, default=1000, help="获取文章数量")
+    parser.add_argument("--threshold", "-t", type=float, default=3.0, help="低分阈值")
+    parser.add_argument("--dry-run", "-n", action="store_true", help="模拟模式")
+    parser.add_argument("--stream-id", help="指定 Stream ID (Category/Feed)")
+    parser.add_argument(
+        "--mark-read",
+        action="store_true",
+        default=PROJ_CONFIG["mark_read"],
+        help=f"是否标记已读 (default: {PROJ_CONFIG['mark_read']})",
+    )
+
+    sub = parser.add_subparsers(dest="cmd")
+    sub.add_parser("newsflash", help="过滤快讯")
+    sub.add_parser("low-score", help="过滤低分")
+    sub.add_parser("all", help="全量过滤")
+
     args = parser.parse_args()
-    
+
     if args.debug:
         setup_logging(True)
-    
+
     # 默认使用 all 命令
     if not args.cmd:
-        args.cmd = 'all'
-    
+        args.cmd = "all"
+
     # 策略路由
-    if args.cmd == 'newsflash':
+    if args.cmd == "newsflash":
         # 专门从 36kr 源获取，如果指定了 stream_id 则优先使用
         target_stream = args.stream_id if args.stream_id else FEED_ID_36KR
         articles = fetch_articles(args.limit, stream_id=target_stream)
         filters = [newsflash_filter]
-    elif args.cmd == 'low-score':
+    elif args.cmd == "low-score":
         # 从全局获取，或指定 stream_id
         articles = fetch_articles(args.limit, stream_id=args.stream_id)
-        filters = [lambda a: low_score_filter(a, args.threshold, args.dry_run, args.mark_read)]
+        filters = [
+            lambda a: low_score_filter(a, args.threshold, args.dry_run, args.mark_read)
+        ]
     else:  # all
         # 全量模式逻辑：
         # 1. 先跑一遍快讯过滤（针对性清理）- 可选，或者直接由全局处理覆盖
@@ -326,13 +358,16 @@ def main():
         # 所以 all 模式维持原样（fetch global），但应用所有过滤器。
 
         articles = fetch_articles(args.limit, stream_id=args.stream_id)
-        filters = [newsflash_filter, lambda a: low_score_filter(a, args.threshold, args.dry_run, args.mark_read)]
+        filters = [
+            newsflash_filter,
+            lambda a: low_score_filter(a, args.threshold, args.dry_run, args.mark_read),
+        ]
 
     if not articles:
         return 0
-    
+
     return run_filters(articles, filters, args.dry_run, args.mark_read)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     sys.exit(main())

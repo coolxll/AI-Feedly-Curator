@@ -1,6 +1,7 @@
 """
 测试评分模块
 """
+
 import unittest
 from unittest.mock import patch, Mock
 
@@ -13,15 +14,15 @@ from rss_analyzer.scoring import (
 
 class TestScoring(unittest.TestCase):
     """评分模块测试"""
-    
+
     def test_build_scoring_prompt(self):
         """测试评分提示词构建"""
         prompt = build_scoring_prompt("测试标题", "测试摘要", "测试内容")
-        
+
         self.assertIn("判断文章类型", prompt)
         self.assertIn("负面特征", prompt)
         self.assertIn("测试标题", prompt)
-    
+
     def test_parse_score_with_red_flags(self):
         """测试包含负面特征的评分"""
         response = """{
@@ -37,9 +38,9 @@ class TestScoring(unittest.TestCase):
             },
             "comment": "虽然分高但是软文"
         }"""
-        
+
         result = parse_score_response(response)
-        
+
         # Soft Flag 会触发惩罚，但不应锁定为 1.0
         self.assertEqual(result["overall_score"], 4.5)
         # Verdict 应包含 red flag 信息
@@ -61,9 +62,9 @@ class TestScoring(unittest.TestCase):
             },
             "comment": "文章质量不错"
         }"""
-        
+
         result = parse_score_response(response)
-        
+
         self.assertEqual(result["relevance_score"], 4)
         self.assertTrue(result["overall_score"] > 0)
         self.assertEqual(result["verdict"], "值得阅读")
@@ -72,17 +73,20 @@ class TestScoring(unittest.TestCase):
     def test_parse_score_response_invalid(self):
         """测试解析无效响应"""
         result = parse_score_response("这不是JSON")
-        
+
         self.assertEqual(result["overall_score"], 0.0)
         self.assertEqual(result["verdict"], "解析错误")
 
-    @patch('rss_analyzer.scoring.OpenAI')
-    @patch('rss_analyzer.scoring.PROJ_CONFIG', {"analysis_profile": None, "scoring_persona": "", "scoring_weights": {}})
+    @patch("rss_analyzer.scoring.OpenAI")
+    @patch(
+        "rss_analyzer.scoring.PROJ_CONFIG",
+        {"analysis_profile": None, "scoring_persona": "", "scoring_weights": {}},
+    )
     def test_score_article_success(self, mock_openai_class):
         """测试成功评分"""
         mock_client = Mock()
         mock_openai_class.return_value = mock_client
-        
+
         mock_response = Mock()
         mock_choice = Mock()
         mock_message = Mock()
@@ -101,11 +105,11 @@ class TestScoring(unittest.TestCase):
         }"""
         mock_choice.message = mock_message
         mock_response.choices = [mock_choice]
-        
+
         mock_client.chat.completions.create.return_value = mock_response
-        
+
         result = score_article("标题", "摘要", "内容")
-        
+
         self.assertIn("值得阅读", result["verdict"])
         self.assertEqual(result["article_type"], "opinion")
 

@@ -3,11 +3,16 @@
 AI-Feedly-Curator TUI Runner
 Interactive menu for running Feedly filters.
 """
+
 import sys
 import logging
 import os
 from rss_analyzer.config import PROJ_CONFIG
-from rss_analyzer.feedly_client import feedly_get_categories, feedly_get_subscriptions, feedly_get_unread_counts
+from rss_analyzer.feedly_client import (
+    feedly_get_categories,
+    feedly_get_subscriptions,
+    feedly_get_unread_counts,
+)
 from rss_analyzer.utils import load_articles
 from rich.console import Console
 from rich.panel import Panel
@@ -23,7 +28,7 @@ logging.basicConfig(
     format="%(message)s",
     datefmt="[%X]",
     handlers=[RichHandler(rich_tracebacks=True, markup=True, show_path=False)],
-    force=True
+    force=True,
 )
 
 console = Console()
@@ -44,7 +49,7 @@ def _maybe_reexec_in_project_venv() -> None:
     script_dir = os.path.dirname(os.path.abspath(__file__))
     candidates = [
         os.path.join(script_dir, ".venv", "Scripts", "python.exe"),  # Windows
-        os.path.join(script_dir, ".venv", "bin", "python"),          # POSIX
+        os.path.join(script_dir, ".venv", "bin", "python"),  # POSIX
     ]
 
     current = os.path.abspath(sys.executable)
@@ -54,6 +59,7 @@ def _maybe_reexec_in_project_venv() -> None:
             env["RSS_OPML_VENV_REEXEC"] = "1"
             os.execve(venv_py, [venv_py] + sys.argv, env)
 
+
 def get_input(prompt_text, default=None):
     """Fallback input helper"""
     p = f"{prompt_text} "
@@ -61,17 +67,22 @@ def get_input(prompt_text, default=None):
         p += f"[{default}]: "
     else:
         p += ": "
-    
+
     val = input(p).strip()
     if not val and default:
         return default
     return val
 
+
 def simple_menu():
     """Fallback menu using standard input"""
     console.clear()
-    console.print(Panel.fit("Feedly AI Filter (Simple Mode)", style="bold cyan", subtitle="Basic Runner"))
-    
+    console.print(
+        Panel.fit(
+            "Feedly AI Filter (Simple Mode)", style="bold cyan", subtitle="Basic Runner"
+        )
+    )
+
     while True:
         console.print("\n[bold]Main Menu:[/bold]")
         console.print("1. Run Filter")
@@ -96,18 +107,19 @@ def simple_menu():
         else:
             console.print("[red]Invalid choice[/red]")
 
+
 def simple_analyze_flow():
     """Fallback analyze flow"""
     console.print("\n[bold]Analyze Articles Configuration:[/bold]")
-    
+
     limit_str = get_input("Article Limit", default="100")
     try:
         limit = int(limit_str)
     except ValueError:
         limit = 100
-    
+
     refresh_str = get_input("Refresh from Feedly? (y/n)", default="y")
-    refresh = refresh_str.lower().startswith('y')
+    refresh = refresh_str.lower().startswith("y")
 
     stream_id = None
     if refresh:
@@ -116,8 +128,10 @@ def simple_analyze_flow():
             stream_id = sid
 
     default_mark = "y" if PROJ_CONFIG.get("mark_read") else "n"
-    mark_read_str = get_input("Mark as read after analysis? (y/n)", default=default_mark)
-    mark_read = mark_read_str.lower().startswith('y')
+    mark_read_str = get_input(
+        "Mark as read after analysis? (y/n)", default=default_mark
+    )
+    mark_read = mark_read_str.lower().startswith("y")
 
     threads_str = get_input("Number of threads (Default: 3)", default="3")
     try:
@@ -126,6 +140,7 @@ def simple_analyze_flow():
         threads = 3
 
     execute_analyze(limit, refresh, mark_read, stream_id, threads)
+
 
 def simple_export_flow():
     """Fallback export flow"""
@@ -141,10 +156,12 @@ def simple_export_flow():
         limit = 100
 
     from datetime import datetime
+
     default_filename = f"export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
     filename = get_input("Output Filename", default=default_filename)
 
     execute_export(limit, stream_id, filename)
+
 
 def run_export_flow():
     """Interactive export flow"""
@@ -167,40 +184,49 @@ def run_export_flow():
 
     execute_export(limit, stream_id, filename, stream_label)
 
+
 def execute_export(limit, stream_id, filename, stream_label=None):
-    display_stream = stream_label if stream_label else (stream_id or 'Global (All)')
-    console.print(Panel(
-        f"Exporting Articles\n"
-        f"Limit: {limit}\n"
-        f"Stream: {display_stream}\n"
-        f"Output: {filename}",
-        title="Export Configuration",
-        border_style="blue"
-    ))
+    display_stream = stream_label if stream_label else (stream_id or "Global (All)")
+    console.print(
+        Panel(
+            f"Exporting Articles\n"
+            f"Limit: {limit}\n"
+            f"Stream: {display_stream}\n"
+            f"Output: {filename}",
+            title="Export Configuration",
+            border_style="blue",
+        )
+    )
 
     try:
         import sys
+
         old_argv = sys.argv
 
-        sys.argv = ['article_analyzer.py', '--limit', str(limit), '--export', filename]
+        sys.argv = ["article_analyzer.py", "--limit", str(limit), "--export", filename]
         if stream_id:
-            sys.argv.append('--stream-id')
+            sys.argv.append("--stream-id")
             sys.argv.append(stream_id)
 
         try:
             try:
                 import article_analyzer
             except Exception as e:
-                console.print(Panel(_import_error_hint('article_analyzer', e), style="red"))
+                console.print(
+                    Panel(_import_error_hint("article_analyzer", e), style="red")
+                )
                 return
 
             article_analyzer.main()
-            console.print(Panel(f"Export Complete! File saved to {filename}", style="bold green"))
+            console.print(
+                Panel(f"Export Complete! File saved to {filename}", style="bold green")
+            )
         finally:
             sys.argv = old_argv
     except Exception:
         logger.exception("Error exporting")
         console.print("[red]Export failed.[/red]")
+
 
 def simple_filter_flow():
     """Fallback filter flow"""
@@ -209,9 +235,9 @@ def simple_filter_flow():
     console.print("2. Newsflash Only")
     console.print("3. Low Score Only")
     console.print("4. Back")
-    
+
     choice = get_input("Select mode")
-    
+
     mode = "all"
     if choice == "1":
         mode = "all"
@@ -239,12 +265,13 @@ def simple_filter_flow():
             threshold = 3.0
 
     dr_str = get_input("Dry Run? (y/n)", default="n")
-    dry_run = dr_str.lower().startswith('y')
-    
+    dry_run = dr_str.lower().startswith("y")
+
     mark_read_str = get_input("Mark as read? (y/n)", default="n")
-    mark_read = mark_read_str.lower().startswith('y')
+    mark_read = mark_read_str.lower().startswith("y")
 
     execute_filter(mode, limit, threshold, dry_run, mark_read=mark_read)
+
 
 def select_stream_interactive():
     """Interactive stream selector"""
@@ -259,13 +286,17 @@ def select_stream_interactive():
 
     if not categories or not subscriptions or not counts_data:
         console.print("[red]Failed to fetch complete directory info.[/red]")
-        if questionary.confirm("Continue with default Global Stream?", default=True).ask():
+        if questionary.confirm(
+            "Continue with default Global Stream?", default=True
+        ).ask():
             return None, "Global (Default)"
         return None, None
 
     # Map counts
     # API returns: {"unreadcounts": [{"id": "...", "count": 123, "updated": ...}]}
-    count_map = {item['id']: item['count'] for item in counts_data.get('unreadcounts', [])}
+    count_map = {
+        item["id"]: item["count"] for item in counts_data.get("unreadcounts", [])
+    }
 
     # Create ID to Label mapping for return value
     id_to_label = {}
@@ -277,7 +308,7 @@ def select_stream_interactive():
     # But usually one of the unreadcounts entries is for global.all
     global_count = 0
     for cid, count in count_map.items():
-        if 'global.all' in cid:
+        if "global.all" in cid:
             global_count = count
             break
 
@@ -288,8 +319,8 @@ def select_stream_interactive():
     # 2. Categories
     cat_choices = []
     for cat in categories:
-        cid = cat['id']
-        label = cat['label']
+        cid = cat["id"]
+        label = cat["label"]
         count = count_map.get(cid, 0)
         if count > 0:
             display_label = f"📁 Category: {label}"
@@ -305,8 +336,8 @@ def select_stream_interactive():
     # 3. Feeds (Top 20 by unread count)
     feed_choices = []
     for sub in subscriptions:
-        fid = sub['id']
-        title = sub['title']
+        fid = sub["id"]
+        title = sub["title"]
         count = count_map.get(fid, 0)
         if count > 0:
             display_label = f"📰 Feed: {title}"
@@ -320,7 +351,7 @@ def select_stream_interactive():
         choices.append(questionary.Separator("--- Feeds ---"))
 
     for i, (count, label, fid) in enumerate(feed_choices):
-        if i >= 50: # Limit to top 50 to avoid clutter
+        if i >= 50:  # Limit to top 50 to avoid clutter
             break
         choices.append(questionary.Choice(f"{label} ({count} unread)", value=fid))
 
@@ -330,14 +361,16 @@ def select_stream_interactive():
     stream_id = questionary.select(
         "Select Stream to Process:",
         choices=choices,
-        style=questionary.Style([
-            ('qmark', 'fg:cyan bold'),
-            ('question', 'fg:cyan bold'),
-            ('answer', 'fg:green bold'),
-            ('pointer', 'fg:cyan bold'),
-            ('highlighted', 'fg:cyan bold'),
-            ('selected', 'fg:green bold'),
-        ])
+        style=questionary.Style(
+            [
+                ("qmark", "fg:cyan bold"),
+                ("question", "fg:cyan bold"),
+                ("answer", "fg:green bold"),
+                ("pointer", "fg:cyan bold"),
+                ("highlighted", "fg:cyan bold"),
+                ("selected", "fg:green bold"),
+            ]
+        ),
     ).ask()
 
     stream_label = None
@@ -364,20 +397,20 @@ def resolve_stream_feed_titles(stream_id, categories=None, subscriptions=None):
     if not categories or not subscriptions:
         return None
 
-    category_ids = {cat.get('id') for cat in categories}
+    category_ids = {cat.get("id") for cat in categories}
     if stream_id in category_ids:
         matched_titles = []
         for sub in subscriptions:
-            sub_categories = sub.get('categories', [])
-            if any(cat.get('id') == stream_id for cat in sub_categories):
-                title = sub.get('title')
+            sub_categories = sub.get("categories", [])
+            if any(cat.get("id") == stream_id for cat in sub_categories):
+                title = sub.get("title")
                 if title:
                     matched_titles.append(title)
         return matched_titles
 
     for sub in subscriptions:
-        if sub.get('id') == stream_id:
-            title = sub.get('title')
+        if sub.get("id") == stream_id:
+            title = sub.get("title")
             return [title] if title else []
 
     return None
@@ -390,7 +423,7 @@ def filter_articles_by_titles(articles, titles):
         return []
 
     title_set = set(titles)
-    return [a for a in articles if a.get('origin') in title_set]
+    return [a for a in articles if a.get("origin") in title_set]
 
 
 def _import_error_hint(modname: str, err: Exception) -> str:
@@ -406,11 +439,11 @@ def _import_error_hint(modname: str, err: Exception) -> str:
         "  python -m pip install -U pip\n"
         "  python -m pip install -r requirements.txt\n\n"
         "If you use langchain-openai, pin OpenAI SDK to 1.x:\n"
-        "  python -m pip install \"openai>=1.86.0,<2.0.0\"\n\n"
+        '  python -m pip install "openai>=1.86.0,<2.0.0"\n\n'
         "Diagnostics to paste:\n"
         "  python -V\n"
-        "  python -c \"import platform; print(platform.architecture()); print(platform.python_version())\"\n"
-        "  python -c \"import sys; print(sys.executable)\"\n"
+        '  python -c "import platform; print(platform.architecture()); print(platform.python_version())"\n'
+        '  python -c "import sys; print(sys.executable)"\n'
         "  python -m pip -V\n"
         "  python -m pip show pydantic-core pydantic openai jiter langchain-openai\n"
     )
@@ -443,15 +476,20 @@ def main_menu():
     """Fancy menu using questionary"""
     try:
         import questionary
+
         # Test if we can access the prompt session (catch NoConsoleScreenBufferError)
-        import prompt_toolkit # noqa: F401
+        import prompt_toolkit  # noqa: F401
     except ImportError:
         simple_menu()
         return
 
     console.clear()
-    console.print(Panel.fit("Feedly AI Filter TUI", style="bold cyan", subtitle="Interactive Runner"))
-    
+    console.print(
+        Panel.fit(
+            "Feedly AI Filter TUI", style="bold cyan", subtitle="Interactive Runner"
+        )
+    )
+
     while True:
         action = questionary.select(
             "What would you like to do?",
@@ -460,18 +498,20 @@ def main_menu():
                 questionary.Choice("Analyze Articles", value="analyze"),
                 questionary.Choice("Regenerate Summary", value="summary"),
                 questionary.Choice("Export Articles", value="export"),
-                questionary.Choice("Exit", value="exit")
+                questionary.Choice("Exit", value="exit"),
             ],
-            style=questionary.Style([
-                ('qmark', 'fg:cyan bold'),
-                ('question', 'fg:cyan bold'),
-                ('answer', 'fg:green bold'),
-                ('pointer', 'fg:cyan bold'),
-                ('highlighted', 'fg:cyan bold'),
-                ('selected', 'fg:green bold'),
-            ])
+            style=questionary.Style(
+                [
+                    ("qmark", "fg:cyan bold"),
+                    ("question", "fg:cyan bold"),
+                    ("answer", "fg:green bold"),
+                    ("pointer", "fg:cyan bold"),
+                    ("highlighted", "fg:cyan bold"),
+                    ("selected", "fg:green bold"),
+                ]
+            ),
         ).ask()
-        
+
         if action == "exit":
             console.print("[cyan]Goodbye![/cyan]")
             sys.exit()
@@ -479,22 +519,47 @@ def main_menu():
             run_filter_flow()
             input("\nPress Enter to return to menu...")
             console.clear()
-            console.print(Panel.fit("Feedly AI Filter TUI", style="bold cyan", subtitle="Interactive Runner"))
+            console.print(
+                Panel.fit(
+                    "Feedly AI Filter TUI",
+                    style="bold cyan",
+                    subtitle="Interactive Runner",
+                )
+            )
         elif action == "analyze":
             run_analyze_flow()
             input("\nPress Enter to return to menu...")
             console.clear()
-            console.print(Panel.fit("Feedly AI Filter TUI", style="bold cyan", subtitle="Interactive Runner"))
+            console.print(
+                Panel.fit(
+                    "Feedly AI Filter TUI",
+                    style="bold cyan",
+                    subtitle="Interactive Runner",
+                )
+            )
         elif action == "summary":
             run_summary_flow()
             input("\nPress Enter to return to menu...")
             console.clear()
-            console.print(Panel.fit("Feedly AI Filter TUI", style="bold cyan", subtitle="Interactive Runner"))
+            console.print(
+                Panel.fit(
+                    "Feedly AI Filter TUI",
+                    style="bold cyan",
+                    subtitle="Interactive Runner",
+                )
+            )
         elif action == "export":
             run_export_flow()
             input("\nPress Enter to return to menu...")
             console.clear()
-            console.print(Panel.fit("Feedly AI Filter TUI", style="bold cyan", subtitle="Interactive Runner"))
+            console.print(
+                Panel.fit(
+                    "Feedly AI Filter TUI",
+                    style="bold cyan",
+                    subtitle="Interactive Runner",
+                )
+            )
+
 
 def run_summary_flow():
     try:
@@ -505,7 +570,9 @@ def run_summary_flow():
             try:
                 import regenerate_summary
             except Exception as e:
-                console.print(Panel(_import_error_hint('regenerate_summary', e), style="red"))
+                console.print(
+                    Panel(_import_error_hint("regenerate_summary", e), style="red")
+                )
                 return
 
             regenerate_summary.main()
@@ -519,9 +586,11 @@ def run_summary_flow():
         "Summary Mode:",
         choices=[
             questionary.Choice("Summarize local analyzed articles", value="local"),
-            questionary.Choice("Refresh from Feedly (analyze & summarize)", value="refresh"),
-            questionary.Choice("Back", value="back")
-        ]
+            questionary.Choice(
+                "Refresh from Feedly (analyze & summarize)", value="refresh"
+            ),
+            questionary.Choice("Back", value="back"),
+        ],
     ).ask()
 
     if mode == "back":
@@ -535,13 +604,15 @@ def run_summary_flow():
         console.print(Panel("Summarizing Local Articles...", style="bold blue"))
         try:
             console.print("[dim]Loading analyzed_articles.json...[/dim]")
-            articles = load_articles('analyzed_articles.json')
+            articles = load_articles("analyzed_articles.json")
 
             if stream_id:
                 console.print("[dim]Resolving selected stream...[/dim]")
                 titles = resolve_stream_feed_titles(stream_id)
                 if titles is None:
-                    console.print("[yellow]Unable to resolve stream to feeds. Using all local articles.[/yellow]")
+                    console.print(
+                        "[yellow]Unable to resolve stream to feeds. Using all local articles.[/yellow]"
+                    )
                 articles = filter_articles_by_titles(articles, titles)
 
             if not articles:
@@ -551,14 +622,20 @@ def run_summary_flow():
             try:
                 import regenerate_summary
             except Exception as e:
-                console.print(Panel(_import_error_hint('regenerate_summary', e), style="red"))
+                console.print(
+                    Panel(_import_error_hint("regenerate_summary", e), style="red")
+                )
                 return
 
-            summary_file, latest_file = regenerate_summary.generate_summary_from_articles(articles)
-            console.print(Panel(
-                f"Summary Generation Complete!\n- {summary_file}\n- {latest_file}",
-                style="bold green"
-            ))
+            summary_file, latest_file = (
+                regenerate_summary.generate_summary_from_articles(articles)
+            )
+            console.print(
+                Panel(
+                    f"Summary Generation Complete!\n- {summary_file}\n- {latest_file}",
+                    style="bold green",
+                )
+            )
         except Exception:
             logger.exception("Error generating summary")
             console.print("[red]Failed to generate summary.[/red]")
@@ -572,9 +649,12 @@ def run_summary_flow():
         console.print("[red]Invalid limit, using default 100[/red]")
         limit = 100
 
-    mark_read = questionary.confirm("Mark as read after analysis?", default=PROJ_CONFIG.get("mark_read", False)).ask()
+    mark_read = questionary.confirm(
+        "Mark as read after analysis?", default=PROJ_CONFIG.get("mark_read", False)
+    ).ask()
 
     execute_analyze(limit, True, mark_read, stream_id, 3, stream_label)
+
 
 def run_analyze_flow():
     """Interactive analyze flow using questionary"""
@@ -594,11 +674,15 @@ def run_analyze_flow():
     stream_label = None
     if refresh:
         # Only ask for stream if we are refreshing
-        use_stream = questionary.confirm("Select specific Category/Feed?", default=False).ask()
+        use_stream = questionary.confirm(
+            "Select specific Category/Feed?", default=False
+        ).ask()
         if use_stream:
             stream_id, stream_label = select_stream_interactive()
 
-    mark_read = questionary.confirm("Mark as read after analysis?", default=PROJ_CONFIG.get("mark_read", False)).ask()
+    mark_read = questionary.confirm(
+        "Mark as read after analysis?", default=PROJ_CONFIG.get("mark_read", False)
+    ).ask()
 
     threads_str = questionary.text("Number of threads:", default="3").ask()
     try:
@@ -609,35 +693,41 @@ def run_analyze_flow():
 
     execute_analyze(limit, refresh, mark_read, stream_id, threads, stream_label)
 
-def execute_analyze(limit, refresh, mark_read, stream_id=None, threads=3, stream_label=None):
+
+def execute_analyze(
+    limit, refresh, mark_read, stream_id=None, threads=3, stream_label=None
+):
     """Shared analyze execution logic"""
-    display_stream = stream_label if stream_label else (stream_id or 'Global (All)')
-    console.print(Panel(
-        f"Analyzing Articles\n"
-        f"Limit: {limit}\n"
-        f"Refresh: {refresh}\n"
-        f"Stream: {display_stream}\n"
-        f"Mark Read: {mark_read}\n"
-        f"Threads: {threads}",
-        title="Configuration",
-        border_style="blue"
-    ))
+    display_stream = stream_label if stream_label else (stream_id or "Global (All)")
+    console.print(
+        Panel(
+            f"Analyzing Articles\n"
+            f"Limit: {limit}\n"
+            f"Refresh: {refresh}\n"
+            f"Stream: {display_stream}\n"
+            f"Mark Read: {mark_read}\n"
+            f"Threads: {threads}",
+            title="Configuration",
+            border_style="blue",
+        )
+    )
 
     try:
         # Build command line arguments for article_analyzer
         import sys
+
         old_argv = sys.argv
 
-        sys.argv = ['article_analyzer.py', '--limit', str(limit)]
+        sys.argv = ["article_analyzer.py", "--limit", str(limit)]
         if refresh:
-            sys.argv.append('--refresh')
+            sys.argv.append("--refresh")
         if mark_read:
-            sys.argv.append('--mark-read')
+            sys.argv.append("--mark-read")
         if stream_id:
-            sys.argv.append('--stream-id')
+            sys.argv.append("--stream-id")
             sys.argv.append(stream_id)
         if threads:
-            sys.argv.append('--threads')
+            sys.argv.append("--threads")
             sys.argv.append(str(threads))
 
         try:
@@ -645,7 +735,9 @@ def execute_analyze(limit, refresh, mark_read, stream_id=None, threads=3, stream
             try:
                 import article_analyzer
             except Exception as e:
-                console.print(Panel(_import_error_hint('article_analyzer', e), style="red"))
+                console.print(
+                    Panel(_import_error_hint("article_analyzer", e), style="red")
+                )
                 return
 
             article_analyzer.main()
@@ -653,26 +745,31 @@ def execute_analyze(limit, refresh, mark_read, stream_id=None, threads=3, stream
         finally:
             # Restore sys.argv
             sys.argv = old_argv
-        
+
     except KeyboardInterrupt:
         console.print("\n[red]Operation cancelled by user.[/red]")
     except Exception:
         logger.exception("An error occurred during analysis")
         console.print("[red]An error occurred. Check logs above.[/red]")
 
-def execute_filter(mode, limit, threshold, dry_run, mark_read, stream_id=None, stream_label=None):
+
+def execute_filter(
+    mode, limit, threshold, dry_run, mark_read, stream_id=None, stream_label=None
+):
     """Shared execution logic"""
-    display_stream = stream_label if stream_label else (stream_id or 'Global (All)')
-    console.print(Panel(
-        f"Running Mode: [bold]{mode}[/bold]\n"
-        f"Limit: {limit}\n"
-        f"Threshold: {threshold}\n"
-        f"Stream: {display_stream}\n"
-        f"Dry Run: {dry_run}\n"
-        f"Mark Read: {mark_read}",
-        title="Configuration",
-        border_style="blue"
-    ))
+    display_stream = stream_label if stream_label else (stream_id or "Global (All)")
+    console.print(
+        Panel(
+            f"Running Mode: [bold]{mode}[/bold]\n"
+            f"Limit: {limit}\n"
+            f"Threshold: {threshold}\n"
+            f"Stream: {display_stream}\n"
+            f"Dry Run: {dry_run}\n"
+            f"Mark Read: {mark_read}",
+            title="Configuration",
+            border_style="blue",
+        )
+    )
 
     try:
         filters = []
@@ -684,24 +781,30 @@ def execute_filter(mode, limit, threshold, dry_run, mark_read, stream_id=None, s
         try:
             import feedly_filter
         except Exception as e:
-            console.print(Panel(_import_error_hint('feedly_filter', e), style="red"))
+            console.print(Panel(_import_error_hint("feedly_filter", e), style="red"))
             return
 
-        if mode == 'newsflash':
+        if mode == "newsflash":
             # For newsflash, usually we target 36kr, but if user provided a stream, use that
             if not target_stream:
                 target_stream = feedly_filter.FEED_ID_36KR
 
             articles = feedly_filter.fetch_articles(limit, stream_id=target_stream)
             filters = [feedly_filter.newsflash_filter]
-        elif mode == 'low-score':
+        elif mode == "low-score":
             articles = feedly_filter.fetch_articles(limit, stream_id=target_stream)
-            filters = [lambda a: feedly_filter.low_score_filter(a, threshold, dry_run, mark_read)]
+            filters = [
+                lambda a: feedly_filter.low_score_filter(
+                    a, threshold, dry_run, mark_read
+                )
+            ]
         else:  # all
             articles = feedly_filter.fetch_articles(limit, stream_id=target_stream)
             filters = [
                 feedly_filter.newsflash_filter,
-                lambda a: feedly_filter.low_score_filter(a, threshold, dry_run, mark_read)
+                lambda a: feedly_filter.low_score_filter(
+                    a, threshold, dry_run, mark_read
+                ),
             ]
 
         if not articles:
@@ -710,15 +813,17 @@ def execute_filter(mode, limit, threshold, dry_run, mark_read, stream_id=None, s
 
         feedly_filter.run_filters(articles, filters, dry_run, mark_read)
         console.print(Panel("Analysis Complete!", style="bold green"))
-        
+
     except KeyboardInterrupt:
         console.print("\n[red]Operation cancelled by user.[/red]")
     except Exception:
         logger.exception("An error occurred during execution")
         console.print("[red]An error occurred. Check logs above.[/red]")
 
+
 def run_filter_flow():
     import questionary
+
     # 1. Select Mode
     mode = questionary.select(
         "Select Filter Mode:",
@@ -726,10 +831,10 @@ def run_filter_flow():
             questionary.Choice("All Filters (Newsflash + Low Score)", value="all"),
             questionary.Choice("Newsflash Only (36kr)", value="newsflash"),
             questionary.Choice("Low Score Only (AI Scoring)", value="low-score"),
-            questionary.Choice("Back", value="back")
-        ]
+            questionary.Choice("Back", value="back"),
+        ],
     ).ask()
-    
+
     if mode == "back":
         return
 
@@ -750,19 +855,26 @@ def run_filter_flow():
             console.print("[red]Invalid threshold, using default 3.0[/red]")
             threshold = 3.0
 
-    dry_run = questionary.confirm("Dry Run? (Simulate only, no changes)", default=False).ask()
+    dry_run = questionary.confirm(
+        "Dry Run? (Simulate only, no changes)", default=False
+    ).ask()
 
     # 4. Stream Selection
     stream_id = None
     stream_label = None
-    use_stream = questionary.confirm("Select specific Category/Feed?", default=False).ask()
+    use_stream = questionary.confirm(
+        "Select specific Category/Feed?", default=False
+    ).ask()
     if use_stream:
         stream_id, stream_label = select_stream_interactive()
 
     # 3. Execution
-    mark_read = questionary.confirm("Mark as read after filter?", default=PROJ_CONFIG.get("mark_read", False)).ask()
+    mark_read = questionary.confirm(
+        "Mark as read after filter?", default=PROJ_CONFIG.get("mark_read", False)
+    ).ask()
 
     execute_filter(mode, limit, threshold, dry_run, mark_read, stream_id, stream_label)
+
 
 if __name__ == "__main__":
     # Auto-use project venv if present (so launching a fresh terminal is fine).
@@ -778,7 +890,9 @@ if __name__ == "__main__":
     except Exception as e:
         # Fallback for NoConsoleScreenBufferError or other TUI init failures
         if "NoConsole" in str(e) or "console" in str(e).lower():
-            console.print("[yellow]Interactive console not detected. Switching to simple mode...[/yellow]")
+            console.print(
+                "[yellow]Interactive console not detected. Switching to simple mode...[/yellow]"
+            )
             simple_menu()
         else:
             raise e

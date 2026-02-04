@@ -2,6 +2,7 @@
 文章评分模块
 基于多维度评估文章的阅读价值
 """
+
 import json
 import re
 import time
@@ -23,19 +24,26 @@ SCORING_DIMENSIONS = {
     "informativeness_accuracy": {"name": "信息量与准确性"},
     "depth_opinion": {"name": "深度与观点"},
     "readability": {"name": "可读性"},
-    "non_redundancy": {"name": "原创性/水分度"}
+    "non_redundancy": {"name": "原创性/水分度"},
 }
 
 # 动态权重配置
-DEFAULT_WEIGHTS = PROJ_CONFIG.get("scoring_weights", {}).get("default", {
-    "relevance": 2, "informativeness_accuracy": 2, "depth_opinion": 2, "readability": 2, "non_redundancy": 1
-})
+DEFAULT_WEIGHTS = PROJ_CONFIG.get("scoring_weights", {}).get(
+    "default",
+    {
+        "relevance": 2,
+        "informativeness_accuracy": 2,
+        "depth_opinion": 2,
+        "readability": 2,
+        "non_redundancy": 1,
+    },
+)
 
 # 负面清单配置
 RED_FLAGS = [
     "pure_promotion",  # 纯推广/软文 (Soft)
-    "clickbait",       # 标题党 (Soft)
-    "ai_generated"     # AI 生成感过重/逻辑混乱 (Hard)
+    "clickbait",  # 标题党 (Soft)
+    "ai_generated",  # AI 生成感过重/逻辑混乱 (Hard)
 ]
 
 HARD_RED_FLAGS = {"ai_generated"}
@@ -44,14 +52,16 @@ HARD_RED_FLAGS = {"ai_generated"}
 def _build_content_snippet(content: str) -> str:
     """智能截断正文，保留头尾关键信息。"""
     if len(content) > 10000:
-        return content[:6000] + "\n\n...[内容过长，中间部分省略]...\n\n" + content[-3000:]
+        return (
+            content[:6000] + "\n\n...[内容过长，中间部分省略]...\n\n" + content[-3000:]
+        )
     return content
 
 
 def build_scoring_prompt(title: str, summary: str, content: str) -> str:
     """构建结构化评分提示词 (含思维链 & 智能截断)"""
     persona = PROJ_CONFIG.get("scoring_persona", "")
-    
+
     # 智能截断：保留头部和尾部，中间截断
     content_snippet = _build_content_snippet(content)
 
@@ -140,7 +150,7 @@ def build_scoring_prompt(title: str, summary: str, content: str) -> str:
 ---
 文章信息：
 标题：{title}
-摘要：{summary[:200] if summary else '无'}
+摘要：{summary[:200] if summary else "无"}
 正文：
 {content_snippet}
 """
@@ -202,10 +212,12 @@ def build_batch_scoring_prompt(articles: list[dict]) -> str:
 """
 
 
-def calculate_weighted_score(scores: Dict[str, int], article_type: str, red_flags: list) -> float:
+def calculate_weighted_score(
+    scores: Dict[str, int], article_type: str, red_flags: list
+) -> float:
     """
     计算加权总分 (动态权重 + 相关性熔断 + 负面惩罚)
-    
+
     新算法特点:
     1. 使用百分比权重（总和为1.0），不同类型文章权重不同
     2. 相关性熔断机制：如果相关性过低，一票否决
@@ -214,20 +226,20 @@ def calculate_weighted_score(scores: Dict[str, int], article_type: str, red_flag
     # 1. 获取权重配置（现在是百分比形式）
     weights_config = PROJ_CONFIG.get("scoring_weights", {})
     weights = weights_config.get(article_type, weights_config.get("default", {}))
-    
+
     # 2. 计算加权分（百分比权重，总和为1.0）
     weighted_score = 0.0
     for key, score in scores.items():
         w = weights.get(key, 0.2)  # 默认20%权重
         weighted_score += score * w
         logger.debug(f"  {key}: {score} × {w} = {score * w}")
-    
+
     logger.debug(f"基础加权分: {weighted_score:.2f}")
-    
+
     # 3. 相关性熔断机制（一票否决）
     relevance_threshold = PROJ_CONFIG.get("relevance_threshold", 2.5)
     relevance_score = scores.get("relevance", 5)
-    
+
     if relevance_score < relevance_threshold:
         original_score = weighted_score
         weighted_score = min(weighted_score, relevance_threshold)
@@ -235,20 +247,22 @@ def calculate_weighted_score(scores: Dict[str, int], article_type: str, red_flag
             f"⚠️ 相关性熔断触发: relevance={relevance_score} < {relevance_threshold}, "
             f"总分限制 {original_score:.1f} → {weighted_score:.1f}"
         )
-    
+
     # 4. 负面清单处理
     if red_flags:
         # Hard Flags: 直接打入冷宫（最高1.0分）
         if any(flag in HARD_RED_FLAGS for flag in red_flags):
             logger.warning(f"🚫 Hard Flag触发: {red_flags}, 总分锁定为1.0")
             return 1.0
-        
+
         # Soft Flags: 每项扣0.5分（原来是1.0，过于严格）
         penalty = len(red_flags) * 0.5
         original_score = weighted_score
         weighted_score = max(1.0, weighted_score - penalty)
-        logger.info(f"🚩 Soft Flags惩罚: {red_flags}, 扣{penalty}分, {original_score:.1f} → {weighted_score:.1f}")
-        
+        logger.info(
+            f"🚩 Soft Flags惩罚: {red_flags}, 扣{penalty}分, {original_score:.1f} → {weighted_score:.1f}"
+        )
+
     return round(weighted_score, 1)
 
 
@@ -260,25 +274,27 @@ def extract_json_from_response(response_text: str) -> str | None:
     3. 思维链后面跟着的 JSON
     """
     # 策略1: 尝试提取 Markdown 代码块中的 JSON
-    code_block_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', response_text, re.DOTALL)
+    code_block_match = re.search(
+        r"```(?:json)?\s*(\{.*?\})\s*```", response_text, re.DOTALL
+    )
     if code_block_match:
         return code_block_match.group(1)
-    
+
     # 策略2: 找到所有完整的 JSON 对象，取最后一个（通常思维链在前，JSON在后）
     # 使用非贪婪匹配，找每个独立的 {...} 块
     json_objects = []
     depth = 0
     start_idx = None
-    
+
     for i, char in enumerate(response_text):
-        if char == '{':
+        if char == "{":
             if depth == 0:
                 start_idx = i
             depth += 1
-        elif char == '}':
+        elif char == "}":
             depth -= 1
             if depth == 0 and start_idx is not None:
-                candidate = response_text[start_idx:i+1]
+                candidate = response_text[start_idx : i + 1]
                 # 验证是否是有效 JSON
                 try:
                     json.loads(candidate)
@@ -286,7 +302,7 @@ def extract_json_from_response(response_text: str) -> str | None:
                 except json.JSONDecodeError:
                     pass
                 start_idx = None
-    
+
     if json_objects:
         # 优先返回包含 "scores" 字段的 JSON（这是我们期望的格式）
         for obj in reversed(json_objects):
@@ -294,12 +310,12 @@ def extract_json_from_response(response_text: str) -> str | None:
                 return obj
         # 否则返回最后一个有效 JSON
         return json_objects[-1]
-    
+
     # 策略3: 回退到原来的贪婪匹配（兼容性）
-    json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', response_text, re.DOTALL)
+    json_match = re.search(r"\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}", response_text, re.DOTALL)
     if json_match:
         return json_match.group()
-    
+
     return None
 
 
@@ -307,10 +323,10 @@ def extract_json_array_from_response(response_text: str) -> str | None:
     """从 LLM 响应中提取 JSON 数组，支持 markdown 代码块和智能边界识别。"""
     # 策略1: 尝试提取 Markdown 代码块 (更宽松的正则)
     # 匹配 ```json ... ``` 或 ``` ... ```
-    code_block_match = re.search(r'```(?:json)?\s*(.*?)```', response_text, re.DOTALL)
+    code_block_match = re.search(r"```(?:json)?\s*(.*?)```", response_text, re.DOTALL)
     if code_block_match:
         content = code_block_match.group(1).strip()
-        if content.startswith('[') and content.endswith(']'):
+        if content.startswith("[") and content.endswith("]"):
             return content
 
     # 策略2: 智能寻找最外层的 [] 对，且忽略字符串内的括号
@@ -319,7 +335,7 @@ def extract_json_array_from_response(response_text: str) -> str | None:
     candidates = []
 
     # 寻找所有的 '[' 作为潜在起点
-    start_indices = [m.start() for m in re.finditer(r'\[', response_text)]
+    start_indices = [m.start() for m in re.finditer(r"\[", response_text)]
 
     for start in start_indices:
         depth = 0
@@ -332,20 +348,20 @@ def extract_json_array_from_response(response_text: str) -> str | None:
             if in_string:
                 if escape:
                     escape = False
-                elif char == '\\':
+                elif char == "\\":
                     escape = True
                 elif char == '"':
                     in_string = False
             else:
                 if char == '"':
                     in_string = True
-                elif char == '[':
+                elif char == "[":
                     depth += 1
-                elif char == ']':
+                elif char == "]":
                     depth -= 1
                     if depth == 0:
                         # 找到闭合的数组
-                        candidate = response_text[start:i+1]
+                        candidate = response_text[start : i + 1]
                         try:
                             # 验证是否为有效 JSON
                             json.loads(candidate)
@@ -394,7 +410,7 @@ def _score_from_data(data: Dict[str, Any]) -> Dict[str, Any]:
         "article_type": article_type,
         "red_flags": red_flags,
         "detailed_scores": data,
-        "score": overall_score
+        "score": overall_score,
     }
 
 
@@ -405,15 +421,15 @@ def parse_score_response(response_text: str) -> Dict[str, Any]:
         json_str = extract_json_from_response(response_text)
         if json_str:
             data = json.loads(json_str)
-            
+
             scores = data.get("scores", {})
             article_type = data.get("article_type", "default")
             red_flags = data.get("red_flags", [])
-            analysis_text = data.get("analysis", "") # 获取分析文本
-            
+            analysis_text = data.get("analysis", "")  # 获取分析文本
+
             # 计算加权总分
             overall_score = calculate_weighted_score(scores, article_type, red_flags)
-            
+
             # 生成一句话 Verdict
             if overall_score >= 3.8:  # User feedback: 3.9 is also high quality
                 verdict = "值得阅读"
@@ -421,31 +437,35 @@ def parse_score_response(response_text: str) -> Dict[str, Any]:
                 verdict = "一般，可选"
             else:
                 verdict = "不值得读"
-                
+
             if red_flags:
                 verdict += f" (含: {', '.join(red_flags)})"
 
             return {
                 "relevance_score": scores.get("relevance", 0),
-                "informativeness_accuracy_score": scores.get("informativeness_accuracy", 0),
+                "informativeness_accuracy_score": scores.get(
+                    "informativeness_accuracy", 0
+                ),
                 "depth_opinion_score": scores.get("depth_opinion", 0),
                 "readability_score": scores.get("readability", 0),
                 "non_redundancy_score": scores.get("non_redundancy", 0),
                 "overall_score": overall_score,
                 "verdict": verdict,
-                "reason": analysis_text, # 使用 analysis 字段作为 reason
-                "comment": data.get("comment", analysis_text), # 兼容 comment
+                "reason": analysis_text,  # 使用 analysis 字段作为 reason
+                "comment": data.get("comment", analysis_text),  # 兼容 comment
                 "article_type": article_type,
                 "red_flags": red_flags,
-                "detailed_scores": data # 保存完整原始数据
+                "detailed_scores": data,  # 保存完整原始数据
             }
-            
+
         return _default_error_result(f"无法解析JSON: {response_text[:200]}")
     except json.JSONDecodeError as e:
         # JSON解析错误，记录更详细的信息
         logger.error(f"JSON解析失败: {e}")
         logger.error(f"原始响应内容: {response_text[:500]}...")
-        return _default_error_result(f"JSON解析错误: {e} | 响应片段: {response_text[:100]}")
+        return _default_error_result(
+            f"JSON解析错误: {e} | 响应片段: {response_text[:100]}"
+        )
     except Exception as e:
         logger.error(f"解析失败: {e}")
         logger.error(f"原始响应内容: {response_text[:500]}...")
@@ -459,7 +479,7 @@ def _default_error_result(msg: str):
         "reason": msg,
         "comment": msg,
         "red_flags": [],
-        "detailed_scores": {}
+        "detailed_scores": {},
     }
 
 
@@ -469,13 +489,13 @@ def score_article(title: str, summary: str, content: str) -> Dict[str, Any]:
     """
     try:
         analysis_profile = PROJ_CONFIG.get("analysis_profile")
-        
+
         base_url = get_config("OPENAI_BASE_URL", profile=analysis_profile)
         logger.info(f"Single Scoring - Connecting to: {base_url}")
 
         client = OpenAI(
             api_key=get_config("OPENAI_API_KEY", profile=analysis_profile),
-            base_url=base_url
+            base_url=base_url,
         )
 
         model = get_config("OPENAI_MODEL", "gpt-4o-mini", profile=analysis_profile)
@@ -486,27 +506,25 @@ def score_article(title: str, summary: str, content: str) -> Dict[str, Any]:
 
         response = client.chat.completions.create(
             model=model,
-            messages=[
-                {"role": "user", "content": prompt}
-            ],
+            messages=[{"role": "user", "content": prompt}],
             temperature=0.2,  # 稍微降低一点，更稳定
-            max_tokens=1500   # 增加 Token 上限以容纳 Analysis
+            max_tokens=1500,  # 增加 Token 上限以容纳 Analysis
         )
-        
+
         response_text = response.choices[0].message.content
         log_debug("Scoring Response", response_text)
-        
+
         if not response_text:
             return _default_error_result("模型返回为空")
-        
+
         result = parse_score_response(response_text)
 
         # 补全 score 字段，兼容旧的 article_analyzer 调用
-        result['score'] = result['overall_score']
-        result['model'] = model
+        result["score"] = result["overall_score"]
+        result["model"] = model
 
         return result
-        
+
     except Exception as e:
         logger.error(f"评分过程异常: {e}")
         return _default_error_result(f"Exception: {str(e)}")
@@ -516,19 +534,21 @@ def format_score_result(score_result: Dict[str, Any]) -> str:
     """格式化展示"""
     verdict = score_result.get("verdict", "未知")
     overall = score_result.get("overall_score", 0.0)
-    
+
     emoji = "😐"
     if overall >= 3.8:
         emoji = "🔥"
     elif overall <= 2.0:
-        emoji = "🗑️" # 垃圾桶
+        emoji = "🗑️"  # 垃圾桶
     elif overall < 3.0:
         emoji = "👎"
-    
+
     return f"{emoji} {verdict} ({overall}/5.0)"
 
 
-def parse_batch_score_response(response_text: str, expected_count: int) -> list[Dict[str, Any]] | None:
+def parse_batch_score_response(
+    response_text: str, expected_count: int
+) -> list[Dict[str, Any]] | None:
     """
     解析批量评分响应并返回结果列表，失败时返回 None。
     改进逻辑：
@@ -573,7 +593,7 @@ def parse_batch_score_response(response_text: str, expected_count: int) -> list[
                 ordered.append(results_by_index[i])
                 valid_count += 1
             else:
-                ordered.append(None) # 标记为缺失
+                ordered.append(None)  # 标记为缺失
 
         if valid_count == 0:
             return None
@@ -619,23 +639,25 @@ def _robust_parse_objects(text: str) -> list[dict]:
             else:
                 if char == '"':
                     in_string = True
-                elif char == '{':
+                elif char == "{":
                     depth += 1
-                elif char == '}':
+                elif char == "}":
                     depth -= 1
                     if depth == 0:
                         # 找到一个完整的对象候选
-                        candidate = text[start:i+1]
+                        candidate = text[start : i + 1]
                         try:
                             obj = json.loads(candidate)
                             objects.append(obj)
                         except Exception:
                             pass
-                        break # 跳出内层循环，处理下一个 start
+                        break  # 跳出内层循环，处理下一个 start
     return objects
 
 
-def score_articles_batch(articles: list[dict], max_retries: int = 3) -> list[Dict[str, Any]] | None:
+def score_articles_batch(
+    articles: list[dict], max_retries: int = 3
+) -> list[Dict[str, Any]] | None:
     """对多篇文章进行批量评分，支持重试和部分恢复，失败时返回 None。"""
     analysis_profile = PROJ_CONFIG.get("analysis_profile")
 
@@ -645,7 +667,7 @@ def score_articles_batch(articles: list[dict], max_retries: int = 3) -> list[Dic
 
         client = OpenAI(
             api_key=get_config("OPENAI_API_KEY", profile=analysis_profile),
-            base_url=base_url
+            base_url=base_url,
         )
     except Exception as e:
         logger.error(f"Client init failed: {e}")
@@ -663,11 +685,9 @@ def score_articles_batch(articles: list[dict], max_retries: int = 3) -> list[Dic
 
             response = client.chat.completions.create(
                 model=model,
-                messages=[
-                    {"role": "user", "content": prompt}
-                ],
+                messages=[{"role": "user", "content": prompt}],
                 temperature=0.2,
-                max_tokens=16000  # Explicitly set high limit for Gemini
+                max_tokens=16000,  # Explicitly set high limit for Gemini
             )
 
             response_text = response.choices[0].message.content
@@ -687,12 +707,14 @@ def score_articles_batch(articles: list[dict], max_retries: int = 3) -> list[Dic
                 # 为所有成功的结果添加模型信息
                 for res in batch_results:
                     if res:
-                        res['model'] = model
+                        res["model"] = model
 
                 if not missing_indices:
-                    return batch_results # 完美成功
+                    return batch_results  # 完美成功
 
-                logger.warning(f"Batch attempt {attempt + 1} partial success. Missing indices: {missing_indices}. Filling gaps...")
+                logger.warning(
+                    f"Batch attempt {attempt + 1} partial success. Missing indices: {missing_indices}. Filling gaps..."
+                )
 
                 # 补全缺失项（单篇调用）
                 for i in missing_indices:
@@ -703,20 +725,28 @@ def score_articles_batch(articles: list[dict], max_retries: int = 3) -> list[Dic
                         score_result = score_article(
                             article.get("title", ""),
                             article.get("summary", ""),
-                            article.get("content", "")
+                            article.get("content", ""),
                         )
                         batch_results[i] = score_result
                     except Exception as e:
                         logger.error(f"Failed to fill gap for article {i}: {e}")
                         # 保持 None 或者填入错误占位符，这里填入默认错误
-                        batch_results[i] = _default_error_result(f"Fill gap failed: {e}")
+                        batch_results[i] = _default_error_result(
+                            f"Fill gap failed: {e}"
+                        )
 
                 return batch_results
 
-            logger.warning(f"Batch attempt {attempt + 1} failed: Parse error or no valid objects found")
+            logger.warning(
+                f"Batch attempt {attempt + 1} failed: Parse error or no valid objects found"
+            )
             logger.warning(f"Response length: {len(response_text)} chars")
-            logger.warning(f"Response starts with: {response_text[:200] if response_text else 'EMPTY'}")
-            logger.warning(f"Response ends with: {response_text[-200:] if response_text else 'EMPTY'}")
+            logger.warning(
+                f"Response starts with: {response_text[:200] if response_text else 'EMPTY'}"
+            )
+            logger.warning(
+                f"Response ends with: {response_text[-200:] if response_text else 'EMPTY'}"
+            )
 
         except Exception as e:
             # 智能退避策略 (Exponential Backoff)
@@ -724,8 +754,10 @@ def score_articles_batch(articles: list[dict], max_retries: int = 3) -> list[Dic
 
             if is_rate_limit:
                 # 指数退避: 1s, 2s, 4s... + 随机抖动
-                delay = (2 ** attempt) * 1.5 + random.uniform(0, 1)
-                logger.warning(f"⚠️ Batch attempt {attempt + 1} hit Rate Limit (429). Cooling down for {delay:.2f}s...")
+                delay = (2**attempt) * 1.5 + random.uniform(0, 1)
+                logger.warning(
+                    f"⚠️ Batch attempt {attempt + 1} hit Rate Limit (429). Cooling down for {delay:.2f}s..."
+                )
                 time.sleep(delay)
             else:
                 logger.warning(f"Batch attempt {attempt + 1} exception: {e}")

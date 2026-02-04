@@ -8,11 +8,13 @@ import logging
 
 # === 调试代码开始 ===
 # 放到最前面，确保任何错误都能被记录
-LOG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "native_host_debug.log")
+LOG_FILE = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "native_host_debug.log"
+)
 logging.basicConfig(
     filename=LOG_FILE,
     level=logging.DEBUG,
-    format='%(asctime)s - %(levelname)s - %(message)s'
+    format="%(asctime)s - %(levelname)s - %(message)s",
 )
 logging.info("Native Host 启动...")
 logging.info(f"Python解释器: {sys.executable}")
@@ -34,6 +36,7 @@ try:
     logging.info(f"设置 RSS_SCORES_DB: {DB_PATH}")
 
     from rss_analyzer.cache import get_cached_score
+
     logging.info("成功导入 rss_analyzer.cache")
 except Exception:
     logging.exception("导入模块失败！")
@@ -49,7 +52,7 @@ def _read_message():
         if len(raw_length) != 4:
             logging.error(f"Invalid length header: {len(raw_length)} bytes")
             return None
-        message_length = struct.unpack('<I', raw_length)[0]
+        message_length = struct.unpack("<I", raw_length)[0]
         if message_length == 0:
             logging.warning("Message length is 0")
             return None
@@ -58,7 +61,7 @@ def _read_message():
             logging.error("Failed to read message body")
             return None
         try:
-            decoded = json.loads(message.decode('utf-8'))
+            decoded = json.loads(message.decode("utf-8"))
             logging.debug(f"Received message: {decoded.get('type', 'unknown')}")
             return decoded
         except Exception as e:
@@ -71,8 +74,8 @@ def _read_message():
 
 def _send_message(payload: dict):
     try:
-        encoded = json.dumps(payload, ensure_ascii=False).encode('utf-8')
-        sys.stdout.buffer.write(struct.pack('<I', len(encoded)))
+        encoded = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        sys.stdout.buffer.write(struct.pack("<I", len(encoded)))
         sys.stdout.buffer.write(encoded)
         sys.stdout.buffer.flush()
         logging.debug("Message sent successfully")
