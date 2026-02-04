@@ -53,7 +53,9 @@ function formatMarkdown(text) {
 
   // Wrap consecutive list items in ul tags
   html = html.replace(/(<li>[\s\S]*?<\/li>)(\s*<li>[\s\S]*?<\/li>)*/g, (match) => {
-    return '<ul>' + match + '</ul>';
+    // Remove newlines between list items to clean up spacing
+    const cleanMatch = match.replace(/<\/li>\s+<li>/g, '</li><li>');
+    return '<ul>' + cleanMatch + '</ul>';
   });
 
   // Convert remaining double newlines to paragraph breaks
@@ -75,3 +77,12 @@ function formatMarkdown(text) {
 }
 
 console.log('[Feedly AI] Side panel loaded');
+
+// Notify background that we are ready to receive data
+if (chrome.windows && chrome.windows.getCurrent) {
+  chrome.windows.getCurrent((win) => {
+    chrome.runtime.sendMessage({ type: 'sidepanel_ready', windowId: win.id });
+  });
+} else {
+  chrome.runtime.sendMessage({ type: 'sidepanel_ready' });
+}

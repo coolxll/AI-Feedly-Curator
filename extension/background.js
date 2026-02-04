@@ -5,6 +5,30 @@ const USE_MOCK = false;  // true = 使用 Mock 数据, false = 使用 Native Hos
 const HOST_NAME = "feedly.ai.overlay";
 const CACHE_TTL_MS = 30 * 1000;
 const cache = new Map();
+const summaryStates = new Map(); // windowId -> { title, content, status }
+
+function updateSidePanelState(windowId, state) {
+  if (!windowId) return;
+  summaryStates.set(windowId, state);
+  chrome.runtime.sendMessage({
+    type: 'update_sidepanel',
+    ...state
+  }).catch(() => {});
+}
+
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (msg.type === 'sidepanel_ready') {
+    const windowId = msg.windowId || sender.tab?.windowId;
+    if (windowId && summaryStates.has(windowId)) {
+      const state = summaryStates.get(windowId);
+      chrome.runtime.sendMessage({
+        type: 'update_sidepanel',
+        ...state
+      }).catch(() => {});
+    }
+    return true;
+  }
+});
 
 // Default settings for summary API
 const DEFAULT_SETTINGS = {
@@ -356,6 +380,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return;
   }
 
+  const windowId = sender.tab?.windowId;
   console.log("Processing summarize_article for", msg.id);
   console.log("Content length:", msg.content?.length || 0, "URL:", msg.url);
 
@@ -385,18 +410,20 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             msg.title,
             (partialSummary) => {
                 // onChunk
-                chrome.runtime.sendMessage({
-                    type: 'update_sidepanel',
+                updateSidePanelState(windowId, {
                     title: msg.title,
                     content: partialSummary,
                     status: 'streaming'
-                }).catch(() => {}); // Ignore errors if side panel closed
+                });
             },
             (fullSummary) => {
                 // onComplete
                 console.log("Stream complete");
-                // Send one last update with 'complete' status if needed, or just let it stay
-                // The last chunk update already contained the full text.
+                updateSidePanelState(windowId, {
+                    title: msg.title,
+                    content: fullSummary,
+                    status: 'success'
+                });
                 sendResponse({
                     id: msg.id,
                     summary: fullSummary
@@ -405,8 +432,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             (errorMsg) => {
                 // onError
                 console.error("Stream error:", errorMsg);
-                chrome.runtime.sendMessage({
-                    type: 'update_sidepanel',
+                updateSidePanelState(windowId, {
                     title: msg.title,
                     content: errorMsg,
                     status: 'error'
@@ -424,35 +450,21 @@ console.log(`Feedly AI Overlay background script loaded (${USE_MOCK ? 'MOCK' : '
 // Handle side panel open request
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === 'open_sidepanel') {
-    // Only try to open side panel if we are in a context that allows it (user action)
-    // However, chrome.sidePanel.open requires a user gesture, which we might not have in the message handler
-    // But since this is triggered by a button click in content script, it might work if the chain is preserved
-    // If not, the user has to click the extension icon or we rely on the side panel being already open
+    const windowId = sender.tab?.windowId;
 
-    // Note: chrome.sidePanel.open() is only available in Chrome 114+ and requires user gesture
-    // If this fails, we can't do much automatically.
-    chrome.sidePanel.open({ windowId: sender.tab.windowId }).then(() => {
-      // Send initial loading state to side panel
-      setTimeout(() => {
-        chrome.runtime.sendMessage({
-          type: 'update_sidepanel',
-          title: msg.title,
-          content: '',
-          status: 'loading'
-        });
-      }, 500); // Increase timeout slightly to ensure panel is ready
-    }).catch(err => {
-      console.error('Failed to open side panel (might need user gesture):', err);
-      // Even if open fails (e.g. already open or no gesture), we still send the update
-       setTimeout(() => {
-        chrome.runtime.sendMessage({
-          type: 'update_sidepanel',
-          title: msg.title,
-          content: '',
-          status: 'loading'
-        });
-      }, 100);
+    if (windowId) {
+      updateSidePanelState(windowId, {
+        title: msg.title,
+        content: '',
+        status: 'loading'
+      });
+    }
+
+    // Try to open side panel (requires user gesture)
+    chrome.sidePanel.open({ windowId: windowId }).catch(err => {
+      console.error('Failed to open side panel:', err);
     });
+
     sendResponse({ ok: true });
     return true;
   }

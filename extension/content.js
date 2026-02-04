@@ -373,17 +373,24 @@ function renderItem(el, item) {
   container.appendChild(badge);
 
   // If in detail view, show the reason text inline
+  // Article view - usually has EntryInfo
   const entryInfo = el.querySelector('.EntryInfo, .entry-info, .EntryMetadataWrapper');
-  if (entryInfo && rawReason) {
-      const reasonEl = document.createElement('span');
-      reasonEl.className = 'ai-reason-text';
-      reasonEl.style.marginLeft = '12px';
-      reasonEl.style.color = 'inherit';
-      reasonEl.style.opacity = '0.8';
-      reasonEl.style.fontSize = '14px';
-      // Include verdict in the text
-      reasonEl.textContent = verdict ? `【${verdict}】 ${rawReason}` : rawReason;
-      container.appendChild(reasonEl);
+  // Title-only expanded view - might not have EntryInfo but is expanded
+  const isExpanded = el.classList.contains('entry--selected') || el.classList.contains('entry--expanded');
+
+  if ((entryInfo || isExpanded) && rawReason) {
+      // Check if we already added it
+      if (!container.querySelector('.ai-reason-text')) {
+          const reasonEl = document.createElement('span');
+          reasonEl.className = 'ai-reason-text';
+          reasonEl.style.marginLeft = '12px';
+          reasonEl.style.color = 'inherit';
+          reasonEl.style.opacity = '0.8';
+          reasonEl.style.fontSize = '14px';
+          // Include verdict in the text
+          reasonEl.textContent = verdict ? `【${verdict}】 ${rawReason}` : rawReason;
+          container.appendChild(reasonEl);
+      }
   } else if (verdict && !container.querySelector('.ai-reason-text')) {
       // Also add text for card/magazine view if possible, but keep it short
       // We only show verdict if space permits or user hovers (tooltip handles hover)
