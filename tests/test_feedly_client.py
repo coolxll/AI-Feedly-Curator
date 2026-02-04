@@ -3,7 +3,6 @@ feedly_client 模块单元测试
 """
 import unittest
 from unittest.mock import patch, MagicMock
-import logging
 
 from rss_analyzer.feedly_client import feedly_mark_read
 

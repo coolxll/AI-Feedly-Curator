@@ -1,11 +1,73 @@
+console.log("[Feedly AI Overlay] Content script loaded!");
+
 const STATE = {
   pending: new Map(),
+  processed: new Set(),
   scheduled: false,
 };
 
 const SELECTORS = {
-  entry: '[data-entry-id], [data-entryid], article, .Entry',
+  entry: '[data-entry-id], [data-entryid], article.entry, .Entry, .entry--titleOnly, .entry--magazine, .entry--cards',
 };
+
+// 注入样式
+const STYLE_ID = 'feedly-ai-overlay-style';
+if (!document.getElementById(STYLE_ID)) {
+  const style = document.createElement('style');
+  style.id = STYLE_ID;
+  style.textContent = `
+    .ai-score-badge {
+      margin-right: 8px;
+      font-size: 11px;
+      font-weight: 600;
+      padding: 1px 6px;
+      border-radius: 4px;
+      color: #fff;
+      display: inline-flex;
+      align-items: center;
+      vertical-align: middle;
+      line-height: 1.3;
+      cursor: help;
+      position: relative;
+    }
+    .ai-verdict {
+      font-size: 12px;
+      color: #6b7280;
+      margin-right: 8px;
+      vertical-align: middle;
+      display: inline-block;
+      max-width: 200px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    /* Tooltip 样式 */
+    .ai-score-badge:hover::after {
+      content: attr(data-tooltip);
+      position: absolute;
+      top: 100%;
+      left: 0;
+      z-index: 9999;
+      background: #1f2937;
+      color: #f3f4f6;
+      padding: 8px 12px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 400;
+      width: 300px;
+      white-space: normal;
+      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+      margin-top: 4px;
+      line-height: 1.5;
+      text-align: left;
+    }
+    /* 在深色模式下的适配 (可选) */
+    [data-theme="dark"] .ai-verdict {
+      color: #9ca3af;
+    }
+  `;
+  document.head.appendChild(style);
+}
 
 function getEntryId(el) {
   const datasetId = el.getAttribute('data-entry-id') || el.getAttribute('data-entryid');
@@ -20,75 +82,97 @@ function getEntryId(el) {
   const idAttr = el.getAttribute('data-id');
   if (idAttr) return idAttr;
 
+  const elId = el.getAttribute('id');
+  if (elId) {
+    return elId.replace(/_main$/, '');
+  }
+
   return null;
 }
 
-function ensureBadge(el) {
-  let badge = el.querySelector('.ai-score-badge');
-  if (!badge) {
-    badge = document.createElement('span');
-    badge.className = 'ai-score-badge';
-    badge.style.cssText = 'margin-left:8px;font-size:12px;padding:2px 6px;border-radius:10px;background:#1f2937;color:#fff;';
-    const title = el.querySelector('h2, h3, .title, .entry-title, .Title');
-    if (title && title.parentElement) {
-      title.parentElement.appendChild(badge);
-    } else {
-      el.appendChild(badge);
-    }
-  }
-  return badge;
-}
+function ensureBadgeContainer(el) {
+  let container = el.querySelector('.ai-score-container');
+  if (!container) {
+    container = document.createElement('span');
+    container.className = 'ai-score-container';
+    container.style.display = 'inline-flex';
+    container.style.alignItems = 'center';
 
-function ensurePanel(el) {
-  let panel = el.querySelector('.ai-summary-panel');
-  if (!panel) {
-    panel = document.createElement('div');
-    panel.className = 'ai-summary-panel';
-    panel.style.cssText = 'margin:12px 0;padding:12px;border:1px solid #e5e7eb;border-radius:8px;background:#f9fafb;font-size:13px;line-height:1.4;color:#111827;';
-    const content = el.querySelector('.Entry__content, .entry-body, .Content, .entry-content');
-    if (content && content.parentElement) {
-      content.parentElement.insertBefore(panel, content);
-    } else {
-      el.insertBefore(panel, el.firstChild);
+    // 查找 Metadata 区域 (适用: Title-Only, Magazine, Cards, Article Detail)
+    const metadata = el.querySelector('.Metadata, .entry-metadata, .EntryMetadata, .meta, .metadata');
+    const title = el.querySelector('.EntryTitle, .entry-title, .title');
+
+    // 1. Metadata 优先
+    if (metadata) {
+      metadata.style.display = 'flex';
+      metadata.style.alignItems = 'center';
+      metadata.insertAdjacentElement('afterbegin', container);
+      return container;
     }
+
+    // 2. Article View
+    const entryInfo = el.querySelector('.EntryInfo, .entry-info');
+    if (entryInfo) {
+      entryInfo.insertAdjacentElement('afterbegin', container);
+      return container;
+    }
+
+    // 3. Cards View / Magazine View
+    if (title) {
+      if (el.classList.contains('entry--cards') || el.classList.contains('u100Entry')) {
+         title.insertAdjacentElement('afterend', container);
+         container.style.marginTop = '4px';
+      } else {
+         container.style.marginLeft = '8px';
+         title.appendChild(container);
+      }
+      return container;
+    }
+
+    // 4. 保底
+    el.insertAdjacentElement('afterbegin', container);
   }
-  return panel;
+  return container;
 }
 
 function renderItem(el, item) {
-  const badge = ensureBadge(el);
+  const container = ensureBadgeContainer(el);
+  container.innerHTML = ''; // 清空内容重绘
+
   if (!item || !item.found) {
-    badge.textContent = 'AI: -';
-    badge.style.background = '#6b7280';
+    // 没分不显示
     return;
   }
 
   const score = item.score;
   const verdict = item.data?.verdict || '';
-  badge.textContent = `AI: ${score?.toFixed ? score.toFixed(1) : score} ${verdict}`.trim();
-  badge.style.background = score >= 4 ? '#059669' : score >= 3 ? '#2563eb' : '#dc2626';
+  const summary = item.data?.summary || item.data?.reason || '无详细总结';
 
-  if (item.data?.summary || item.data?.reason) {
-    const panel = ensurePanel(el);
-    const summary = item.data.summary || '';
-    const reason = item.data.reason || '';
-    panel.textContent = '';
+  // 1. 创建徽章
+  const badge = document.createElement('span');
+  badge.className = 'ai-score-badge';
+  badge.textContent = score?.toFixed(1);
 
-    const titleEl = document.createElement('div');
-    titleEl.style.fontWeight = '600';
-    titleEl.style.marginBottom = '6px';
-    titleEl.textContent = 'AI Summary';
-
-    const bodyEl = document.createElement('div');
-    bodyEl.style.marginBottom = '6px';
-    bodyEl.textContent = summary || reason;
-
-    const metaEl = document.createElement('div');
-    metaEl.style.color = '#6b7280';
-    metaEl.textContent = `Updated: ${item.updated_at || 'N/A'}`;
-
-    panel.append(titleEl, bodyEl, metaEl);
+  // 颜色
+  if (score >= 4.0) {
+    badge.style.background = '#10b981';
+  } else if (score >= 3.0) {
+    badge.style.background = '#3b82f6';
+  } else {
+    badge.style.background = '#ef4444';
   }
+
+  // Tooltip 内容
+  const tooltipText = `【${verdict}】\n${summary}`;
+  badge.setAttribute('data-tooltip', tooltipText);
+
+  // 2. 创建 Verdict 文本 (显示在徽章旁边)
+  const verdictEl = document.createElement('span');
+  verdictEl.className = 'ai-verdict';
+  verdictEl.textContent = verdict; // e.g. "值得阅读"
+
+  container.appendChild(badge);
+  container.appendChild(verdictEl);
 }
 
 function scheduleScan() {
@@ -100,13 +184,16 @@ function scheduleScan() {
 function scanEntries() {
   STATE.scheduled = false;
   const entries = Array.from(document.querySelectorAll(SELECTORS.entry));
+
   const ids = [];
   const map = new Map();
 
   for (const entry of entries) {
     const id = getEntryId(entry);
     if (!id) continue;
-    if (STATE.pending.has(id)) continue;
+
+    if (STATE.processed.has(id) || STATE.pending.has(id)) continue;
+
     ids.push(id);
     map.set(id, entry);
     STATE.pending.set(id, entry);
@@ -114,7 +201,15 @@ function scanEntries() {
 
   if (ids.length === 0) return;
 
+  console.log("[Feedly AI Overlay] Fetching scores for", ids.length, "new articles");
+
   chrome.runtime.sendMessage({ type: 'get_scores', ids }, (resp) => {
+    if (chrome.runtime.lastError) {
+      console.error("[Feedly AI Overlay] Error:", chrome.runtime.lastError);
+      for (const id of ids) STATE.pending.delete(id);
+      return;
+    }
+
     const items = resp?.items || {};
     for (const id of ids) {
       const entry = map.get(id) || STATE.pending.get(id);
@@ -122,11 +217,22 @@ function scanEntries() {
         renderItem(entry, items[id]);
       }
       STATE.pending.delete(id);
+      STATE.processed.add(id);
     }
   });
 }
 
-const observer = new MutationObserver(() => scheduleScan());
+let debounceTimer = null;
+function debouncedScan() {
+  if (debounceTimer) return;
+  debounceTimer = setTimeout(() => {
+    debounceTimer = null;
+    scheduleScan();
+  }, 200);
+}
+
+const observer = new MutationObserver(() => debouncedScan());
 observer.observe(document.documentElement, { childList: true, subtree: true });
 
+console.log("[Feedly AI Overlay] Starting initial scan...");
 scheduleScan();

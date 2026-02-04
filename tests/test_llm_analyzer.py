@@ -2,7 +2,7 @@
 测试 LLM 分析模块
 """
 import unittest
-from unittest.mock import patch, Mock
+from unittest.mock import patch
 
 from rss_analyzer.llm_analyzer import analyze_article_with_llm
 

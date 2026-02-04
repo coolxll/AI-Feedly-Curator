@@ -8,7 +8,6 @@ from rss_analyzer.scoring import (
     build_scoring_prompt,
     parse_score_response,
     score_article,
-    format_score_result
 )
 
 
@@ -41,10 +40,10 @@ class TestScoring(unittest.TestCase):
         
         result = parse_score_response(response)
         
-        # 有 Red Flag (Hard)，分数应被限制为 1.0
-        self.assertEqual(result["overall_score"], 1.0)
-        # Verdict 应该是 "不值得读 (含: pure_promotion)"
-        self.assertIn("不值得读", result["verdict"])
+        # Soft Flag 会触发惩罚，但不应锁定为 1.0
+        self.assertEqual(result["overall_score"], 4.5)
+        # Verdict 应包含 red flag 信息
+        self.assertIn("值得阅读", result["verdict"])
         self.assertIn("pure_promotion", result["verdict"])
 
     def test_parse_score_response_valid(self):

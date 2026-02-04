@@ -266,7 +266,7 @@ def generate_overall_summary(analyzed_articles: list) -> str:
         # 打印选择信息
         if response.choices and len(response.choices) > 0:
             choice = response.choices[0]
-            print(f"\n响应详情:")
+            print("\n响应详情:")
             print(f"  - Finish Reason: {choice.finish_reason if hasattr(choice, 'finish_reason') else 'N/A'}")
             print(f"  - Index: {choice.index if hasattr(choice, 'index') else 'N/A'}")
 
@@ -295,7 +295,7 @@ def generate_overall_summary(analyzed_articles: list) -> str:
         print(f"{'='*60}")
         print(f"错误类型: {type(e).__name__}")
         print(f"错误信息: {str(e)}")
-        print(f"\n完整堆栈跟踪:")
+        print("\n完整堆栈跟踪:")
         traceback.print_exc(file=sys.stderr)
         print(f"{'='*60}\n")
         return f"生成总结失败: {str(e)}"

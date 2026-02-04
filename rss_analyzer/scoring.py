@@ -10,7 +10,7 @@ import logging
 from typing import Dict, Any
 from datetime import datetime
 
-from openai import OpenAI, RateLimitError, APIError
+from openai import OpenAI, RateLimitError
 
 from .config import PROJ_CONFIG, get_config, log_debug
 
@@ -610,12 +610,17 @@ def _robust_parse_objects(text: str) -> list[dict]:
         for i in range(start, len(text)):
             char = text[i]
             if in_string:
-                if escape: escape = False
-                elif char == '\\': escape = True
-                elif char == '"': in_string = False
+                if escape:
+                    escape = False
+                elif char == "\\":
+                    escape = True
+                elif char == '"':
+                    in_string = False
             else:
-                if char == '"': in_string = True
-                elif char == '{': depth += 1
+                if char == '"':
+                    in_string = True
+                elif char == '{':
+                    depth += 1
                 elif char == '}':
                     depth -= 1
                     if depth == 0:
@@ -624,7 +629,7 @@ def _robust_parse_objects(text: str) -> list[dict]:
                         try:
                             obj = json.loads(candidate)
                             objects.append(obj)
-                        except:
+                        except Exception:
                             pass
                         break # 跳出内层循环，处理下一个 start
     return objects

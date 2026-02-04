@@ -2,7 +2,6 @@
 测试工具函数模块
 """
 import os
-import json
 import unittest
 import tempfile
 

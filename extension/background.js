@@ -1,46 +1,45 @@
-const HOST_NAME = "feedly.ai.overlay";
-const RECONNECT_DELAY_MS = 1500;
-const CACHE_TTL_MS = 30 * 1000;
+// ============ 配置开关 ============
+const USE_MOCK = false;  // true = 使用 Mock 数据, false = 使用 Native Host
+// ==================================
 
-let port = null;
-let connecting = false;
-let pending = [];
+const HOST_NAME = "feedly.ai.overlay";
+const CACHE_TTL_MS = 30 * 1000;
 const cache = new Map();
 
-function connectNative() {
-  if (connecting || port) return;
-  connecting = true;
-  try {
-    port = chrome.runtime.connectNative(HOST_NAME);
-    port.onMessage.addListener(handleNativeMessage);
-    port.onDisconnect.addListener(() => {
-      port = null;
-      connecting = false;
-      setTimeout(connectNative, RECONNECT_DELAY_MS);
-    });
-  } catch (err) {
-    port = null;
-  } finally {
-    connecting = false;
+// Mock 数据：模拟 Native Host 返回的评分
+function getMockScores(ids) {
+  const items = {};
+  for (const id of ids) {
+    const score = Math.round((Math.random() * 2 + 3) * 10) / 10; // 3.0 - 5.0
+    const verdicts = ["值得阅读", "一般，可选", "不值得读"];
+    const verdict = score >= 4 ? verdicts[0] : score >= 3 ? verdicts[1] : verdicts[2];
+
+    items[id] = {
+      id: id,
+      score: score,
+      data: {
+        verdict: verdict,
+        summary: "这是一篇关于技术的文章，内容涉及前沿开发实践。",
+        reason: `AI评分: ${score}/5.0 - ${verdict}`
+      },
+      updated_at: new Date().toISOString(),
+      found: true
+    };
   }
+  return items;
 }
 
-function handleNativeMessage(message) {
-  const callbacks = pending;
-  pending = [];
-  for (const cb of callbacks) {
-    cb.resolve(message || {});
-  }
-}
-
+// Native Host 通信
 function sendNativeMessage(payload) {
   return new Promise((resolve) => {
-    if (!port) {
-      resolve({ error: "not_connected" });
-      return;
-    }
-    pending.push({ resolve });
-    port.postMessage(payload);
+    chrome.runtime.sendNativeMessage(HOST_NAME, payload, (response) => {
+      if (chrome.runtime.lastError) {
+        console.error("Native messaging error:", chrome.runtime.lastError.message);
+        resolve({ error: chrome.runtime.lastError.message });
+        return;
+      }
+      resolve(response || {});
+    });
   });
 }
 
@@ -66,16 +65,16 @@ function mergeCache(items) {
   }
 }
 
-chrome.runtime.onInstalled.addListener(() => connectNative());
-chrome.runtime.onStartup.addListener(() => connectNative());
-connectNative();
-
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  console.log("Background received message:", msg);
+
   if (!msg || msg.type !== "get_scores") {
     return;
   }
 
   const ids = Array.isArray(msg.ids) ? msg.ids : [];
+  console.log("Processing get_scores for", ids.length, "articles");
+
   if (ids.length === 0) {
     sendResponse({ items: {} });
     return;
@@ -83,15 +82,28 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
   const { items, missing } = getCached(ids);
   if (missing.length === 0) {
+    console.log("All from cache");
     sendResponse({ items });
     return;
   }
 
-  sendNativeMessage({ type: "get_scores", ids: missing }).then((resp) => {
-    const fetched = resp && resp.items ? resp.items : {};
+  if (USE_MOCK) {
+    // Mock 模式
+    console.log("[MOCK MODE] Generating mock scores for", missing.length, "articles");
+    const fetched = getMockScores(missing);
     mergeCache(fetched);
     sendResponse({ items: { ...items, ...fetched } });
-  });
+  } else {
+    // Native Host 模式
+    console.log("[NATIVE MODE] Fetching scores from Native Host for", missing.length, "articles");
+    sendNativeMessage({ type: "get_scores", ids: missing }).then((resp) => {
+      const fetched = resp && resp.items ? resp.items : {};
+      mergeCache(fetched);
+      sendResponse({ items: { ...items, ...fetched } });
+    });
+  }
 
   return true;
 });
+
+console.log(`Feedly AI Overlay background script loaded (${USE_MOCK ? 'MOCK' : 'NATIVE'} MODE)`);

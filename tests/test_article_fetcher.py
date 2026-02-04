@@ -50,21 +50,3 @@ class TestArticleFetcher(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
-    
-    @patch('rss_analyzer.article_fetcher.requests.get')
-    def test_http_error(self, mock_get):
-        """测试 HTTP 错误"""
-        mock_response = Mock()
-        mock_response.status_code = 404
-        mock_get.return_value = mock_response
-        
-        url = "https://example.com/notfound"
-        result = fetch_article_content(url)
-        
-        self.assertIn("获取失败", result)
-        self.assertIn("404", result)
-
-
-if __name__ == "__main__":
-    unittest.main()

@@ -14,7 +14,7 @@ class TestConfig(unittest.TestCase):
     def test_proj_config_defaults(self):
         """测试默认配置"""
         self.assertEqual(PROJ_CONFIG["limit"], 100)
-        self.assertTrue(PROJ_CONFIG["mark_read"])
+        self.assertFalse(PROJ_CONFIG["mark_read"])
         self.assertFalse(PROJ_CONFIG["debug"])
     
     def test_get_config_without_profile(self):

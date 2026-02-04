@@ -198,7 +198,7 @@ def execute_export(limit, stream_id, filename, stream_label=None):
             console.print(Panel(f"Export Complete! File saved to {filename}", style="bold green"))
         finally:
             sys.argv = old_argv
-    except Exception as e:
+    except Exception:
         logger.exception("Error exporting")
         console.print("[red]Export failed.[/red]")
 
@@ -213,10 +213,14 @@ def simple_filter_flow():
     choice = get_input("Select mode")
     
     mode = "all"
-    if choice == "1": mode = "all"
-    elif choice == "2": mode = "newsflash"
-    elif choice == "3": mode = "low-score"
-    elif choice == "4": return
+    if choice == "1":
+        mode = "all"
+    elif choice == "2":
+        mode = "newsflash"
+    elif choice == "3":
+        mode = "low-score"
+    elif choice == "4":
+        return
     else:
         console.print("[red]Invalid mode, defaulting to All[/red]")
 

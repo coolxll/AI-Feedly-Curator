@@ -1,12 +1,9 @@
 {
   "name": "feedly.ai.overlay",
   "description": "Feedly AI overlay native messaging host",
-  "path": "C:\\Python311\\python.exe",
+  "path": "C:\\Workspace\\rss-opml\\native_host\\wrapper.bat",
   "type": "stdio",
   "allowed_origins": [
-    "chrome-extension://<extension-id>/"
-  ],
-  "arguments": [
-    "C:\\Workspace\\rss-opml\\native_host\\feedly_native_host.py"
+    "chrome-extension://paafjnjhhjecdgblkalhaikhcljoohnk/"
   ]
 }
