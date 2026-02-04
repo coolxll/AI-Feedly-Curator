@@ -6,10 +6,9 @@ Interactive menu for running Feedly filters.
 import sys
 import logging
 import os
-import feedly_filter
-import regenerate_summary
-import article_analyzer
+from rss_analyzer.config import PROJ_CONFIG
 from rss_analyzer.feedly_client import feedly_get_categories, feedly_get_subscriptions, feedly_get_unread_counts
+from rss_analyzer.utils import load_articles
 from rich.console import Console
 from rich.panel import Panel
 from rich.logging import RichHandler
@@ -91,7 +90,8 @@ def simple_analyze_flow():
         if sid:
             stream_id = sid
 
-    mark_read_str = get_input("Mark as read after analysis? (y/n)", default="n")
+    default_mark = "y" if PROJ_CONFIG.get("mark_read") else "n"
+    mark_read_str = get_input("Mark as read after analysis? (y/n)", default=default_mark)
     mark_read = mark_read_str.lower().startswith('y')
 
     threads_str = get_input("Number of threads (Default: 3)", default="3")
@@ -127,7 +127,7 @@ def run_export_flow():
     from datetime import datetime
 
     # 1. Select Stream
-    stream_id = select_stream_interactive()
+    stream_id, stream_label = select_stream_interactive()
 
     # 2. Limit
     limit_str = questionary.text("Article Limit:", default="100").ask()
@@ -140,13 +140,14 @@ def run_export_flow():
     default_filename = f"export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
     filename = questionary.text("Output Filename:", default=default_filename).ask()
 
-    execute_export(limit, stream_id, filename)
+    execute_export(limit, stream_id, filename, stream_label)
 
-def execute_export(limit, stream_id, filename):
+def execute_export(limit, stream_id, filename, stream_label=None):
+    display_stream = stream_label if stream_label else (stream_id or 'Global (All)')
     console.print(Panel(
         f"Exporting Articles\n"
         f"Limit: {limit}\n"
-        f"Stream: {stream_id or 'Global (All)'}\n"
+        f"Stream: {display_stream}\n"
         f"Output: {filename}",
         title="Export Configuration",
         border_style="blue"
@@ -162,6 +163,12 @@ def execute_export(limit, stream_id, filename):
             sys.argv.append(stream_id)
 
         try:
+            try:
+                import article_analyzer
+            except Exception as e:
+                console.print(Panel(_import_error_hint('article_analyzer', e), style="red"))
+                return
+
             article_analyzer.main()
             console.print(Panel(f"Export Complete! File saved to {filename}", style="bold green"))
         finally:
@@ -205,7 +212,10 @@ def simple_filter_flow():
     dr_str = get_input("Dry Run? (y/n)", default="n")
     dry_run = dr_str.lower().startswith('y')
     
-    execute_filter(mode, limit, threshold, dry_run)
+    mark_read_str = get_input("Mark as read? (y/n)", default="n")
+    mark_read = mark_read_str.lower().startswith('y')
+
+    execute_filter(mode, limit, threshold, dry_run, mark_read=mark_read)
 
 def select_stream_interactive():
     """Interactive stream selector"""
@@ -221,12 +231,15 @@ def select_stream_interactive():
     if not categories or not subscriptions or not counts_data:
         console.print("[red]Failed to fetch complete directory info.[/red]")
         if questionary.confirm("Continue with default Global Stream?", default=True).ask():
-            return None
-        return None
+            return None, "Global (Default)"
+        return None, None
 
     # Map counts
     # API returns: {"unreadcounts": [{"id": "...", "count": 123, "updated": ...}]}
     count_map = {item['id']: item['count'] for item in counts_data.get('unreadcounts', [])}
+
+    # Create ID to Label mapping for return value
+    id_to_label = {}
 
     choices = []
 
@@ -239,7 +252,9 @@ def select_stream_interactive():
             global_count = count
             break
 
-    choices.append(questionary.Choice(f"Global All ({global_count} unread)", value=None))
+    global_label = f"Global All ({global_count} unread)"
+    choices.append(questionary.Choice(global_label, value=None))
+    id_to_label[None] = "Global All"
 
     # 2. Categories
     cat_choices = []
@@ -248,7 +263,9 @@ def select_stream_interactive():
         label = cat['label']
         count = count_map.get(cid, 0)
         if count > 0:
-            cat_choices.append((count, f"📁 Category: {label}", cid))
+            display_label = f"📁 Category: {label}"
+            cat_choices.append((count, display_label, cid))
+            id_to_label[cid] = f"Category: {label}"
 
     # Sort by count descending
     cat_choices.sort(key=lambda x: x[0], reverse=True)
@@ -263,7 +280,9 @@ def select_stream_interactive():
         title = sub['title']
         count = count_map.get(fid, 0)
         if count > 0:
-            feed_choices.append((count, f"📰 Feed: {title}", fid))
+            display_label = f"📰 Feed: {title}"
+            feed_choices.append((count, display_label, fid))
+            id_to_label[fid] = f"Feed: {title}"
 
     feed_choices.sort(key=lambda x: x[0], reverse=True)
 
@@ -292,12 +311,103 @@ def select_stream_interactive():
         ])
     ).ask()
 
+    stream_label = None
     if stream_id == "MANUAL":
         stream_id = questionary.text("Enter Stream ID:").ask()
         if not stream_id:
-            return None
+            return None, None
+        stream_label = f"Manual ID: {stream_id}"
+    else:
+        stream_label = id_to_label.get(stream_id, str(stream_id))
 
-    return stream_id
+    return stream_id, stream_label
+
+
+def resolve_stream_feed_titles(stream_id, categories=None, subscriptions=None):
+    if not stream_id:
+        return None
+
+    if categories is None:
+        categories = feedly_get_categories()
+    if subscriptions is None:
+        subscriptions = feedly_get_subscriptions()
+
+    if not categories or not subscriptions:
+        return None
+
+    category_ids = {cat.get('id') for cat in categories}
+    if stream_id in category_ids:
+        matched_titles = []
+        for sub in subscriptions:
+            sub_categories = sub.get('categories', [])
+            if any(cat.get('id') == stream_id for cat in sub_categories):
+                title = sub.get('title')
+                if title:
+                    matched_titles.append(title)
+        return matched_titles
+
+    for sub in subscriptions:
+        if sub.get('id') == stream_id:
+            title = sub.get('title')
+            return [title] if title else []
+
+    return None
+
+
+def filter_articles_by_titles(articles, titles):
+    if titles is None:
+        return articles
+    if not titles:
+        return []
+
+    title_set = set(titles)
+    return [a for a in articles if a.get('origin') in title_set]
+
+
+def _import_error_hint(modname: str, err: Exception) -> str:
+    # Goal: unblock users hitting binary dependency issues (pydantic-core / jiter) after Python upgrades.
+    return (
+        f"Failed to import '{modname}': {err}\n\n"
+        "Common causes:\n"
+        "- You upgraded Python (e.g. 3.13 → 3.14) and binary wheels (pydantic-core / jiter) no longer match.\n"
+        "- Your environment has dependency conflicts (e.g. langchain-openai requires openai<2.0.0 but openai 2.x is installed).\n\n"
+        "Recommended fix (clean venv):\n"
+        "  python -m venv .venv\n"
+        "  .venv\\Scripts\\activate\n"
+        "  python -m pip install -U pip\n"
+        "  python -m pip install -r requirements.txt\n\n"
+        "If you use langchain-openai, pin OpenAI SDK to 1.x:\n"
+        "  python -m pip install \"openai>=1.86.0,<2.0.0\"\n\n"
+        "Diagnostics to paste:\n"
+        "  python -V\n"
+        "  python -c \"import platform; print(platform.architecture()); print(platform.python_version())\"\n"
+        "  python -c \"import sys; print(sys.executable)\"\n"
+        "  python -m pip -V\n"
+        "  python -m pip show pydantic-core pydantic openai jiter langchain-openai\n"
+    )
+
+
+def _verify_startup_dependencies_or_exit() -> None:
+    """Fail-fast dependency check.
+
+    User preference: if LLM-related deps are broken (often due to Python upgrades
+    making binary wheels like pydantic-core/jiter incompatible), show a clear
+    message and exit before entering the menu.
+    """
+    # Importing these modules is enough to trigger the common failure modes.
+    # Keep the import list minimal and aligned with the plan.
+    required = [
+        "feedly_filter",
+        "article_analyzer",
+        "regenerate_summary",
+    ]
+
+    for mod in required:
+        try:
+            __import__(mod)
+        except Exception as e:
+            console.print(Panel(_import_error_hint(mod, e), style="red"))
+            raise SystemExit(1)
 
 
 def main_menu():
@@ -358,18 +468,89 @@ def main_menu():
             console.print(Panel.fit("Feedly AI Filter TUI", style="bold cyan", subtitle="Interactive Runner"))
 
 def run_summary_flow():
-    console.print(Panel("Regenerating Summary...", style="bold blue"))
     try:
-        regenerate_summary.main()
-        console.print(Panel("Summary Generation Complete!", style="bold green"))
-    except Exception as e:
-        logger.exception("Error generating summary")
-        console.print("[red]Failed to generate summary.[/red]")
+        import questionary
+    except ImportError:
+        console.print(Panel("Regenerating Summary...", style="bold blue"))
+        try:
+            try:
+                import regenerate_summary
+            except Exception as e:
+                console.print(Panel(_import_error_hint('regenerate_summary', e), style="red"))
+                return
+
+            regenerate_summary.main()
+            console.print(Panel("Summary Generation Complete!", style="bold green"))
+        except Exception:
+            logger.exception("Error generating summary")
+            console.print("[red]Failed to generate summary.[/red]")
+        return
+
+    mode = questionary.select(
+        "Summary Mode:",
+        choices=[
+            questionary.Choice("Summarize local analyzed articles", value="local"),
+            questionary.Choice("Refresh from Feedly (analyze & summarize)", value="refresh"),
+            questionary.Choice("Back", value="back")
+        ]
+    ).ask()
+
+    if mode == "back":
+        return
+
+    stream_id, stream_label = select_stream_interactive()
+    if stream_id is None and stream_label is None:
+        return
+
+    if mode == "local":
+        console.print(Panel("Summarizing Local Articles...", style="bold blue"))
+        try:
+            console.print("[dim]Loading analyzed_articles.json...[/dim]")
+            articles = load_articles('analyzed_articles.json')
+
+            if stream_id:
+                console.print("[dim]Resolving selected stream...[/dim]")
+                titles = resolve_stream_feed_titles(stream_id)
+                if titles is None:
+                    console.print("[yellow]Unable to resolve stream to feeds. Using all local articles.[/yellow]")
+                articles = filter_articles_by_titles(articles, titles)
+
+            if not articles:
+                console.print("[yellow]No articles matched the selection.[/yellow]")
+                return
+
+            try:
+                import regenerate_summary
+            except Exception as e:
+                console.print(Panel(_import_error_hint('regenerate_summary', e), style="red"))
+                return
+
+            summary_file, latest_file = regenerate_summary.generate_summary_from_articles(articles)
+            console.print(Panel(
+                f"Summary Generation Complete!\n- {summary_file}\n- {latest_file}",
+                style="bold green"
+            ))
+        except Exception:
+            logger.exception("Error generating summary")
+            console.print("[red]Failed to generate summary.[/red]")
+        return
+
+    # refresh mode
+    limit_str = questionary.text("Article Limit:", default="100").ask()
+    try:
+        limit = int(limit_str)
+    except ValueError:
+        console.print("[red]Invalid limit, using default 100[/red]")
+        limit = 100
+
+    mark_read = questionary.confirm("Mark as read after analysis?", default=PROJ_CONFIG.get("mark_read", False)).ask()
+
+    execute_analyze(limit, True, mark_read, stream_id, 3, stream_label)
 
 def run_analyze_flow():
     """Interactive analyze flow using questionary"""
     import questionary
-    
+
     # Configure parameters
     limit_str = questionary.text("Article Limit:", default="100").ask()
     try:
@@ -377,17 +558,18 @@ def run_analyze_flow():
     except ValueError:
         console.print("[red]Invalid limit, using default 100[/red]")
         limit = 100
-    
+
     refresh = questionary.confirm("Refresh from Feedly?", default=True).ask()
 
     stream_id = None
+    stream_label = None
     if refresh:
         # Only ask for stream if we are refreshing
         use_stream = questionary.confirm("Select specific Category/Feed?", default=False).ask()
         if use_stream:
-            stream_id = select_stream_interactive()
+            stream_id, stream_label = select_stream_interactive()
 
-    mark_read = questionary.confirm("Mark as read after analysis?", default=False).ask()
+    mark_read = questionary.confirm("Mark as read after analysis?", default=PROJ_CONFIG.get("mark_read", False)).ask()
 
     threads_str = questionary.text("Number of threads:", default="3").ask()
     try:
@@ -396,15 +578,16 @@ def run_analyze_flow():
         console.print("[red]Invalid thread count, using default 3[/red]")
         threads = 3
 
-    execute_analyze(limit, refresh, mark_read, stream_id, threads)
+    execute_analyze(limit, refresh, mark_read, stream_id, threads, stream_label)
 
-def execute_analyze(limit, refresh, mark_read, stream_id=None, threads=3):
+def execute_analyze(limit, refresh, mark_read, stream_id=None, threads=3, stream_label=None):
     """Shared analyze execution logic"""
+    display_stream = stream_label if stream_label else (stream_id or 'Global (All)')
     console.print(Panel(
         f"Analyzing Articles\n"
         f"Limit: {limit}\n"
         f"Refresh: {refresh}\n"
-        f"Stream: {stream_id or 'Global (All)'}\n"
+        f"Stream: {display_stream}\n"
         f"Mark Read: {mark_read}\n"
         f"Threads: {threads}",
         title="Configuration",
@@ -430,6 +613,12 @@ def execute_analyze(limit, refresh, mark_read, stream_id=None, threads=3):
 
         try:
             # Call article_analyzer.main() which will parse sys.argv
+            try:
+                import article_analyzer
+            except Exception as e:
+                console.print(Panel(_import_error_hint('article_analyzer', e), style="red"))
+                return
+
             article_analyzer.main()
             console.print(Panel("Article Analysis Complete!", style="bold green"))
         finally:
@@ -442,14 +631,16 @@ def execute_analyze(limit, refresh, mark_read, stream_id=None, threads=3):
         logger.exception("An error occurred during analysis")
         console.print("[red]An error occurred. Check logs above.[/red]")
 
-def execute_filter(mode, limit, threshold, dry_run, stream_id=None):
+def execute_filter(mode, limit, threshold, dry_run, mark_read, stream_id=None, stream_label=None):
     """Shared execution logic"""
+    display_stream = stream_label if stream_label else (stream_id or 'Global (All)')
     console.print(Panel(
         f"Running Mode: [bold]{mode}[/bold]\n"
         f"Limit: {limit}\n"
         f"Threshold: {threshold}\n"
-        f"Stream: {stream_id or 'Global (All)'}\n"
-        f"Dry Run: {dry_run}",
+        f"Stream: {display_stream}\n"
+        f"Dry Run: {dry_run}\n"
+        f"Mark Read: {mark_read}",
         title="Configuration",
         border_style="blue"
     ))
@@ -461,6 +652,12 @@ def execute_filter(mode, limit, threshold, dry_run, stream_id=None):
         # Determine target stream (priority: explicitly passed stream_id > mode default)
         target_stream = stream_id
 
+        try:
+            import feedly_filter
+        except Exception as e:
+            console.print(Panel(_import_error_hint('feedly_filter', e), style="red"))
+            return
+
         if mode == 'newsflash':
             # For newsflash, usually we target 36kr, but if user provided a stream, use that
             if not target_stream:
@@ -470,19 +667,19 @@ def execute_filter(mode, limit, threshold, dry_run, stream_id=None):
             filters = [feedly_filter.newsflash_filter]
         elif mode == 'low-score':
             articles = feedly_filter.fetch_articles(limit, stream_id=target_stream)
-            filters = [lambda a: feedly_filter.low_score_filter(a, threshold, dry_run)]
+            filters = [lambda a: feedly_filter.low_score_filter(a, threshold, dry_run, mark_read)]
         else:  # all
             articles = feedly_filter.fetch_articles(limit, stream_id=target_stream)
             filters = [
                 feedly_filter.newsflash_filter,
-                lambda a: feedly_filter.low_score_filter(a, threshold, dry_run)
+                lambda a: feedly_filter.low_score_filter(a, threshold, dry_run, mark_read)
             ]
 
         if not articles:
             console.print("[yellow]No unread articles found.[/yellow]")
             return
 
-        feedly_filter.run_filters(articles, filters, dry_run)
+        feedly_filter.run_filters(articles, filters, dry_run, mark_read)
         console.print(Panel("Analysis Complete!", style="bold green"))
         
     except KeyboardInterrupt:
@@ -528,14 +725,20 @@ def run_filter_flow():
 
     # 4. Stream Selection
     stream_id = None
+    stream_label = None
     use_stream = questionary.confirm("Select specific Category/Feed?", default=False).ask()
     if use_stream:
-        stream_id = select_stream_interactive()
+        stream_id, stream_label = select_stream_interactive()
 
     # 3. Execution
-    execute_filter(mode, limit, threshold, dry_run, stream_id)
+    mark_read = questionary.confirm("Mark as read after filter?", default=PROJ_CONFIG.get("mark_read", False)).ask()
+
+    execute_filter(mode, limit, threshold, dry_run, mark_read, stream_id, stream_label)
 
 if __name__ == "__main__":
+    # Fail fast on broken LLM dependencies (do not enter menu).
+    _verify_startup_dependencies_or_exit()
+
     try:
         main_menu()
     except KeyboardInterrupt:

@@ -6,7 +6,7 @@ from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
-DB_PATH = os.path.join(os.getcwd(), 'rss_scores.db')
+DB_PATH = os.getenv('RSS_SCORES_DB', os.path.join(os.getcwd(), 'rss_scores.db'))
 
 def init_db():
     try:
@@ -31,7 +31,7 @@ def get_cached_score(article_id: str) -> dict | None:
     try:
         conn = sqlite3.connect(DB_PATH)
         c = conn.cursor()
-        c.execute('SELECT score, data FROM article_scores WHERE article_id = ?', (article_id,))
+        c.execute('SELECT score, data, updated_at FROM article_scores WHERE article_id = ?', (article_id,))
         row = c.fetchone()
         conn.close()
 
@@ -40,9 +40,13 @@ def get_cached_score(article_id: str) -> dict | None:
                 data = json.loads(row[1])
             except:
                 data = {}
+            updated_at = row[2]
+            if hasattr(updated_at, "isoformat"):
+                updated_at = updated_at.isoformat()
             return {
                 'score': row[0],
-                'data': data
+                'data': data,
+                'updated_at': updated_at
             }
     except Exception as e:
         logger.error(f"Cache read error: {e}")

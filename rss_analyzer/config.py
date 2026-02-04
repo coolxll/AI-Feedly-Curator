@@ -13,7 +13,7 @@ load_dotenv()
 PROJ_CONFIG = {
     "input_file": "unread_news.json",
     "limit": 100,
-    "mark_read": True,      # 是否默认标记已读
+    "mark_read": False,      # 是否默认标记已读
     "debug": False,         # 是否默认开启Debug
     "refresh": True,       # 是否默认刷新
     "proxy": "127.0.0.1:7890",  # 代理服务器

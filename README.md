@@ -9,7 +9,7 @@ AI 驱动的 RSS 文章分析器，自动从 Feedly 获取未读文章，使用 
 - 🚩 **负面特征检测** - 自动识别软文、标题党、AI 生成及过时信息
 - 📊 **总体报告** - 生成包含趋势分析和高质量推荐的 Markdown 报告
 - 🔄 **多 Profile 支持** - 灵活切换不同的 API 服务商（支持不同任务使用不同模型）
-- ✅ **自动标记已读** - 处理后自动同步 Feedly 阅读状态
+- ✅ **可选标记已读** - 默认不自动标记，需显式开启
 
 ## 快速开始
 
@@ -36,12 +36,42 @@ python article_analyzer.py --refresh
 # 分析已有的文章
 python article_analyzer.py --input unread_news.json
 
-# 限制处理数量并标记已读
+# 限制处理数量并标记已读（默认不标记，需显式开启）
 python article_analyzer.py --refresh --limit 50 --mark-read
 
 # 重新生成总体摘要（基于已分析的文章，不重新调用 API 评分）
 python regenerate_summary.py
 ```
+
+### 4. Feedly Web UI AI 覆盖（Chrome 扩展 + Native Messaging）
+
+#### 4.1 Native Host 安装（一次性）
+
+```powershell
+# 1) 修改 native_host/feedly_ai_overlay.json
+#    - path: Python 可执行路径
+#    - arguments: feedly_native_host.py 绝对路径
+#    - allowed_origins: 你的 Chrome 扩展 ID
+
+# 2) 注册 native host
+powershell -ExecutionPolicy Bypass -File .\scripts\install_native_host.ps1
+```
+
+可选：如需指定数据库路径，设置环境变量 `RSS_SCORES_DB` 指向 `rss_scores.db`。
+
+#### 4.2 加载扩展
+
+1. 打开 `chrome://extensions`，启用开发者模式
+2. 选择“加载已解压的扩展”，选择 `extension/` 目录
+3. 复制扩展 ID 并填入 `native_host/feedly_ai_overlay.json` 的 `allowed_origins`
+
+#### 4.3 使用
+
+打开 Feedly Web：
+- `https://feedly.com/*`
+- `https://cloud.feedly.com/*`
+
+列表与详情中会展示评分与摘要覆盖层。
 
 ## 命令行参数
 
@@ -50,7 +80,7 @@ python regenerate_summary.py
 | `--input` | 输入 JSON 文件 | `unread_news.json` |
 | `--limit` | 处理文章数量 | `100` |
 | `--refresh` | 从 Feedly 刷新文章 | `False` |
-| `--mark-read` | 标记已读 | `True` |
+| `--mark-read` | 标记已读 | `False` |
 | `--debug` | 启用调试模式 | `False` |
 
 ## 多 Profile 配置
