@@ -37,7 +37,7 @@ try:
 
     from rss_analyzer.cache import get_cached_score, save_cached_score
     from rss_analyzer.article_fetcher import fetch_article_content
-    from rss_analyzer.llm_analyzer import analyze_article_with_llm, summarize_single_article
+    from rss_analyzer.llm_analyzer import analyze_article_with_llm, summarize_single_article, analyze_articles_with_llm_batch
 
     logging.info("成功导入 rss_analyzer 模块")
 except Exception:
@@ -172,6 +172,9 @@ def _handle_get_scores(msg: dict) -> dict:
     logging.info(f"Handling get_scores for {len(items_to_process)} items")
 
     results = {}
+    missing_items = []
+
+    # 1. 第一遍扫描：检查缓存，收集未命中的文章
     for item in items_to_process:
         # 兼容 dict 或 str
         if isinstance(item, str):
@@ -183,9 +186,63 @@ def _handle_get_scores(msg: dict) -> dict:
 
         cached = get_cached_score(article_id)
 
-        # 如果缓存未命中，且有标题，则进行实时计算
+        # 如果缓存未命中，且有标题，则标记为需要分析
         if not cached and item.get("title"):
-            logging.info(f"Cache miss for {article_id}, triggering analysis...")
+             missing_items.append(item)
+        else:
+             results[article_id] = _normalize_item(article_id, cached)
+
+    # 2. 决定批处理还是单篇处理
+    missing_count = len(missing_items)
+    if missing_count == 0:
+        return {"items": results}
+
+    logging.info(f"Cache miss for {missing_count} articles. Threshold=10")
+
+    if missing_count > 10:
+        # === 批量处理模式 ===
+        logging.info(f"Triggering BATCH analysis for {missing_count} articles...")
+        try:
+            # 准备数据给批量分析器
+            analyzed_batch = analyze_articles_with_llm_batch(missing_items)
+
+            # 匹配结果并保存缓存
+            if analyzed_batch and len(analyzed_batch) == missing_count:
+                for idx, analyzed in enumerate(analyzed_batch):
+                    item = missing_items[idx]
+                    article_id = item.get("id")
+
+                    score = analyzed.get("score", 0)
+                    save_cached_score(article_id, score, analyzed)
+
+                    results[article_id] = _normalize_item(article_id, {
+                        "score": score,
+                        "data": analyzed,
+                        "updated_at": None
+                    })
+                logging.info("Batch analysis completed successfully")
+            else:
+                logging.error("Batch analysis returned mismatching results, fallback to failed")
+                # 标记为失败，避免卡死
+                for item in missing_items:
+                    article_id = item.get("id")
+                    results[article_id] = _normalize_item(article_id, None)
+
+        except Exception as e:
+            logging.error(f"Batch analysis exception: {e}")
+            # 出错了也尽量返回能返回的
+            for item in missing_items:
+                article_id = item.get("id")
+                if article_id not in results:
+                    results[article_id] = _normalize_item(article_id, None)
+
+    else:
+        # === 单篇处理模式 (原有逻辑) ===
+        logging.info(f"Triggering SINGLE analysis for {missing_count} articles...")
+        for item in missing_items:
+            article_id = item.get("id")
+            logging.info(f"Analyzing single: {article_id}")
+
             analyzed = _perform_analysis(
                 article_id,
                 item.get("title"),
@@ -193,10 +250,10 @@ def _handle_get_scores(msg: dict) -> dict:
                 item.get("summary", ""),
                 item.get("content")
             )
-            if analyzed:
-                cached = analyzed
 
-        results[article_id] = _normalize_item(article_id, cached)
+            # 如果分析失败（返回None），analyzed就是None，_normalize_item会处理
+            cached = analyzed
+            results[article_id] = _normalize_item(article_id, cached)
 
     return {"items": results}
 
