@@ -162,43 +162,7 @@ function ensureBadgeContainer(el) {
   return container;
 }
 
-// Simple markdown to HTML formatter
-function formatMarkdown(text) {
-  if (!text) return '';
 
-  // First escape any raw HTML that might be in the content (security)
-  let html = text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
-
-  // Then apply markdown formatting
-  html = html
-    // Headers (must come before other inline formatting)
-    .replace(/^#### (.+)$/gm, '<h5>$1</h5>')
-    .replace(/^### (.+)$/gm, '<h4>$1</h4>')
-    .replace(/^## (.+)$/gm, '<h3>$1</h3>')
-    .replace(/^# (.+)$/gm, '<h2>$1</h2>')
-    // Bold (use non-greedy matching)
-    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-    // Italic
-    .replace(/\*([^*]+)\*/g, '<em>$1</em>')
-    // Bullet points - convert to list items
-    .replace(/^[\*\-] (.+)$/gm, '<li>$1</li>');
-
-  // Wrap consecutive list items in ul tags
-  html = html.replace(/(<li>[\s\S]*?<\/li>)(\s*<li>[\s\S]*?<\/li>)*/g, (match) => {
-    return '<ul>' + match + '</ul>';
-  });
-
-  // Convert remaining double newlines to paragraph breaks
-  html = html.replace(/\n\n+/g, '</p><p>');
-
-  // Convert single newlines to line breaks
-  html = html.replace(/\n/g, '<br>');
-
-  return html;
-}
 
 // 全局 Tooltip 元素管理
 let tooltipEl = null;
@@ -422,7 +386,7 @@ function renderItem(el, item) {
           title.style.color = '#8b5cf6';
 
           const text = document.createElement('div');
-          text.innerHTML = formatMarkdown(summaryContent);
+          text.innerHTML = marked.parse(summaryContent);
 
           summaryDiv.appendChild(title);
           summaryDiv.appendChild(text);
