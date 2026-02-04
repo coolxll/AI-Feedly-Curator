@@ -624,8 +624,132 @@ function getObserverRoot() {
   );
 }
 
-const observer = new MutationObserver(() => debouncedScan());
-observer.observe(getObserverRoot(), { childList: true, subtree: true });
+function fastProcessEntry(entry, mapToFetch, itemsToFetch) {
+  if (!entry || !(entry instanceof Element)) return;
+
+  // Already rendered
+  if (entry.querySelector('.ai-score-badge') || entry.querySelector('.ai-analyze-btn')) {
+    return;
+  }
+
+  const id = getEntryId(entry);
+  if (!id) return;
+
+  // If we already have it locally, render immediately
+  const cached = STATE.itemCache.get(id);
+  if (cached) {
+    renderItem(entry, cached);
+    return;
+  }
+
+  // Otherwise request from background immediately
+  if (STATE.pending.has(id)) return;
+
+  const titleEl = entry.querySelector('.EntryTitleLink, .entry-title-link, .entry__title, .ArticleTitle');
+  const summaryEl = entry.querySelector('.EntrySummary, .entry__summary, .content, .entryContent');
+  const link = titleEl ? titleEl.getAttribute('href') : null;
+  const url = link ? (link.startsWith('http') ? link : window.location.origin + link) : null;
+
+  const item = {
+    id: id,
+    title: titleEl ? titleEl.textContent.trim() : 'Unknown Title',
+    url: url,
+    summary: summaryEl ? summaryEl.textContent.trim() : ''
+  };
+
+  STATE.pending.set(id, entry);
+  mapToFetch.set(id, entry);
+  itemsToFetch.push(item);
+}
+
+function fastProcessMutations(mutations) {
+  const itemsToFetch = [];
+  const mapToFetch = new Map();
+
+  for (const m of mutations) {
+    if (!m.addedNodes || m.addedNodes.length === 0) continue;
+
+    for (const node of m.addedNodes) {
+      if (!(node instanceof Element)) continue;
+
+      // 1) If node is inside an entry
+      if (node.closest) {
+        const parentEntry = node.closest(SELECTORS.entry);
+        if (parentEntry) {
+          fastProcessEntry(parentEntry, mapToFetch, itemsToFetch);
+        }
+      }
+
+      // 2) If node itself is an entry
+      if (node.matches && node.matches(SELECTORS.entry)) {
+        fastProcessEntry(node, mapToFetch, itemsToFetch);
+      }
+
+      // 3) Any entries under this node
+      const innerEntries = node.querySelectorAll ? node.querySelectorAll(SELECTORS.entry) : [];
+      for (const entry of innerEntries) {
+        fastProcessEntry(entry, mapToFetch, itemsToFetch);
+      }
+    }
+  }
+
+  if (itemsToFetch.length === 0) return false;
+
+  chrome.runtime.sendMessage({ type: 'get_scores', items: itemsToFetch }, (resp) => {
+    if (chrome.runtime.lastError) {
+      console.error("[Feedly AI Overlay] Error:", chrome.runtime.lastError);
+      for (const item of itemsToFetch) STATE.pending.delete(item.id);
+      return;
+    }
+
+    const items = resp?.items || {};
+    for (const item of itemsToFetch) {
+      const id = item.id;
+      const entry = mapToFetch.get(id) || STATE.pending.get(id);
+      if (items[id]) {
+        STATE.itemCache.set(id, items[id]);
+      }
+      if (entry) {
+        renderItem(entry, items[id]);
+      }
+      STATE.pending.delete(id);
+      STATE.processed.add(id);
+    }
+  });
+
+  return true;
+}
+
+const observer = new MutationObserver((mutations) => {
+  // Fast path: when user opens an article, Feedly often injects DOM; render badge immediately.
+  // Fallback: if we didn't detect any entry nodes, use the original debounced full scan.
+  try {
+    if (!fastProcessMutations(mutations)) {
+      debouncedScan();
+    }
+  } catch (e) {
+    console.error("[Feedly AI] Mutation handling error:", e);
+    debouncedScan();
+  }
+});
+
+function startObserver() {
+  const root = getObserverRoot();
+  if (!root) {
+    console.log("[Feedly AI] Observer root not found, retrying in 1s...");
+    setTimeout(startObserver, 1000);
+    return;
+  }
+  try {
+    observer.observe(root, { childList: true, subtree: true });
+    console.log("[Feedly AI] Observer started on:", root);
+  } catch (e) {
+    console.error("[Feedly AI] Failed to start observer:", e);
+    // Fallback to body if specific root fails
+    observer.observe(document.body, { childList: true, subtree: true });
+  }
+}
 
 console.log("[Feedly AI Overlay] Starting initial scan...");
 scheduleScan();
+startObserver();

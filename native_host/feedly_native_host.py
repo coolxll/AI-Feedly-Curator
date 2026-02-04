@@ -5,22 +5,58 @@ import struct
 import sys
 import traceback
 import logging
+from logging.handlers import TimedRotatingFileHandler
 
-# === 调试代码开始 ===
-# 放到最前面，确保任何错误都能被记录
-LOG_FILE = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), "native_host_debug.log"
-)
-logging.basicConfig(
-    filename=LOG_FILE,
-    level=logging.DEBUG,
-    format="%(asctime)s - %(levelname)s - %(message)s",
-)
+def setup_native_logging():
+    """配置 Native Host 的日志系统：按日轮转，降噪，支持环境变量覆盖"""
+    # 1. 确定日志目录和文件
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    log_dir = os.environ.get("RSS_NATIVE_LOG_DIR", os.path.join(current_dir, "logs"))
+    if not os.path.exists(log_dir):
+        try:
+            os.makedirs(log_dir, exist_ok=True)
+        except Exception:
+            # 如果没法创建目录，就退回到当前目录
+            log_dir = current_dir
+
+    log_file = os.path.join(log_dir, "native_host.log")
+
+    # 2. 确定日志级别 (默认 INFO)
+    level_str = os.environ.get("RSS_NATIVE_LOG_LEVEL", "INFO").upper()
+    level = getattr(logging, level_str, logging.INFO)
+
+    # 3. 配置 Handler (按日轮转，保留 7 天)
+    handler = TimedRotatingFileHandler(
+        log_file,
+        when="midnight",
+        interval=1,
+        backupCount=7,
+        encoding="utf-8"
+    )
+    formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+    handler.setFormatter(formatter)
+
+    # 4. 配置 Root Logger
+    root_logger = logging.getLogger()
+    root_logger.setLevel(level)
+    # 清除旧的 handlers (如果有)
+    for h in root_logger.handlers[:]:
+        root_logger.removeHandler(h)
+    root_logger.addHandler(handler)
+
+    # 5. 限制第三方库日志噪声
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("urllib3").setLevel(logging.WARNING)
+    logging.getLogger("openai").setLevel(logging.WARNING)
+
+    return log_file
+
+# 在最开始调用
+LOG_FILE = setup_native_logging()
 logging.info("Native Host 启动...")
-logging.info(f"Python解释器: {sys.executable}")
-logging.info(f"当前工作目录: {os.getcwd()}")
-logging.info(f"系统路径: {sys.path}")
-# === 调试代码结束 ===
+logging.debug(f"Python解释器: {sys.executable}")
+logging.debug(f"当前工作目录: {os.getcwd()}")
+logging.debug(f"系统路径: {sys.path}")
 
 try:
     # 这一步是为了让它能找到上级目录的 rss_analyzer 包
@@ -53,7 +89,7 @@ def _read_message():
     try:
         raw_length = sys.stdin.buffer.read(4)
         if len(raw_length) == 0:
-            logging.info("stdin closed")
+            logging.debug("stdin closed")
             return None
         if len(raw_length) != 4:
             logging.error(f"Invalid length header: {len(raw_length)} bytes")
@@ -139,7 +175,7 @@ def _normalize_item(article_id: str, cached: dict | None) -> dict:
 
 def _handle_get_score(msg: dict) -> dict:
     article_id = msg.get("id")
-    logging.info(f"Handling get_score for: {article_id}")
+    logging.debug(f"Handling get_score for: {article_id}")
     cached = get_cached_score(article_id)
 
     if not cached:
@@ -155,7 +191,7 @@ def _handle_get_score(msg: dict) -> dict:
             if result:
                 cached = result
 
-    logging.info(f"Cache result: {'Found' if cached else 'Not Found'}")
+    logging.debug(f"Cache result: {'Found' if cached else 'Not Found'}")
     return _normalize_item(article_id, cached)
 
 
@@ -344,6 +380,10 @@ def main():
         msg = _read_message()
         if msg is None:
             break
+
+        # 记录请求
+        logging.debug(f"Received message: {json.dumps(msg, ensure_ascii=False)}")
+
         try:
             response = _handle_message(msg)
         except Exception as exc:
@@ -353,6 +393,10 @@ def main():
                 "detail": str(exc),
                 "trace": traceback.format_exc(limit=3),
             }
+
+        # 记录响应
+        logging.debug(f"Sending response: {json.dumps(response, ensure_ascii=False)}")
+
         _send_message(response)
 
 

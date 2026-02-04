@@ -49,6 +49,7 @@ output/
 # Logs
 *.log
 run_log.txt
+native_host/logs/
 
 # DB
 rss_scores.db
