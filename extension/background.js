@@ -396,12 +396,30 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     (async () => {
         let content = msg.content || '';
 
-        if (content.length < 100 && msg.url) {
-            console.log('[Feedly AI] Content too short, fetching from URL...');
+        // If content is very short (likely just a snippet), try to fetch from URL
+        // Increased threshold to 500 to catch more incomplete previews
+        // But respect user's request: if it's not "extremely short", don't fetch
+        if (content.length < 200 && msg.url) {
+            console.log('[Feedly AI] Content too short (< 200 chars), fetching from URL...');
+            updateSidePanelState(windowId, {
+                title: msg.title,
+                content: '正在获取全文...',
+                status: 'loading'
+            });
+
             const fetched = await fetchArticleContent(msg.url);
             if (fetched && fetched.length > content.length) {
                 content = fetched;
             }
+        } else if (content.length < 50) {
+             // Still too short even after check?
+             updateSidePanelState(windowId, {
+                title: msg.title,
+                content: '文章内容过短，无法生成总结。',
+                status: 'error'
+             });
+             sendResponse({ error: 'Content too short' });
+             return;
         }
 
         // Use streaming API
