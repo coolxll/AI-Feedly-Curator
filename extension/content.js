@@ -55,30 +55,159 @@ if (!document.getElementById(STYLE_ID)) {
       line-height: 1.5;
       border: 1px solid rgba(255,255,255,0.1); /* 增加微弱边框增加对比度 */
     }
+    /* 侧边栏样式 */
+    #ai-sidebar-overlay {
+      position: fixed;
+      top: 0;
+      right: 0;
+      width: 420px;
+      height: 100vh;
+      background: #ffffff;
+      box-shadow: -4px 0 20px rgba(0,0,0,0.15);
+      z-index: 2147483646;
+      display: none;
+      flex-direction: column;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }
+    #ai-sidebar-overlay.open {
+      display: flex;
+    }
+    .ai-sidebar-header {
+      padding: 16px 20px;
+      background: #8b5cf6;
+      color: #fff;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-shrink: 0;
+    }
+    .ai-sidebar-header h3 {
+      margin: 0;
+      font-size: 16px;
+      font-weight: 600;
+    }
+    .ai-sidebar-close {
+      background: none;
+      border: none;
+      color: #fff;
+      font-size: 24px;
+      cursor: pointer;
+      padding: 0;
+      line-height: 1;
+    }
+    .ai-sidebar-close:hover {
+      opacity: 0.8;
+    }
+    .ai-sidebar-content {
+      flex: 1;
+      overflow-y: auto;
+      padding: 20px;
+      font-size: 14px;
+      line-height: 1.7;
+      color: #374151;
+    }
+    .ai-sidebar-content h2, .ai-sidebar-content h3, .ai-sidebar-content h4 {
+      margin: 20px 0 10px 0;
+      color: #111827;
+      font-weight: 600;
+    }
+    .ai-sidebar-content h2 { font-size: 18px; }
+    .ai-sidebar-content h3 { font-size: 16px; }
+    .ai-sidebar-content h4 { font-size: 15px; }
+    .ai-sidebar-content ul {
+      margin: 8px 0;
+      padding-left: 20px;
+    }
+    .ai-sidebar-content li {
+      margin: 6px 0;
+    }
+    .ai-sidebar-content strong {
+      color: #111827;
+    }
+    .ai-sidebar-loading {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 200px;
+      color: #6b7280;
+    }
+    .ai-sidebar-loading .spinner-large {
+      width: 40px;
+      height: 40px;
+      border: 3px solid #e5e7eb;
+      border-top-color: #8b5cf6;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+      margin-bottom: 16px;
+    }
+    .ai-sidebar-title {
+      padding: 12px 20px;
+      background: #f3f4f6;
+      border-bottom: 1px solid #e5e7eb;
+      font-weight: 600;
+      color: #374151;
+      flex-shrink: 0;
+    }
+    /* 深色模式 */
+    [data-theme="dark"] #ai-sidebar-overlay { background: #1f2937; }
+    [data-theme="dark"] .ai-sidebar-content { color: #d1d5db; }
+    [data-theme="dark"] .ai-sidebar-content h2,
+    [data-theme="dark"] .ai-sidebar-content h3,
+    [data-theme="dark"] .ai-sidebar-content h4,
+    [data-theme="dark"] .ai-sidebar-content strong { color: #f3f4f6; }
+    [data-theme="dark"] .ai-sidebar-title { background: #374151; border-color: #4b5563; color: #d1d5db; }
+    [data-theme="dark"] .ai-sidebar-loading { color: #9ca3af; }
+
     /* 详情页总结面板样式 */
     .ai-summary-panel {
       margin: 16px 0;
-      padding: 12px 16px;
+      padding: 16px 20px;
       background: #f9fafb;
       border: 1px solid #e5e7eb;
       border-radius: 8px;
       font-size: 14px;
-      line-height: 1.6;
+      line-height: 1.7;
       color: #374151;
+      max-height: 600px;
+      overflow-y: auto;
     }
     .ai-summary-title {
       font-weight: 600;
-      margin-bottom: 4px;
+      margin-bottom: 12px;
       display: flex;
       align-items: center;
       color: #111827;
+      font-size: 16px;
     }
     .ai-summary-content {
-      white-space: pre-wrap;
+      white-space: normal;
+    }
+    .ai-summary-content h2, .ai-summary-content h3, .ai-summary-content h4 {
+      margin: 16px 0 8px 0;
+      color: #111827;
+      font-weight: 600;
+    }
+    .ai-summary-content h2 { font-size: 18px; }
+    .ai-summary-content h3 { font-size: 16px; }
+    .ai-summary-content h4 { font-size: 15px; }
+    .ai-summary-content ul {
+      margin: 8px 0;
+      padding-left: 20px;
+    }
+    .ai-summary-content li {
+      margin: 4px 0;
+    }
+    .ai-summary-content strong {
+      color: #111827;
     }
     /* 深色模式适配 */
     [data-theme="dark"] .ai-summary-panel { background: #1f2937; border-color: #374151; color: #d1d5db; }
     [data-theme="dark"] .ai-summary-title { color: #f3f4f6; }
+    [data-theme="dark"] .ai-summary-content h2,
+    [data-theme="dark"] .ai-summary-content h3,
+    [data-theme="dark"] .ai-summary-content h4,
+    [data-theme="dark"] .ai-summary-content strong { color: #f3f4f6; }
 
     /* 分析按钮样式 */
     .ai-analyze-btn, .ai-summary-btn {
@@ -207,10 +336,62 @@ function ensureBadgeContainer(el) {
   return container;
 }
 
-function ensureSummaryPanel(el, summaryText, verdictText) {
-  const contentBody = el.querySelector('.EntryBody, .content, .entryContent, .entryBody');
-  if (!contentBody) return;
+// 侧边栏管理
+let sidebarEl = null;
 
+function ensureSidebar() {
+  if (!sidebarEl) {
+    sidebarEl = document.createElement('div');
+    sidebarEl.id = 'ai-sidebar-overlay';
+    sidebarEl.innerHTML = `
+      <div class="ai-sidebar-header">
+        <h3>🤖 AI Summary</h3>
+        <button class="ai-sidebar-close">&times;</button>
+      </div>
+      <div class="ai-sidebar-title"></div>
+      <div class="ai-sidebar-content"></div>
+    `;
+    document.body.appendChild(sidebarEl);
+
+    // Close button handler
+    sidebarEl.querySelector('.ai-sidebar-close').addEventListener('click', () => {
+      closeSidebar();
+    });
+
+    // Close on Escape key
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && sidebarEl.classList.contains('open')) {
+        closeSidebar();
+      }
+    });
+  }
+  return sidebarEl;
+}
+
+function openSidebar(title) {
+  const sidebar = ensureSidebar();
+  sidebar.querySelector('.ai-sidebar-title').textContent = title || 'Article Summary';
+  sidebar.querySelector('.ai-sidebar-content').innerHTML = `
+    <div class="ai-sidebar-loading">
+      <div class="spinner-large"></div>
+      <div>正在生成总结...</div>
+    </div>
+  `;
+  sidebar.classList.add('open');
+}
+
+function updateSidebarContent(html) {
+  const sidebar = ensureSidebar();
+  sidebar.querySelector('.ai-sidebar-content').innerHTML = html;
+}
+
+function closeSidebar() {
+  if (sidebarEl) {
+    sidebarEl.classList.remove('open');
+  }
+}
+
+function ensureSummaryPanel(el, summaryText, verdictText) {
   // Remove existing panel first (to support replacement)
   const existingPanel = el.querySelector('.ai-summary-panel');
   if (existingPanel) {
@@ -226,12 +407,53 @@ function ensureSummaryPanel(el, summaryText, verdictText) {
 
   const body = document.createElement('div');
   body.className = 'ai-summary-content';
-  body.textContent = summaryText;
+  // Support markdown-like formatting (convert ## headers and bullet points)
+  body.innerHTML = formatMarkdown(summaryText);
 
   panel.appendChild(title);
   panel.appendChild(body);
 
-  contentBody.insertAdjacentElement('afterbegin', panel);
+  // Try to find the best insertion point
+  const contentBody = el.querySelector('.EntryBody, .content, .entryContent, .entryBody, .ArticleBody');
+  if (contentBody) {
+    contentBody.insertAdjacentElement('afterbegin', panel);
+  } else {
+    // Fallback: insert after the score container or at the end of the entry
+    const scoreContainer = el.querySelector('.ai-score-container');
+    if (scoreContainer) {
+      scoreContainer.insertAdjacentElement('afterend', panel);
+    } else {
+      el.appendChild(panel);
+    }
+  }
+
+  console.log('[Feedly AI] Summary panel inserted');
+}
+
+// Simple markdown to HTML formatter
+function formatMarkdown(text) {
+  if (!text) return '';
+
+  return text
+    // Escape HTML first
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    // Headers
+    .replace(/^### (.+)$/gm, '<h4>$1</h4>')
+    .replace(/^## (.+)$/gm, '<h3>$1</h3>')
+    .replace(/^# (.+)$/gm, '<h2>$1</h2>')
+    // Bold
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    // Italic
+    .replace(/\*(.+?)\*/g, '<em>$1</em>')
+    // Bullet points
+    .replace(/^\* (.+)$/gm, '<li>$1</li>')
+    .replace(/^- (.+)$/gm, '<li>$1</li>')
+    // Wrap consecutive li elements in ul
+    .replace(/(<li>.*<\/li>\n?)+/g, '<ul>$&</ul>')
+    // Line breaks
+    .replace(/\n/g, '<br>');
 }
 
 // 全局 Tooltip 元素管理
@@ -413,34 +635,63 @@ function renderItem(el, item) {
 
         // Extract content
         const titleEl = el.querySelector('.EntryTitleLink, .entry-title-link, .entry__title, .ArticleTitle');
-        const summaryEl = el.querySelector('.EntrySummary, .entry__summary, .content, .entryContent');
-        const contentEl = el.querySelector('.EntryBody, .content, .entryContent, .entryBody');
+        const summaryEl = el.querySelector('.EntrySummary, .entry__summary');
+        const contentEl = el.querySelector('.EntryBody, .entryBody, .ArticleBody, .entry__content');
 
-        const contentText = contentEl ? contentEl.innerText : (summaryEl ? summaryEl.textContent.trim() : '');
+        // Try multiple content sources
+        let contentText = '';
+        if (contentEl && contentEl.innerText.trim().length > 100) {
+            contentText = contentEl.innerText.trim();
+        } else if (summaryEl && summaryEl.innerText.trim().length > 50) {
+            contentText = summaryEl.innerText.trim();
+        }
+
         const titleText = titleEl ? titleEl.textContent.trim() : 'Unknown Title';
         const link = titleEl ? titleEl.getAttribute('href') : null;
         const url = link ? (link.startsWith('http') ? link : window.location.origin + link) : null;
 
         console.log(`[Feedly AI] Summarizing article: ${id} - ${titleText}`);
+        console.log(`[Feedly AI] Content length: ${contentText.length} chars, URL: ${url}`);
+
+        // If content is too short, we need to fetch from URL
+        if (contentText.length < 100 && !url) {
+            openSidebar(titleText);
+            updateSidebarContent('<div style="color:#ef4444;padding:20px;">❌ 无法获取文章内容：页面内容为空且没有可用的URL</div>');
+            summaryBtn.disabled = false;
+            spinner.style.display = 'none';
+            summaryBtn.childNodes[1].textContent = 'Summary';
+            return;
+        }
+
+        // Open sidebar immediately with loading state
+        openSidebar(titleText);
 
         chrome.runtime.sendMessage({
             type: 'summarize_article',
             id: id,
             title: titleText,
             url: url,
-            content: contentText
+            content: contentText,
+            needFetch: contentText.length < 100  // Signal that we need to fetch content
         }, (resp) => {
              summaryBtn.disabled = false;
              spinner.style.display = 'none';
              summaryBtn.childNodes[1].textContent = 'Summary';
 
+             console.log('[Feedly AI] Summary response:', resp);
+
              if (chrome.runtime.lastError) {
                 console.error("Summary error:", chrome.runtime.lastError);
+                updateSidebarContent(`<div style="color:#ef4444;padding:20px;">❌ Error: ${chrome.runtime.lastError.message}</div>`);
                 return;
              }
 
              if (resp && resp.summary) {
-                 ensureSummaryPanel(el, resp.summary, null);
+                 updateSidebarContent(formatMarkdown(resp.summary));
+             } else if (resp && resp.error) {
+                 updateSidebarContent(`<div style="color:#ef4444;padding:20px;">❌ Error: ${resp.error}</div>`);
+             } else {
+                 updateSidebarContent('<div style="color:#ef4444;padding:20px;">❌ No response received. Check console for details.</div>');
              }
         });
     };

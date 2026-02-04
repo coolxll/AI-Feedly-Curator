@@ -1,12 +1,14 @@
 {
   "manifest_version": 3,
   "name": "Feedly AI Overlay",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "description": "Overlay local AI scores in Feedly web UI",
-  "permissions": ["storage", "scripting", "nativeMessaging"],
+  "permissions": ["storage", "scripting", "nativeMessaging", "sidePanel"],
   "host_permissions": [
     "https://feedly.com/*",
-    "https://cloud.feedly.com/*"
+    "https://cloud.feedly.com/*",
+    "https://*/*",
+    "http://*/*"
   ],
   "background": {
     "service_worker": "background.js"
@@ -17,5 +19,15 @@
       "js": ["content.js"],
       "run_at": "document_idle"
     }
-  ]
+  ],
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  },
+  "action": {
+    "default_title": "Feedly AI Overlay Settings"
+  },
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  }
 }

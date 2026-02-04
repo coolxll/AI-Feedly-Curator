@@ -6,6 +6,157 @@ const HOST_NAME = "feedly.ai.overlay";
 const CACHE_TTL_MS = 30 * 1000;
 const cache = new Map();
 
+// Default settings for summary API
+const DEFAULT_SETTINGS = {
+  apiEndpoint: 'https://api.openai.com/v1',
+  apiKey: '',
+  model: 'gpt-4o-mini',
+  summaryPrompt: `你是一位专业的内容分析专家。请对以下文章进行全面、详细的总结。
+
+重要提示：不要只写简短概述，而是要深入分析并总结文章中的所有关键要点。
+
+请按以下结构组织你的回答：
+
+## 🎯 核心观点
+用2-3句话清晰陈述文章的主要论点、事件或核心观点。
+
+## 🔑 关键要点与细节
+详细列出文章中的所有重要内容：
+- 包含具体的事实、数据、统计信息
+- 涵盖文章的所有主要章节和论点
+- 记录重要的引用或声明
+- 如有技术细节，请详细说明
+
+## 💡 分析与启示
+- 这对读者意味着什么？
+- 有哪些更广泛的影响？
+- 文章得出了什么结论或预测？
+
+## 📝 补充说明
+- 文章中提到的任何注意事项、局限性或反面观点
+- 相关背景信息或上下文
+
+请使用清晰简洁的语言，用要点列表提高可读性。目标是提供一份能够捕捉文章完整深度的详尽总结。`
+};
+
+// Get settings from storage
+async function getSettings() {
+  return new Promise((resolve) => {
+    chrome.storage.sync.get(DEFAULT_SETTINGS, (items) => {
+      resolve(items);
+    });
+  });
+}
+
+// Call OpenAI-compatible API directly
+async function callOpenAI(content, title) {
+  const settings = await getSettings();
+
+  if (!settings.apiKey) {
+    return { error: 'API key not configured. Please set it in extension options.' };
+  }
+
+  if (!content || content.length < 50) {
+    return { error: 'Article content is empty or too short to summarize.' };
+  }
+
+  const endpoint = settings.apiEndpoint.replace(/\/$/, '') + '/chat/completions';
+
+  try {
+    console.log(`[Feedly AI] Calling OpenAI API with ${content.length} chars of content`);
+
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${settings.apiKey}`
+      },
+      body: JSON.stringify({
+        model: settings.model,
+        messages: [
+          { role: 'system', content: settings.summaryPrompt },
+          { role: 'user', content: `文章标题: ${title}\n\n文章内容:\n\n${content}` }
+        ],
+        temperature: 0.5
+      })
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('OpenAI API error:', response.status, errorText);
+      return { error: `API error: ${response.status} - ${errorText.substring(0, 200)}` };
+    }
+
+    const data = await response.json();
+    const summary = data.choices?.[0]?.message?.content;
+
+    if (!summary) {
+      return { error: 'No content in API response' };
+    }
+
+    return { summary };
+  } catch (err) {
+    console.error('OpenAI API call failed:', err);
+    return { error: `Request failed: ${err.message}` };
+  }
+}
+
+// Fetch article content from URL
+async function fetchArticleContent(url) {
+  try {
+    console.log(`[Feedly AI] Fetching article content from: ${url}`);
+
+    const response = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+      }
+    });
+
+    if (!response.ok) {
+      console.error(`Fetch failed: ${response.status}`);
+      return null;
+    }
+
+    const html = await response.text();
+
+    // Extract text content from HTML (simple approach)
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html, 'text/html');
+
+    // Remove script, style, nav, header, footer elements
+    const removeSelectors = ['script', 'style', 'nav', 'header', 'footer', 'aside', '.sidebar', '.comments', '.advertisement'];
+    removeSelectors.forEach(sel => {
+      doc.querySelectorAll(sel).forEach(el => el.remove());
+    });
+
+    // Try to find main content
+    const contentSelectors = ['article', '.article', '.post-content', '.entry-content', '.content', 'main', '.main'];
+    let content = '';
+
+    for (const sel of contentSelectors) {
+      const el = doc.querySelector(sel);
+      if (el && el.innerText.length > 200) {
+        content = el.innerText;
+        break;
+      }
+    }
+
+    // Fallback to body
+    if (!content || content.length < 200) {
+      content = doc.body?.innerText || '';
+    }
+
+    // Clean up whitespace
+    content = content.replace(/\s+/g, ' ').trim();
+
+    console.log(`[Feedly AI] Fetched ${content.length} chars of content`);
+    return content;
+  } catch (err) {
+    console.error('Fetch article failed:', err);
+    return null;
+  }
+}
+
 // Mock 数据：模拟 Native Host 返回的评分
 function getMockScores(ids) {
   const items = {};
@@ -164,6 +315,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 
   console.log("Processing summarize_article for", msg.id);
+  console.log("Content length:", msg.content?.length || 0, "URL:", msg.url);
 
   if (USE_MOCK) {
       setTimeout(() => {
@@ -173,10 +325,25 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           });
       }, 1500);
   } else {
-      sendNativeMessage(msg).then(resp => {
-          console.log("Native Summarize Response:", resp);
-          sendResponse(resp);
-      });
+      // If content is too short, try to fetch from URL first
+      (async () => {
+          let content = msg.content || '';
+
+          if (content.length < 100 && msg.url) {
+              console.log('[Feedly AI] Content too short, fetching from URL...');
+              const fetched = await fetchArticleContent(msg.url);
+              if (fetched && fetched.length > content.length) {
+                  content = fetched;
+              }
+          }
+
+          const result = await callOpenAI(content, msg.title);
+          console.log("OpenAI Summarize Response:", result);
+          sendResponse({
+              id: msg.id,
+              summary: result.summary || result.error
+          });
+      })();
   }
   return true;
 });
