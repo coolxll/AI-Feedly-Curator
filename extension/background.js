@@ -106,11 +106,8 @@ async function fetchArticleContent(url) {
   try {
     console.log(`[Feedly AI] Fetching article content from: ${url}`);
 
-    const response = await fetch(url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-      }
-    });
+    // NOTE: Some headers (e.g. User-Agent) are forbidden in extension fetch().
+    const response = await fetch(url, { credentials: 'omit' });
 
     if (!response.ok) {
       console.error(`Fetch failed: ${response.status}`);
@@ -119,32 +116,44 @@ async function fetchArticleContent(url) {
 
     const html = await response.text();
 
-    // Extract text content from HTML (simple approach)
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(html, 'text/html');
+    // Extract text content from HTML using regex (Service Worker doesn't have DOMParser)
+    let content = html;
 
-    // Remove script, style, nav, header, footer elements
-    const removeSelectors = ['script', 'style', 'nav', 'header', 'footer', 'aside', '.sidebar', '.comments', '.advertisement'];
-    removeSelectors.forEach(sel => {
-      doc.querySelectorAll(sel).forEach(el => el.remove());
-    });
+    // Remove script and style tags
+    content = content.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
+    content = content.replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, '');
 
-    // Try to find main content
-    const contentSelectors = ['article', '.article', '.post-content', '.entry-content', '.content', 'main', '.main'];
-    let content = '';
-
-    for (const sel of contentSelectors) {
-      const el = doc.querySelector(sel);
-      if (el && el.innerText.length > 200) {
-        content = el.innerText;
-        break;
+    // Try to extract article content
+    const articleMatch = content.match(/<article[^>]*>([\s\S]*?)<\/article>/i);
+    if (articleMatch) {
+      content = articleMatch[1];
+    } else {
+      // Try main tag
+      const mainMatch = content.match(/<main[^>]*>([\s\S]*?)<\/main>/i);
+      if (mainMatch) {
+        content = mainMatch[1];
+      } else {
+        // Try common content divs
+        const contentMatch = content.match(/<div[^>]*class="[^"]*(?:content|article|post)[^"]*"[^>]*>([\s\S]*?)<\/div>/i);
+        if (contentMatch) {
+          content = contentMatch[1];
+        }
       }
     }
 
-    // Fallback to body
-    if (!content || content.length < 200) {
-      content = doc.body?.innerText || '';
-    }
+    // Remove all HTML tags
+    content = content.replace(/<[^>]+>/g, ' ');
+
+    // Decode HTML entities
+    content = content
+      .replace(/&nbsp;/g, ' ')
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      .replace(/&#x27;/g, "'")
+      .replace(/&#(\d+);/g, (_, code) => String.fromCharCode(code));
 
     // Clean up whitespace
     content = content.replace(/\s+/g, ' ').trim();
@@ -349,3 +358,29 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 });
 
 console.log(`Feedly AI Overlay background script loaded (${USE_MOCK ? 'MOCK' : 'NATIVE'} MODE)`);
+
+// Handle side panel open request
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (msg.type === 'open_sidepanel') {
+    chrome.sidePanel.open({ tabId: sender.tab.id }).then(() => {
+      // Send initial loading state to side panel
+      setTimeout(() => {
+        chrome.runtime.sendMessage({
+          type: 'update_sidepanel',
+          title: msg.title,
+          content: '',
+          status: 'loading'
+        });
+      }, 100);
+    }).catch(err => {
+      console.error('Failed to open side panel:', err);
+    });
+    sendResponse({ ok: true });
+    return true;
+  }
+});
+
+// Enable side panel on Feedly
+chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(err => {
+  console.error('Failed to set panel behavior:', err);
+});

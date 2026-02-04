@@ -31,30 +31,47 @@ function updatePanel(title, content, status) {
 function formatMarkdown(text) {
   if (!text) return '';
 
-  return text
-    // Escape HTML first
+  // First escape any raw HTML that might be in the content (security)
+  let html = text
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    // Headers
+    .replace(/>/g, '&gt;');
+
+  // Then apply markdown formatting
+  html = html
+    // Headers (must come before other inline formatting)
+    .replace(/^#### (.+)$/gm, '<h5>$1</h5>')
     .replace(/^### (.+)$/gm, '<h4>$1</h4>')
     .replace(/^## (.+)$/gm, '<h3>$1</h3>')
     .replace(/^# (.+)$/gm, '<h2>$1</h2>')
-    // Bold
-    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    // Bold (use non-greedy matching)
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
     // Italic
-    .replace(/\*(.+?)\*/g, '<em>$1</em>')
-    // Bullet points
-    .replace(/^\* (.+)$/gm, '<li>$1</li>')
-    .replace(/^- (.+)$/gm, '<li>$1</li>')
-    // Wrap consecutive li elements in ul
-    .replace(/(<li>.*<\/li>\n?)+/g, '<ul>$&</ul>')
-    // Paragraphs (double newlines)
-    .replace(/\n\n/g, '</p><p>')
-    // Line breaks
-    .replace(/\n/g, '<br>')
-    // Wrap in paragraph
-    .replace(/^(.+)$/, '<p>$1</p>');
+    .replace(/\*([^*]+)\*/g, '<em>$1</em>')
+    // Bullet points - convert to list items
+    .replace(/^[\*\-] (.+)$/gm, '<li>$1</li>');
+
+  // Wrap consecutive list items in ul tags
+  html = html.replace(/(<li>[\s\S]*?<\/li>)(\s*<li>[\s\S]*?<\/li>)*/g, (match) => {
+    return '<ul>' + match + '</ul>';
+  });
+
+  // Convert remaining double newlines to paragraph breaks
+  html = html.replace(/\n\n+/g, '</p><p>');
+
+  // Convert single newlines to line breaks (but not inside tags)
+  html = html.replace(/\n/g, '<br>');
+
+  // Wrap in paragraph if not already wrapped
+  if (!html.startsWith('<h') && !html.startsWith('<ul') && !html.startsWith('<p>')) {
+    html = '<p>' + html + '</p>';
+  }
+
+  // Clean up empty paragraphs
+  html = html.replace(/<p>\s*<\/p>/g, '');
+  html = html.replace(/<p>\s*<br>\s*<\/p>/g, '');
+
+  return html;
 }
 
 console.log('[Feedly AI] Side panel loaded');

@@ -508,7 +508,7 @@ def score_article(title: str, summary: str, content: str) -> Dict[str, Any]:
             model=model,
             messages=[{"role": "user", "content": prompt}],
             temperature=0.2,  # 稍微降低一点，更稳定
-            max_tokens=1500,  # 增加 Token 上限以容纳 Analysis
+            max_tokens=16000,  # 增加 Token 上限以容纳 Analysis
         )
 
         response_text = response.choices[0].message.content

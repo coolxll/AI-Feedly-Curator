@@ -32,7 +32,7 @@ if (!document.getElementById(STYLE_ID)) {
       position: relative;
       flex-shrink: 0; /* 防止被挤压 */
     }
-    // 移除旧的 tooltip 样式
+    /* 移除旧的 tooltip 样式 */
     /* .ai-score-badge:hover::after { ... } */
 
     /* 新增 JS Tooltip 容器样式 */
@@ -55,109 +55,6 @@ if (!document.getElementById(STYLE_ID)) {
       line-height: 1.5;
       border: 1px solid rgba(255,255,255,0.1); /* 增加微弱边框增加对比度 */
     }
-    /* 侧边栏样式 */
-    #ai-sidebar-overlay {
-      position: fixed;
-      top: 0;
-      right: 0;
-      width: 420px;
-      height: 100vh;
-      background: #ffffff;
-      box-shadow: -4px 0 20px rgba(0,0,0,0.15);
-      z-index: 2147483646;
-      display: none;
-      flex-direction: column;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    }
-    #ai-sidebar-overlay.open {
-      display: flex;
-    }
-    .ai-sidebar-header {
-      padding: 16px 20px;
-      background: #8b5cf6;
-      color: #fff;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      flex-shrink: 0;
-    }
-    .ai-sidebar-header h3 {
-      margin: 0;
-      font-size: 16px;
-      font-weight: 600;
-    }
-    .ai-sidebar-close {
-      background: none;
-      border: none;
-      color: #fff;
-      font-size: 24px;
-      cursor: pointer;
-      padding: 0;
-      line-height: 1;
-    }
-    .ai-sidebar-close:hover {
-      opacity: 0.8;
-    }
-    .ai-sidebar-content {
-      flex: 1;
-      overflow-y: auto;
-      padding: 20px;
-      font-size: 14px;
-      line-height: 1.7;
-      color: #374151;
-    }
-    .ai-sidebar-content h2, .ai-sidebar-content h3, .ai-sidebar-content h4 {
-      margin: 20px 0 10px 0;
-      color: #111827;
-      font-weight: 600;
-    }
-    .ai-sidebar-content h2 { font-size: 18px; }
-    .ai-sidebar-content h3 { font-size: 16px; }
-    .ai-sidebar-content h4 { font-size: 15px; }
-    .ai-sidebar-content ul {
-      margin: 8px 0;
-      padding-left: 20px;
-    }
-    .ai-sidebar-content li {
-      margin: 6px 0;
-    }
-    .ai-sidebar-content strong {
-      color: #111827;
-    }
-    .ai-sidebar-loading {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      height: 200px;
-      color: #6b7280;
-    }
-    .ai-sidebar-loading .spinner-large {
-      width: 40px;
-      height: 40px;
-      border: 3px solid #e5e7eb;
-      border-top-color: #8b5cf6;
-      border-radius: 50%;
-      animation: spin 1s linear infinite;
-      margin-bottom: 16px;
-    }
-    .ai-sidebar-title {
-      padding: 12px 20px;
-      background: #f3f4f6;
-      border-bottom: 1px solid #e5e7eb;
-      font-weight: 600;
-      color: #374151;
-      flex-shrink: 0;
-    }
-    /* 深色模式 */
-    [data-theme="dark"] #ai-sidebar-overlay { background: #1f2937; }
-    [data-theme="dark"] .ai-sidebar-content { color: #d1d5db; }
-    [data-theme="dark"] .ai-sidebar-content h2,
-    [data-theme="dark"] .ai-sidebar-content h3,
-    [data-theme="dark"] .ai-sidebar-content h4,
-    [data-theme="dark"] .ai-sidebar-content strong { color: #f3f4f6; }
-    [data-theme="dark"] .ai-sidebar-title { background: #374151; border-color: #4b5563; color: #d1d5db; }
-    [data-theme="dark"] .ai-sidebar-loading { color: #9ca3af; }
 
     /* 详情页总结面板样式 */
     .ai-summary-panel {
@@ -336,61 +233,6 @@ function ensureBadgeContainer(el) {
   return container;
 }
 
-// 侧边栏管理
-let sidebarEl = null;
-
-function ensureSidebar() {
-  if (!sidebarEl) {
-    sidebarEl = document.createElement('div');
-    sidebarEl.id = 'ai-sidebar-overlay';
-    sidebarEl.innerHTML = `
-      <div class="ai-sidebar-header">
-        <h3>🤖 AI Summary</h3>
-        <button class="ai-sidebar-close">&times;</button>
-      </div>
-      <div class="ai-sidebar-title"></div>
-      <div class="ai-sidebar-content"></div>
-    `;
-    document.body.appendChild(sidebarEl);
-
-    // Close button handler
-    sidebarEl.querySelector('.ai-sidebar-close').addEventListener('click', () => {
-      closeSidebar();
-    });
-
-    // Close on Escape key
-    document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape' && sidebarEl.classList.contains('open')) {
-        closeSidebar();
-      }
-    });
-  }
-  return sidebarEl;
-}
-
-function openSidebar(title) {
-  const sidebar = ensureSidebar();
-  sidebar.querySelector('.ai-sidebar-title').textContent = title || 'Article Summary';
-  sidebar.querySelector('.ai-sidebar-content').innerHTML = `
-    <div class="ai-sidebar-loading">
-      <div class="spinner-large"></div>
-      <div>正在生成总结...</div>
-    </div>
-  `;
-  sidebar.classList.add('open');
-}
-
-function updateSidebarContent(html) {
-  const sidebar = ensureSidebar();
-  sidebar.querySelector('.ai-sidebar-content').innerHTML = html;
-}
-
-function closeSidebar() {
-  if (sidebarEl) {
-    sidebarEl.classList.remove('open');
-  }
-}
-
 function ensureSummaryPanel(el, summaryText, verdictText) {
   // Remove existing panel first (to support replacement)
   const existingPanel = el.querySelector('.ai-summary-panel');
@@ -434,26 +276,38 @@ function ensureSummaryPanel(el, summaryText, verdictText) {
 function formatMarkdown(text) {
   if (!text) return '';
 
-  return text
-    // Escape HTML first
+  // First escape any raw HTML that might be in the content (security)
+  let html = text
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    // Headers
+    .replace(/>/g, '&gt;');
+
+  // Then apply markdown formatting
+  html = html
+    // Headers (must come before other inline formatting)
+    .replace(/^#### (.+)$/gm, '<h5>$1</h5>')
     .replace(/^### (.+)$/gm, '<h4>$1</h4>')
     .replace(/^## (.+)$/gm, '<h3>$1</h3>')
     .replace(/^# (.+)$/gm, '<h2>$1</h2>')
-    // Bold
-    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    // Bold (use non-greedy matching)
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
     // Italic
-    .replace(/\*(.+?)\*/g, '<em>$1</em>')
-    // Bullet points
-    .replace(/^\* (.+)$/gm, '<li>$1</li>')
-    .replace(/^- (.+)$/gm, '<li>$1</li>')
-    // Wrap consecutive li elements in ul
-    .replace(/(<li>.*<\/li>\n?)+/g, '<ul>$&</ul>')
-    // Line breaks
-    .replace(/\n/g, '<br>');
+    .replace(/\*([^*]+)\*/g, '<em>$1</em>')
+    // Bullet points - convert to list items
+    .replace(/^[\*\-] (.+)$/gm, '<li>$1</li>');
+
+  // Wrap consecutive list items in ul tags
+  html = html.replace(/(<li>[\s\S]*?<\/li>)(\s*<li>[\s\S]*?<\/li>)*/g, (match) => {
+    return '<ul>' + match + '</ul>';
+  });
+
+  // Convert remaining double newlines to paragraph breaks
+  html = html.replace(/\n\n+/g, '</p><p>');
+
+  // Convert single newlines to line breaks
+  html = html.replace(/\n/g, '<br>');
+
+  return html;
 }
 
 // 全局 Tooltip 元素管理
@@ -655,16 +509,30 @@ function renderItem(el, item) {
 
         // If content is too short, we need to fetch from URL
         if (contentText.length < 100 && !url) {
-            openSidebar(titleText);
-            updateSidebarContent('<div style="color:#ef4444;padding:20px;">❌ 无法获取文章内容：页面内容为空且没有可用的URL</div>');
+            chrome.runtime.sendMessage({
+              type: 'open_sidepanel',
+              title: titleText
+            }, () => {
+              setTimeout(() => {
+                chrome.runtime.sendMessage({
+                  type: 'update_sidepanel',
+                  title: titleText,
+                  content: '无法获取文章内容：页面内容为空且没有可用的URL',
+                  status: 'error'
+                });
+              }, 200);
+            });
             summaryBtn.disabled = false;
             spinner.style.display = 'none';
             summaryBtn.childNodes[1].textContent = 'Summary';
             return;
         }
 
-        // Open sidebar immediately with loading state
-        openSidebar(titleText);
+        // Open side panel first with loading state
+        chrome.runtime.sendMessage({
+          type: 'open_sidepanel',
+          title: titleText
+        });
 
         chrome.runtime.sendMessage({
             type: 'summarize_article',
@@ -682,25 +550,44 @@ function renderItem(el, item) {
 
              if (chrome.runtime.lastError) {
                 console.error("Summary error:", chrome.runtime.lastError);
-                updateSidebarContent(`<div style="color:#ef4444;padding:20px;">❌ Error: ${chrome.runtime.lastError.message}</div>`);
+                chrome.runtime.sendMessage({
+                  type: 'update_sidepanel',
+                  title: titleText,
+                  content: chrome.runtime.lastError.message,
+                  status: 'error'
+                });
                 return;
              }
 
              if (resp && resp.summary) {
-                 updateSidebarContent(formatMarkdown(resp.summary));
+                 chrome.runtime.sendMessage({
+                   type: 'update_sidepanel',
+                   title: titleText,
+                   content: resp.summary,
+                   status: 'success'
+                 });
              } else if (resp && resp.error) {
-                 updateSidebarContent(`<div style="color:#ef4444;padding:20px;">❌ Error: ${resp.error}</div>`);
+                 chrome.runtime.sendMessage({
+                   type: 'update_sidepanel',
+                   title: titleText,
+                   content: resp.error,
+                   status: 'error'
+                 });
              } else {
-                 updateSidebarContent('<div style="color:#ef4444;padding:20px;">❌ No response received. Check console for details.</div>');
+                 chrome.runtime.sendMessage({
+                   type: 'update_sidepanel',
+                   title: titleText,
+                   content: 'No response received. Check console for details.',
+                   status: 'error'
+                 });
              }
         });
     };
     container.appendChild(summaryBtn);
   }
 
-  if (summary && summary !== '无详细总结') {
-    ensureSummaryPanel(el, summary, verdict);
-  }
+  // Don't auto-show summary panel in list view - only show when user clicks Summary button
+  // The summary will be shown in the Chrome side panel instead
 }
 
 function scheduleScan() {
