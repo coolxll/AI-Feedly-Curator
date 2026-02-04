@@ -351,8 +351,8 @@ function renderItem(el, item) {
           reasonEl.style.color = 'inherit';
           reasonEl.style.opacity = '0.8';
           reasonEl.style.fontSize = '14px';
-          // Include verdict in the text
-          reasonEl.textContent = verdict ? `【${verdict}】 ${rawReason}` : rawReason;
+          // Only show the reason (verdict is redundant with score)
+          reasonEl.textContent = rawReason;
           container.appendChild(reasonEl);
       }
   } else if (verdict && !container.querySelector('.ai-reason-text')) {
