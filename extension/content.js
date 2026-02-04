@@ -396,6 +396,43 @@ function renderItem(el, item) {
       // We only show verdict if space permits or user hovers (tooltip handles hover)
   }
 
+  // --- NEW: Insert summary at the top of the article body if expanded ---
+  if (entryInfo || isExpanded) {
+      const contentBody = el.querySelector('.EntryBody, .entryBody, .ArticleBody, .entry__content');
+      if (contentBody && summaryContent && summaryContent !== '无详细总结' && !contentBody.querySelector('.ai-summary-header')) {
+          // Check if we are in list view or title-only view to avoid clutter
+          // Usually expanded view has 'entry--selected' or 'entry--expanded' or is a full article page
+          // We double check to ensure we don't insert into a small card preview
+
+          const summaryDiv = document.createElement('div');
+          summaryDiv.className = 'ai-summary-header';
+          summaryDiv.style.marginBottom = '20px';
+          summaryDiv.style.padding = '15px';
+          summaryDiv.style.backgroundColor = '#f8fafc'; // Light gray background
+          summaryDiv.style.borderLeft = '4px solid #8b5cf6'; // Purple border matching summary btn
+          summaryDiv.style.borderRadius = '4px';
+          summaryDiv.style.color = '#334155';
+          summaryDiv.style.fontSize = '16px';
+          summaryDiv.style.lineHeight = '1.6';
+
+          const title = document.createElement('strong');
+          title.textContent = 'AI 总结: ';
+          title.style.display = 'block';
+          title.style.marginBottom = '8px';
+          title.style.color = '#8b5cf6';
+
+          const text = document.createElement('div');
+          text.innerHTML = formatMarkdown(summaryContent);
+
+          summaryDiv.appendChild(title);
+          summaryDiv.appendChild(text);
+
+          // Insert at the very beginning of the content body
+          contentBody.insertBefore(summaryDiv, contentBody.firstChild);
+      }
+  }
+  // ---------------------------------------------------------------------
+
   // Add Summary Button (Only if it doesn't exist)
   if (!container.querySelector('.ai-summary-btn')) {
     const summaryBtn = document.createElement('button');
