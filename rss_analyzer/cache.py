@@ -38,7 +38,7 @@ def get_cached_score(article_id: str) -> dict | None:
         if row:
             try:
                 data = json.loads(row[1])
-            except:
+            except Exception:
                 data = {}
             updated_at = row[2]
             if hasattr(updated_at, "isoformat"):

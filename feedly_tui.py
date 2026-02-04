@@ -444,7 +444,7 @@ def main_menu():
     try:
         import questionary
         # Test if we can access the prompt session (catch NoConsoleScreenBufferError)
-        import prompt_toolkit
+        import prompt_toolkit # noqa: F401
     except ImportError:
         simple_menu()
         return

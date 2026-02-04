@@ -35,7 +35,7 @@ try:
 
     from rss_analyzer.cache import get_cached_score
     logging.info("成功导入 rss_analyzer.cache")
-except Exception as e:
+except Exception:
     logging.exception("导入模块失败！")
     sys.exit(1)
 
@@ -64,7 +64,7 @@ def _read_message():
         except Exception as e:
             logging.error(f"JSON decode error: {e}")
             return None
-    except Exception as e:
+    except Exception:
         logging.exception("Read message exception")
         return None
 
@@ -76,7 +76,7 @@ def _send_message(payload: dict):
         sys.stdout.buffer.write(encoded)
         sys.stdout.buffer.flush()
         logging.debug("Message sent successfully")
-    except Exception as e:
+    except Exception:
         logging.exception("Send message exception")
 
 

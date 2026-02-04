@@ -3,14 +3,13 @@ LLM 分析模块
 使用 OpenAI 兼容 API 进行文章分析和摘要生成
 """
 import json
-import re
 import logging
 import traceback
 import sys
 
 from openai import OpenAI
 
-from .config import PROJ_CONFIG, get_config, log_debug
+from .config import PROJ_CONFIG, get_config
 
 logger = logging.getLogger(__name__)
 
