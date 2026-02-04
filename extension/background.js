@@ -424,7 +424,14 @@ console.log(`Feedly AI Overlay background script loaded (${USE_MOCK ? 'MOCK' : '
 // Handle side panel open request
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === 'open_sidepanel') {
-    chrome.sidePanel.open({ tabId: sender.tab.id }).then(() => {
+    // Only try to open side panel if we are in a context that allows it (user action)
+    // However, chrome.sidePanel.open requires a user gesture, which we might not have in the message handler
+    // But since this is triggered by a button click in content script, it might work if the chain is preserved
+    // If not, the user has to click the extension icon or we rely on the side panel being already open
+
+    // Note: chrome.sidePanel.open() is only available in Chrome 114+ and requires user gesture
+    // If this fails, we can't do much automatically.
+    chrome.sidePanel.open({ windowId: sender.tab.windowId }).then(() => {
       // Send initial loading state to side panel
       setTimeout(() => {
         chrome.runtime.sendMessage({
@@ -433,9 +440,18 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           content: '',
           status: 'loading'
         });
-      }, 100);
+      }, 500); // Increase timeout slightly to ensure panel is ready
     }).catch(err => {
-      console.error('Failed to open side panel:', err);
+      console.error('Failed to open side panel (might need user gesture):', err);
+      // Even if open fails (e.g. already open or no gesture), we still send the update
+       setTimeout(() => {
+        chrome.runtime.sendMessage({
+          type: 'update_sidepanel',
+          title: msg.title,
+          content: '',
+          status: 'loading'
+        });
+      }, 100);
     });
     sendResponse({ ok: true });
     return true;

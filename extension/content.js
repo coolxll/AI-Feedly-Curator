@@ -35,77 +35,6 @@ if (!document.getElementById(STYLE_ID)) {
     /* 移除旧的 tooltip 样式 */
     /* .ai-score-badge:hover::after { ... } */
 
-    /* 新增 JS Tooltip 容器样式 */
-    #ai-tooltip-container {
-      position: fixed; /* 改为 fixed 定位，彻底脱离文档流 */
-      z-index: 2147483647; /* 最大 z-index */
-      background: #1f2937;
-      color: #f3f4f6;
-      padding: 8px 12px;
-      border-radius: 6px;
-      font-size: 12px;
-      font-weight: 400;
-      width: 300px;
-      max-width: 90vw; /* 防止在小屏幕溢出 */
-      white-space: pre-wrap;
-      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-      pointer-events: none;
-      display: none;
-      text-align: left;
-      line-height: 1.5;
-      border: 1px solid rgba(255,255,255,0.1); /* 增加微弱边框增加对比度 */
-    }
-
-    /* 详情页总结面板样式 */
-    .ai-summary-panel {
-      margin: 16px 0;
-      padding: 16px 20px;
-      background: #f9fafb;
-      border: 1px solid #e5e7eb;
-      border-radius: 8px;
-      font-size: 14px;
-      line-height: 1.7;
-      color: #374151;
-      max-height: 600px;
-      overflow-y: auto;
-    }
-    .ai-summary-title {
-      font-weight: 600;
-      margin-bottom: 12px;
-      display: flex;
-      align-items: center;
-      color: #111827;
-      font-size: 16px;
-    }
-    .ai-summary-content {
-      white-space: normal;
-    }
-    .ai-summary-content h2, .ai-summary-content h3, .ai-summary-content h4 {
-      margin: 16px 0 8px 0;
-      color: #111827;
-      font-weight: 600;
-    }
-    .ai-summary-content h2 { font-size: 18px; }
-    .ai-summary-content h3 { font-size: 16px; }
-    .ai-summary-content h4 { font-size: 15px; }
-    .ai-summary-content ul {
-      margin: 8px 0;
-      padding-left: 20px;
-    }
-    .ai-summary-content li {
-      margin: 4px 0;
-    }
-    .ai-summary-content strong {
-      color: #111827;
-    }
-    /* 深色模式适配 */
-    [data-theme="dark"] .ai-summary-panel { background: #1f2937; border-color: #374151; color: #d1d5db; }
-    [data-theme="dark"] .ai-summary-title { color: #f3f4f6; }
-    [data-theme="dark"] .ai-summary-content h2,
-    [data-theme="dark"] .ai-summary-content h3,
-    [data-theme="dark"] .ai-summary-content h4,
-    [data-theme="dark"] .ai-summary-content strong { color: #f3f4f6; }
-
     /* 分析按钮样式 */
     .ai-analyze-btn, .ai-summary-btn {
       margin-right: 8px;
@@ -231,45 +160,6 @@ function ensureBadgeContainer(el) {
     el.insertAdjacentElement('afterbegin', container);
   }
   return container;
-}
-
-function ensureSummaryPanel(el, summaryText, verdictText) {
-  // Remove existing panel first (to support replacement)
-  const existingPanel = el.querySelector('.ai-summary-panel');
-  if (existingPanel) {
-      existingPanel.remove();
-  }
-
-  const panel = document.createElement('div');
-  panel.className = 'ai-summary-panel';
-
-  const title = document.createElement('div');
-  title.className = 'ai-summary-title';
-  title.textContent = verdictText ? `🤖 AI 总结: ${verdictText}` : '🤖 AI Summary';
-
-  const body = document.createElement('div');
-  body.className = 'ai-summary-content';
-  // Support markdown-like formatting (convert ## headers and bullet points)
-  body.innerHTML = formatMarkdown(summaryText);
-
-  panel.appendChild(title);
-  panel.appendChild(body);
-
-  // Try to find the best insertion point
-  const contentBody = el.querySelector('.EntryBody, .content, .entryContent, .entryBody, .ArticleBody');
-  if (contentBody) {
-    contentBody.insertAdjacentElement('afterbegin', panel);
-  } else {
-    // Fallback: insert after the score container or at the end of the entry
-    const scoreContainer = el.querySelector('.ai-score-container');
-    if (scoreContainer) {
-      scoreContainer.insertAdjacentElement('afterend', panel);
-    } else {
-      el.appendChild(panel);
-    }
-  }
-
-  console.log('[Feedly AI] Summary panel inserted');
 }
 
 // Simple markdown to HTML formatter
@@ -466,6 +356,26 @@ function renderItem(el, item) {
   badge.addEventListener('mousemove', (e) => updateTooltipPos(e));
 
   container.appendChild(badge);
+
+  // If in detail view, show the reason text inline
+  const entryInfo = el.querySelector('.EntryInfo, .entry-info, .EntryMetadataWrapper');
+  if (entryInfo && rawReason) {
+      const reasonEl = document.createElement('span');
+      reasonEl.className = 'ai-reason-text';
+      reasonEl.style.marginLeft = '12px';
+      reasonEl.style.color = 'inherit';
+      reasonEl.style.opacity = '0.8';
+      reasonEl.style.fontSize = '14px';
+      reasonEl.textContent = rawReason;
+      // Also show verdict
+      if (verdict) {
+          reasonEl.textContent = `【${verdict}】 ${rawReason}`;
+      }
+      container.appendChild(reasonEl);
+  } else if (verdict && !container.querySelector('.ai-reason-text')) {
+      // Also add text for card/magazine view if possible, but keep it short
+      // We only show verdict if space permits or user hovers (tooltip handles hover)
+  }
 
   // Add Summary Button (Only if it doesn't exist)
   if (!container.querySelector('.ai-summary-btn')) {
