@@ -81,7 +81,7 @@ if (!document.getElementById(STYLE_ID)) {
     [data-theme="dark"] .ai-summary-title { color: #f3f4f6; }
 
     /* 分析按钮样式 */
-    .ai-analyze-btn {
+    .ai-analyze-btn, .ai-summary-btn {
       margin-right: 8px;
       font-size: 11px;
       font-weight: 600;
@@ -96,14 +96,20 @@ if (!document.getElementById(STYLE_ID)) {
       transition: background 0.2s;
       vertical-align: middle;
     }
+    .ai-summary-btn {
+      background: #8b5cf6; /* Purple for summary */
+    }
     .ai-analyze-btn:hover {
       background: #1d4ed8;
     }
-    .ai-analyze-btn:disabled {
+    .ai-summary-btn:hover {
+      background: #7c3aed;
+    }
+    .ai-analyze-btn:disabled, .ai-summary-btn:disabled {
       background: #9ca3af;
       cursor: not-allowed;
     }
-    .ai-analyze-btn .spinner {
+    .ai-analyze-btn .spinner, .ai-summary-btn .spinner {
       width: 10px;
       height: 10px;
       border: 2px solid #ffffff;
@@ -156,26 +162,35 @@ function ensureBadgeContainer(el) {
     container.style.display = 'inline-flex';
     container.style.alignItems = 'center';
     container.style.verticalAlign = 'middle';
+    container.style.marginLeft = '8px'; // Add some spacing
+    container.style.zIndex = '100'; // Ensure it's above other elements
 
     // 查找关键元素
     const titleLink = el.querySelector('.EntryTitleLink, .entry-title-link, .entry__title, .ArticleTitle'); // 标题文字链接
     const titleContainer = el.querySelector('.EntryTitle, .entry-title, .title, .ArticleTitle'); // 标题容器
     const entryInfo = el.querySelector('.EntryInfo, .entry-info, .EntryMetadataWrapper'); // 详情页信息区
     const visual = el.querySelector('.Visual'); // 卡片视图的图片区
+    const metadata = el.querySelector('.Metadata, .entry__metadata'); // 列表视图的元数据区
 
     // --- 视图适配逻辑 ---
 
-    // 1. Title-Only View (列表模式) - 插入到标题链接内部的最前面
-    if (el.classList.contains('entry--titleOnly') || (titleLink && !visual)) {
+    // 1. Title-Only View (列表模式) - 插入到标题链接内部的最前面，或者标题后面
+    if (el.classList.contains('entry--titleOnly')) {
+        // Title Only 模式通常比较紧凑，尝试放在 metadata 里或者标题后
+        if (metadata) {
+            metadata.insertAdjacentElement('afterbegin', container);
+            return container;
+        }
         if (titleLink) {
-            titleLink.insertAdjacentElement('afterbegin', container);
+            // 放在标题链接后面，避免破坏标题点击区域
+            titleLink.insertAdjacentElement('afterend', container);
             return container;
         }
     }
 
     // 2. Article View (详情页) - 插入到 Info 区域 (作者/时间行)
     if (entryInfo) {
-      entryInfo.insertAdjacentElement('afterbegin', container);
+      entryInfo.insertAdjacentElement('beforeend', container); // 放在 info 的最后面
       return container;
     }
 
@@ -196,14 +211,18 @@ function ensureSummaryPanel(el, summaryText, verdictText) {
   const contentBody = el.querySelector('.EntryBody, .content, .entryContent, .entryBody');
   if (!contentBody) return;
 
-  if (el.querySelector('.ai-summary-panel')) return;
+  // Remove existing panel first (to support replacement)
+  const existingPanel = el.querySelector('.ai-summary-panel');
+  if (existingPanel) {
+      existingPanel.remove();
+  }
 
   const panel = document.createElement('div');
   panel.className = 'ai-summary-panel';
 
   const title = document.createElement('div');
   title.className = 'ai-summary-title';
-  title.textContent = `🤖 AI 总结: ${verdictText}`;
+  title.textContent = verdictText ? `🤖 AI 总结: ${verdictText}` : '🤖 AI Summary';
 
   const body = document.createElement('div');
   body.className = 'ai-summary-content';
@@ -372,6 +391,62 @@ function renderItem(el, item) {
 
   container.appendChild(badge);
 
+  // Add Summary Button (Only if it doesn't exist)
+  if (!container.querySelector('.ai-summary-btn')) {
+    const summaryBtn = document.createElement('button');
+    summaryBtn.className = 'ai-summary-btn';
+    summaryBtn.innerHTML = '<span class="spinner"></span>Summary';
+
+    summaryBtn.onclick = (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+
+        const id = getEntryId(el);
+        if (!id) return;
+
+        const spinner = summaryBtn.querySelector('.spinner');
+
+        // Update button state
+        summaryBtn.disabled = true;
+        spinner.style.display = 'inline-block';
+        summaryBtn.childNodes[1].textContent = 'Summarizing...';
+
+        // Extract content
+        const titleEl = el.querySelector('.EntryTitleLink, .entry-title-link, .entry__title, .ArticleTitle');
+        const summaryEl = el.querySelector('.EntrySummary, .entry__summary, .content, .entryContent');
+        const contentEl = el.querySelector('.EntryBody, .content, .entryContent, .entryBody');
+
+        const contentText = contentEl ? contentEl.innerText : (summaryEl ? summaryEl.textContent.trim() : '');
+        const titleText = titleEl ? titleEl.textContent.trim() : 'Unknown Title';
+        const link = titleEl ? titleEl.getAttribute('href') : null;
+        const url = link ? (link.startsWith('http') ? link : window.location.origin + link) : null;
+
+        console.log(`[Feedly AI] Summarizing article: ${id} - ${titleText}`);
+
+        chrome.runtime.sendMessage({
+            type: 'summarize_article',
+            id: id,
+            title: titleText,
+            url: url,
+            content: contentText
+        }, (resp) => {
+             summaryBtn.disabled = false;
+             spinner.style.display = 'none';
+             summaryBtn.childNodes[1].textContent = 'Summary';
+
+             if (chrome.runtime.lastError) {
+                console.error("Summary error:", chrome.runtime.lastError);
+                return;
+             }
+
+             if (resp && resp.summary) {
+                 ensureSummaryPanel(el, resp.summary, null);
+             }
+        });
+    };
+    container.appendChild(summaryBtn);
+  }
+
   if (summary && summary !== '无详细总结') {
     ensureSummaryPanel(el, summary, verdict);
   }
@@ -397,10 +472,12 @@ function scanEntries() {
     // Check if we're already fetching this ID
     if (STATE.pending.has(id)) continue;
 
-    // Check if this specific DOM element already has a badge
-    if (entry.querySelector('.ai-score-badge')) {
+    // Check if this specific DOM element already has a badge OR an analyze button
+    // This prevents re-fetching/re-rendering items that already have a status
+    if (entry.querySelector('.ai-score-badge') || entry.querySelector('.ai-analyze-btn')) {
+        // Even if it has a badge, we might need to update the summary panel if it's a new DOM node (e.g. expanded view)
         const item = STATE.itemCache?.get(id);
-        if (item) {
+        if (item && item.found) {
              const summary = item.data?.summary || item.data?.reason;
              const verdict = item.data?.verdict;
              if (summary) ensureSummaryPanel(entry, summary, verdict);

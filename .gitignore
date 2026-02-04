@@ -49,6 +49,7 @@ output/
 *.log
 run_log.txt
 
-# Coverage
-.coverage
+# DB
+rss_scores.db
+
 htmlcov/

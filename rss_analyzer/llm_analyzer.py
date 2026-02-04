@@ -127,6 +127,71 @@ def analyze_articles_with_llm_batch(articles: list[dict]) -> list[dict]:
         return fallback
 
 
+def summarize_single_article(text: str, profile_name: str = None) -> str:
+    """
+    Summarize a single article using the specified profile (defaults to analysis_profile for speed).
+
+    Args:
+        text: The article text to summarize
+        profile_name: Optional profile name to use for configuration
+
+    Returns:
+        The summary text
+    """
+    try:
+        # Use analysis_profile by default as requested (fast model)
+        # If profile_name is provided, it overrides
+        profile = profile_name or "analysis_profile"
+
+        api_key = get_config("OPENAI_API_KEY", profile=profile)
+        base_url = get_config("OPENAI_BASE_URL", "https://api.openai.com/v1", profile=profile)
+        model = get_config("OPENAI_MODEL", "gpt-3.5-turbo", profile=profile)
+
+        client = OpenAI(
+            api_key=api_key,
+            base_url=base_url,
+        )
+
+        prompt = """
+You are an expert analyst. Provide a comprehensive summary of the following article.
+Do NOT just skim the surface. Deeply analyze the content and provide a detailed summary.
+
+Structure your response as follows:
+
+### 🎯 Core Argument
+State the main point or event in 1-2 clear sentences.
+
+### 🔑 Key Details
+- List 3-5 crucial details, facts, or data points from the article.
+- Include specific numbers, names, or dates if present.
+- Capture the nuance of the argument.
+
+### 💡 Implications
+What does this mean? What are the consequences or conclusions drawn?
+
+Output Format: Markdown.
+"""
+
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": prompt},
+                {"role": "user", "content": f"Article Content:\n\n{text}"}
+            ],
+            temperature=0.5,
+        )
+
+        content = response.choices[0].message.content
+        if not content:
+            return "Summarization failed: Model returned empty content"
+        return content
+
+    except Exception as e:
+        logger.error(f"Summarization failed: {e}")
+        return f"Summarization failed: {str(e)}"
+
+
+
 def generate_overall_summary(analyzed_articles: list) -> str:
     """
     生成总体摘要

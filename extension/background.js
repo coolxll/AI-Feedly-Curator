@@ -158,4 +158,27 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   return true;
 });
 
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (!msg || msg.type !== "summarize_article") {
+    return;
+  }
+
+  console.log("Processing summarize_article for", msg.id);
+
+  if (USE_MOCK) {
+      setTimeout(() => {
+          sendResponse({
+              id: msg.id,
+              summary: "## Mock Summary\n\n- Point 1: This is a mock summary point.\n- Point 2: Another key detail from the article.\n- Conclusion: This is a test conclusion."
+          });
+      }, 1500);
+  } else {
+      sendNativeMessage(msg).then(resp => {
+          console.log("Native Summarize Response:", resp);
+          sendResponse(resp);
+      });
+  }
+  return true;
+});
+
 console.log(`Feedly AI Overlay background script loaded (${USE_MOCK ? 'MOCK' : 'NATIVE'} MODE)`);

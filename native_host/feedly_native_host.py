@@ -36,7 +36,8 @@ try:
     logging.info(f"设置 RSS_SCORES_DB: {DB_PATH}")
 
     from rss_analyzer.cache import get_cached_score, save_cached_score
-    from rss_analyzer.llm_analyzer import analyze_article_with_llm
+    from rss_analyzer.article_fetcher import fetch_article_content
+    from rss_analyzer.llm_analyzer import analyze_article_with_llm, summarize_single_article
 
     logging.info("成功导入 rss_analyzer 模块")
 except Exception:
@@ -63,7 +64,6 @@ def _read_message():
             return None
         try:
             decoded = json.loads(message.decode("utf-8"))
-            logging.debug(f"Received message: {decoded.get('type', 'unknown')}")
             return decoded
         except Exception as e:
             logging.error(f"JSON decode error: {e}")
@@ -79,9 +79,42 @@ def _send_message(payload: dict):
         sys.stdout.buffer.write(struct.pack("<I", len(encoded)))
         sys.stdout.buffer.write(encoded)
         sys.stdout.buffer.flush()
-        logging.debug("Message sent successfully")
     except Exception:
         logging.exception("Send message exception")
+
+
+def _perform_analysis(article_id: str, title: str, url: str | None, summary: str, content: str | None) -> dict:
+    """执行实时分析并保存缓存"""
+    logging.info(f"Performing real-time analysis for {article_id}: {title}")
+
+    # 1. 准备内容
+    final_content = content or summary
+    if url and (not content or len(content) < 200):
+        logging.info(f"Fetching content from {url}...")
+        fetched = fetch_article_content(url)
+        if fetched and len(fetched) > 100:
+            final_content = fetched
+            logging.info(f"Fetched {len(fetched)} chars")
+        else:
+            logging.warning("Fetch failed or too short, using summary")
+
+    # 2. 调用 LLM
+    try:
+        analysis = analyze_article_with_llm(title, summary, final_content)
+        score = analysis.get("score", 0)
+
+        # 3. 保存缓存
+        save_cached_score(article_id, score, analysis)
+        logging.info(f"Analysis complete. Score: {score}")
+
+        return {
+            "score": score,
+            "data": analysis,
+            "updated_at": None
+        }
+    except Exception as e:
+        logging.error(f"Analysis failed: {e}")
+        return None
 
 
 def _normalize_item(article_id: str, cached: dict | None) -> dict:
@@ -106,46 +139,127 @@ def _handle_get_score(msg: dict) -> dict:
     article_id = msg.get("id")
     logging.info(f"Handling get_score for: {article_id}")
     cached = get_cached_score(article_id)
+
+    if not cached:
+        # 如果请求中包含了元数据，尝试实时计算
+        if msg.get("title"):
+             result = _perform_analysis(
+                 article_id,
+                 msg.get("title"),
+                 msg.get("url"),
+                 msg.get("summary", ""),
+                 msg.get("content")
+             )
+             if result:
+                 cached = result
+
     logging.info(f"Cache result: {'Found' if cached else 'Not Found'}")
     return _normalize_item(article_id, cached)
 
 
 def _handle_get_scores(msg: dict) -> dict:
-    ids = msg.get("ids") or []
-    logging.info(f"Handling get_scores for {len(ids)} items")
-    items = {}
-    for article_id in ids:
+    # msg['items'] 是 list[dict] 或 msg['ids'] 是 list[str]
+    input_items = msg.get("items")
+    ids = msg.get("ids")
+
+    # 统一格式为 list[dict]
+    items_to_process = []
+    if input_items:
+        items_to_process = input_items
+    elif ids:
+        items_to_process = [{"id": i} for i in ids]
+
+    logging.info(f"Handling get_scores for {len(items_to_process)} items")
+
+    results = {}
+    for item in items_to_process:
+        # 兼容 dict 或 str
+        if isinstance(item, str):
+            item = {"id": item}
+
+        article_id = item.get("id")
+        if not article_id:
+            continue
+
         cached = get_cached_score(article_id)
-        items[article_id] = _normalize_item(article_id, cached)
-    return {"items": items}
+
+        # 如果缓存未命中，且有标题，则进行实时计算
+        if not cached and item.get("title"):
+            logging.info(f"Cache miss for {article_id}, triggering analysis...")
+            analyzed = _perform_analysis(
+                article_id,
+                item.get("title"),
+                item.get("url"),
+                item.get("summary", ""),
+                item.get("content")
+            )
+            if analyzed:
+                cached = analyzed
+
+        results[article_id] = _normalize_item(article_id, cached)
+
+    return {"items": results}
 
 
 def _handle_analyze_article(msg: dict) -> dict:
+    """处理单篇文章的显式分析请求"""
     article_id = msg.get("id")
-    title = msg.get("title")
-    summary = msg.get("summary", "")
+    if not article_id:
+        return {"error": "no_id"}
+
+    result = _perform_analysis(
+        article_id,
+        msg.get("title", "Unknown"),
+        msg.get("url"),
+        msg.get("summary", ""),
+        msg.get("content")
+    )
+
+    if result:
+        return _normalize_item(article_id, result)
+    else:
+        return {"error": "analysis_failed"}
+
+
+def _handle_summarize_article(msg: dict) -> dict:
+    """Handle on-demand summarization request"""
+    article_id = msg.get("id")
+    title = msg.get("title", "")
     content = msg.get("content", "")
+    url = msg.get("url")
 
-    if not article_id or not title:
-        return {"error": "missing_id_or_title"}
+    logging.info(f"Handling summarize_article for {article_id}: {title}")
 
-    logging.info(f"Analyzing article: {article_id} - {title}")
+    # Ensure we have content
+    final_content = content
+    if url and (not content or len(content) < 200):
+        logging.info(f"Fetching content for summary from {url}...")
+        fetched = fetch_article_content(url)
+        if fetched and len(fetched) > 100:
+            final_content = fetched
+            logging.info(f"Fetched {len(fetched)} chars for summary")
 
-    try:
-        # Call LLM
-        analysis = analyze_article_with_llm(title, summary, content)
+    if not final_content:
+         return {"error": "no_content", "message": "Could not retrieve article content"}
 
-        # Save to cache
-        save_cached_score(article_id, analysis.get("score"), analysis)
+    summary = summarize_single_article(final_content)
 
-        # Return formatted result
-        # Note: We don't have the updated_at from DB yet unless we re-read, but it's fine to pass None or just let the client handle it.
-        # However, _normalize_item expects a cached dict structure if we were reading from cache.
-        # Let's construct a compatible structure.
-        return _normalize_item(article_id, {"score": analysis.get("score"), "data": analysis, "updated_at": None})
-    except Exception as e:
-        logging.error(f"Analysis failed: {e}")
-        return {"error": str(e)}
+    # Update Cache if exists
+    cached = get_cached_score(article_id)
+    if cached:
+        score = cached.get("score")
+        data = cached.get("data") or {}
+        data["summary"] = summary
+        # If the original analysis didn't include a verdict/reason, we might want to keep it that way
+        # or maybe add a note?
+        # Just update summary is safe.
+        save_cached_score(article_id, score, data)
+        logging.info(f"Updated cache for {article_id} with new summary")
+
+    return {
+        "id": article_id,
+        "summary": summary
+    }
 
 
 def _handle_health(_: dict) -> dict:
@@ -160,6 +274,8 @@ def _handle_message(msg: dict) -> dict:
         return _handle_get_scores(msg)
     if msg_type == "analyze_article":
         return _handle_analyze_article(msg)
+    if msg_type == "summarize_article":
+        return _handle_summarize_article(msg)
     if msg_type == "health":
         return _handle_health(msg)
     return {"error": "unknown_type"}
