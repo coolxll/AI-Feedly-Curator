@@ -611,8 +611,21 @@ function debouncedScan() {
   }, 200);
 }
 
+function getObserverRoot() {
+  // Feedly 页面 DOM 变化非常频繁，尽量缩小观察范围，避免全量 scanEntries 过度触发。
+  // 这些 selector 是经验候选；如果都找不到，回退到 document.body。
+  return (
+    document.querySelector('#feedlyPageFX') ||
+    document.querySelector('#feedlyFrame') ||
+    document.querySelector('#feedlyPage') ||
+    document.querySelector('main') ||
+    document.body ||
+    document.documentElement
+  );
+}
+
 const observer = new MutationObserver(() => debouncedScan());
-observer.observe(document.documentElement, { childList: true, subtree: true });
+observer.observe(getObserverRoot(), { childList: true, subtree: true });
 
 console.log("[Feedly AI Overlay] Starting initial scan...");
 scheduleScan();
