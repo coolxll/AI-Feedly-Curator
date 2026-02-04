@@ -1,6 +1,14 @@
 # Core dependencies
 requests>=2.28.0
-openai
 python-dotenv>=1.0.0
+
+# LLM & Embedding
+openai>=1.0.0
+dashscope>=1.14.0
+
+# Article fetching & parsing
 trafilatura>=1.6.0
 beautifulsoup4>=4.12.0
+
+# Vector database
+chromadb>=0.5.0
