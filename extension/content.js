@@ -350,10 +350,25 @@ function renderItem(el, item) {
 
   const tooltipText = `【${verdict}】\n${summaryContent}${reasonContent}`;
 
-  // 绑定鼠标事件代替 CSS Hover
-  badge.addEventListener('mouseenter', (e) => showTooltip(e, tooltipText));
-  badge.addEventListener('mouseleave', () => hideTooltip());
-  badge.addEventListener('mousemove', (e) => updateTooltipPos(e));
+  // 改为点击显示/隐藏 Tooltip，避免自动弹出干扰
+  badge.style.cursor = 'pointer';
+  badge.onclick = (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+
+      const el = ensureTooltipEl();
+      if (el.style.display === 'block' && el.textContent === tooltipText) {
+          hideTooltip();
+      } else {
+          showTooltip(e, tooltipText);
+          // 点击其他地方关闭
+          const closeHandler = () => {
+              hideTooltip();
+              document.removeEventListener('click', closeHandler);
+          };
+          setTimeout(() => document.addEventListener('click', closeHandler), 0);
+      }
+  };
 
   container.appendChild(badge);
 
@@ -366,11 +381,8 @@ function renderItem(el, item) {
       reasonEl.style.color = 'inherit';
       reasonEl.style.opacity = '0.8';
       reasonEl.style.fontSize = '14px';
-      reasonEl.textContent = rawReason;
-      // Also show verdict
-      if (verdict) {
-          reasonEl.textContent = `【${verdict}】 ${rawReason}`;
-      }
+      // Include verdict in the text
+      reasonEl.textContent = verdict ? `【${verdict}】 ${rawReason}` : rawReason;
       container.appendChild(reasonEl);
   } else if (verdict && !container.querySelector('.ai-reason-text')) {
       // Also add text for card/magazine view if possible, but keep it short
@@ -523,6 +535,17 @@ function scanEntries() {
     // Check if this specific DOM element already has a badge OR an analyze button
     // This prevents re-fetching/re-rendering items that already have a status
     if (entry.querySelector('.ai-score-badge') || entry.querySelector('.ai-analyze-btn')) {
+        // If it has a badge but is now expanded (has EntryInfo) and missing reason text, we should re-render
+        const id = getEntryId(entry);
+        const item = STATE.itemCache.get(id);
+        if (item && item.found && item.data?.reason) {
+             const entryInfo = entry.querySelector('.EntryInfo, .entry-info, .EntryMetadataWrapper');
+             const existingReason = entry.querySelector('.ai-reason-text');
+             // If we have entry info (expanded) but no reason text displayed yet
+             if (entryInfo && !existingReason) {
+                 renderItem(entry, item);
+             }
+        }
         continue;
     }
     const titleEl = entry.querySelector('.EntryTitleLink, .entry-title-link, .entry__title, .ArticleTitle');
