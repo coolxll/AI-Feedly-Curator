@@ -29,6 +29,31 @@ logging.basicConfig(
 console = Console()
 logger = logging.getLogger("tui")
 
+
+def _maybe_reexec_in_project_venv() -> None:
+    """Re-exec into the project's .venv interpreter if present.
+
+    This avoids requiring users to manually activate the venv when launching a
+    terminal via right-click/open-in-terminal.
+    """
+    if os.environ.get("RSS_OPML_SKIP_VENV") == "1":
+        return
+    if os.environ.get("RSS_OPML_VENV_REEXEC") == "1":
+        return
+
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    candidates = [
+        os.path.join(script_dir, ".venv", "Scripts", "python.exe"),  # Windows
+        os.path.join(script_dir, ".venv", "bin", "python"),          # POSIX
+    ]
+
+    current = os.path.abspath(sys.executable)
+    for venv_py in candidates:
+        if os.path.exists(venv_py) and os.path.abspath(venv_py) != current:
+            env = os.environ.copy()
+            env["RSS_OPML_VENV_REEXEC"] = "1"
+            os.execve(venv_py, [venv_py] + sys.argv, env)
+
 def get_input(prompt_text, default=None):
     """Fallback input helper"""
     p = f"{prompt_text} "
@@ -736,6 +761,9 @@ def run_filter_flow():
     execute_filter(mode, limit, threshold, dry_run, mark_read, stream_id, stream_label)
 
 if __name__ == "__main__":
+    # Auto-use project venv if present (so launching a fresh terminal is fine).
+    _maybe_reexec_in_project_venv()
+
     # Fail fast on broken LLM dependencies (do not enter menu).
     _verify_startup_dependencies_or_exit()
 
