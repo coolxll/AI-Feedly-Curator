@@ -155,6 +155,122 @@ class ChromaVectorStore:
             logger.error(f"Vector search failed: {e}")
             return []
 
+    def delete_article(self, article_id: str) -> bool:
+        """
+        Delete an article from the vector store
+
+        Args:
+            article_id: ID of the article to delete
+
+        Returns:
+            Boolean indicating success
+        """
+        try:
+            self.collection.delete(ids=[article_id])
+            logger.debug(f"Deleted article {article_id} from vector store")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to delete article {article_id} from vector store: {e}")
+            return False
+
+    def delete_articles(self, article_ids: List[str]) -> bool:
+        """
+        Delete multiple articles from the vector store
+
+        Args:
+            article_ids: List of IDs of articles to delete
+
+        Returns:
+            Boolean indicating success
+        """
+        try:
+            self.collection.delete(ids=article_ids)
+            logger.debug(f"Deleted {len(article_ids)} articles from vector store")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to delete articles from vector store: {e}")
+            return False
+
+    def clear_collection(self) -> bool:
+        """
+        Clear all articles from the vector store collection
+
+        Returns:
+            Boolean indicating success
+        """
+        try:
+            # Get all IDs in the collection first
+            all_items = self.collection.get(include=[])
+            if all_items['ids']:
+                self.collection.delete(ids=all_items['ids'])
+                logger.info(f"Cleared {len(all_items['ids'])} articles from vector store")
+            else:
+                logger.info("Vector store collection was already empty")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to clear vector store collection: {e}")
+            return False
+
+    def get_article_count(self) -> int:
+        """
+        Get the total number of articles in the vector store
+
+        Returns:
+            Total count of articles
+        """
+        try:
+            count = self.collection.count()
+            return count
+        except Exception as e:
+            logger.error(f"Failed to get article count: {e}")
+            return 0
+
+    def get_all_article_ids(self) -> List[str]:
+        """
+        Get all article IDs in the vector store
+
+        Returns:
+            List of all article IDs
+        """
+        try:
+            all_items = self.collection.get(include=[])
+            return all_items['ids']
+        except Exception as e:
+            logger.error(f"Failed to get all article IDs: {e}")
+            return []
+
+    def cleanup_invalid_entries(self) -> int:
+        """
+        Clean up invalid entries from the vector store (e.g., with empty content)
+
+        Returns:
+            Number of entries removed
+        """
+        try:
+            # Get all documents and their metadata
+            all_items = self.collection.get(include=['documents', 'metadatas', 'ids'])
+
+            invalid_ids = []
+            for i, doc in enumerate(all_items['documents']):
+                # Check for empty or invalid content
+                if not doc or len(doc.strip()) == 0:
+                    invalid_ids.append(all_items['ids'][i])
+
+                # Optionally check for other invalid conditions
+                metadata = all_items['metadatas'][i] if i < len(all_items['metadatas']) else {}
+                if not metadata.get('title') and len(doc.strip()) < 10:  # Very short without title
+                    if all_items['ids'][i] not in invalid_ids:
+                        invalid_ids.append(all_items['ids'][i])
+
+            if invalid_ids:
+                self.collection.delete(ids=invalid_ids)
+                logger.info(f"Cleaned up {len(invalid_ids)} invalid entries from vector store")
+
+            return len(invalid_ids)
+        except Exception as e:
+            logger.error(f"Failed to clean up invalid entries: {e}")
+            return 0
+
     def get_article_tags(self, article_id: str, text: str = None) -> List[str]:
         """
         Get tags for an article using simple keyword extraction from title and content

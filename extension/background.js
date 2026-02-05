@@ -586,6 +586,105 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   return true;
 });
 
+// Handle delete article requests
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (!msg || msg.type !== "delete_article") {
+    return;
+  }
+
+  console.log("Processing delete_article for:", msg.article_id);
+
+  if (USE_MOCK) {
+    setTimeout(() => {
+      sendResponse({
+        article_id: msg.article_id,
+        success: true
+      });
+    }, 300);
+  } else {
+    sendNativeMessage(msg).then(resp => {
+      console.log("Native Delete Article Response:", resp);
+      sendResponse(resp);
+    });
+  }
+  return true;
+});
+
+// Handle clear vector store requests
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (!msg || msg.type !== "clear_vector_store") {
+    return;
+  }
+
+  console.log("Processing clear_vector_store");
+
+  if (USE_MOCK) {
+    setTimeout(() => {
+      sendResponse({
+        success: true,
+        remaining_count: 0,
+        message: "Vector store cleared (mock)."
+      });
+    }, 500);
+  } else {
+    sendNativeMessage(msg).then(resp => {
+      console.log("Native Clear Vector Store Response:", resp);
+      sendResponse(resp);
+    });
+  }
+  return true;
+});
+
+// Handle get vector store stats requests
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (!msg || msg.type !== "get_vector_store_stats") {
+    return;
+  }
+
+  console.log("Processing get_vector_store_stats");
+
+  if (USE_MOCK) {
+    setTimeout(() => {
+      sendResponse({
+        article_count: 25,
+        sample_ids: ["id1", "id2", "id3", "id4", "id5"],
+        has_data: true
+      });
+    }, 200);
+  } else {
+    sendNativeMessage(msg).then(resp => {
+      console.log("Native Get Vector Store Stats Response:", resp);
+      sendResponse(resp);
+    });
+  }
+  return true;
+});
+
+// Handle cleanup invalid entries requests
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (!msg || msg.type !== "cleanup_invalid_entries") {
+    return;
+  }
+
+  console.log("Processing cleanup_invalid_entries");
+
+  if (USE_MOCK) {
+    setTimeout(() => {
+      sendResponse({
+        removed_count: 3,
+        remaining_count: 22,
+        message: "Cleaned up 3 invalid entries (mock)."
+      });
+    }, 400);
+  } else {
+    sendNativeMessage(msg).then(resp => {
+      console.log("Native Cleanup Invalid Entries Response:", resp);
+      sendResponse(resp);
+    });
+  }
+  return true;
+});
+
 // Enable side panel on Feedly
 chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(err => {
   console.error('Failed to set panel behavior:', err);
