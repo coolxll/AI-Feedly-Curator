@@ -76,6 +76,7 @@ try:
         summarize_single_article,
         analyze_articles_with_llm_batch,
     )
+    from rss_analyzer.vector_store import vector_store
 
     logging.info("成功导入 rss_analyzer 模块")
 except Exception:
@@ -353,6 +354,27 @@ def _handle_summarize_article(msg: dict) -> dict:
     return {"id": article_id, "summary": summary}
 
 
+def _handle_semantic_search(msg: dict) -> dict:
+    """Handle semantic search request"""
+    query = msg.get("query")
+    limit = msg.get("limit", 5)
+
+    if not query:
+        return {"error": "no_query", "message": "Query string is required"}
+
+    logging.info(f"Handling semantic_search: query='{query}', limit={limit}")
+
+    try:
+        results = vector_store.search_similar(query, limit)
+        return {
+            "query": query,
+            "results": results
+        }
+    except Exception as e:
+        logging.error(f"Semantic search error: {e}")
+        return {"error": "search_failed", "message": str(e)}
+
+
 def _handle_health(_: dict) -> dict:
     return {"ok": True}
 
@@ -367,6 +389,8 @@ def _handle_message(msg: dict) -> dict:
         return _handle_analyze_article(msg)
     if msg_type == "summarize_article":
         return _handle_summarize_article(msg)
+    if msg_type == "semantic_search":
+        return _handle_semantic_search(msg)
     if msg_type == "health":
         return _handle_health(msg)
     return {"error": "unknown_type"}

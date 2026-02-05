@@ -55,3 +55,8 @@ native_host/logs/
 rss_scores.db
 
 htmlcov/
+
+.gemini/
+gha-creds-*.json
+# Ignore chroma_db directory as it contains runtime data
+chroma_db/

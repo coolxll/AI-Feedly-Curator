@@ -4,7 +4,6 @@ python-dotenv>=1.0.0
 
 # LLM & Embedding
 openai>=1.0.0
-dashscope>=1.14.0
 
 # Article fetching & parsing
 trafilatura>=1.6.0

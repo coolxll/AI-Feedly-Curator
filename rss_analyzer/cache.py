@@ -58,6 +58,7 @@ def save_cached_score(article_id: str, score: float, data: dict):
     if not article_id:
         return
     try:
+        # 1. Save to SQLite
         conn = sqlite3.connect(DB_PATH)
         c = conn.cursor()
         c.execute(
@@ -69,6 +70,40 @@ def save_cached_score(article_id: str, score: float, data: dict):
         )
         conn.commit()
         conn.close()
+
+        # 2. Save to Vector Store (ChromaDB)
+        # Only save if we have meaningful text (summary or content)
+        try:
+            # Local import to avoid circular dependency if cache is imported early
+            from rss_analyzer.vector_store import vector_store
+
+            text_content = data.get("summary") or data.get("content") or ""
+            title = data.get("title", "")
+
+            # Construct a meaningful document for embedding
+            # Prefer: Title + Summary. If no summary, Title + Content snippet.
+            document_text = ""
+            if title:
+                document_text += f"Title: {title}\n"
+            if text_content:
+                document_text += f"Content: {text_content}"
+
+            if document_text.strip():
+                # Prepare metadata
+                metadata = {
+                    "score": score,
+                    "title": title[:100], # Limit length
+                    "updated_at": datetime.now().isoformat()
+                }
+
+                # Async-like: don't let vector store failure block main flow
+                vector_store.add_article(article_id, document_text, metadata)
+                logger.debug(f"Saved vector embedding for {article_id}")
+
+        except Exception as ve:
+            # Log but don't fail the whole operation
+            logger.warning(f"Failed to save vector embedding: {ve}")
+
     except Exception as e:
         logger.error(f"Cache write error: {e}")
 
