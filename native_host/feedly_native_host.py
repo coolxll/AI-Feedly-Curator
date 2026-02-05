@@ -372,6 +372,43 @@ def _handle_semantic_search(msg: dict) -> dict:
         return {"error": "search_failed", "message": str(e)}
 
 
+def _handle_get_article_tags(msg: dict) -> dict:
+    """Handle request to get tags for an article"""
+    article_id = msg.get("article_id")
+
+    if not article_id:
+        return {"error": "no_article_id", "message": "Article ID is required"}
+
+    logging.info(f"Handling get_article_tags: article_id='{article_id}'")
+
+    try:
+        tags = vector_store.get_article_tags(article_id)
+        return {
+            "article_id": article_id,
+            "tags": tags
+        }
+    except Exception as e:
+        logging.error(f"Get article tags error: {e}")
+        return {"error": "tags_failed", "message": str(e)}
+
+
+def _handle_discover_trending_topics(msg: dict) -> dict:
+    """Handle request to discover trending topics"""
+    limit = msg.get("limit", 5)
+
+    logging.info(f"Handling discover_trending_topics: limit={limit}")
+
+    try:
+        trending_topics = vector_store.discover_trending_topics(limit)
+        return {
+            "topics": trending_topics,
+            "limit": limit
+        }
+    except Exception as e:
+        logging.error(f"Discover trending topics error: {e}")
+        return {"error": "trending_failed", "message": str(e)}
+
+
 def _handle_health(_: dict) -> dict:
     return {"ok": True}
 
@@ -388,6 +425,10 @@ def _handle_message(msg: dict) -> dict:
         return _handle_summarize_article(msg)
     if msg_type == "semantic_search":
         return _handle_semantic_search(msg)
+    if msg_type == "get_article_tags":
+        return _handle_get_article_tags(msg)
+    if msg_type == "discover_trending_topics":
+        return _handle_discover_trending_topics(msg)
     if msg_type == "health":
         return _handle_health(msg)
     return {"error": "unknown_type"}

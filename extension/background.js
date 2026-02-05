@@ -528,6 +528,64 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   return true;
 });
 
+// Handle get article tags requests
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (!msg || msg.type !== "get_article_tags") {
+    return;
+  }
+
+  console.log("Processing get_article_tags for article:", msg.article_id);
+
+  if (USE_MOCK) {
+    // Mock tags
+    setTimeout(() => {
+      sendResponse({
+        article_id: msg.article_id,
+        tags: ["AI", "Machine Learning", "Technology", "Innovation"]
+      });
+    }, 500);
+  } else {
+    // Native Host mode - forward to native host
+    sendNativeMessage(msg).then(resp => {
+      console.log("Native Get Article Tags Response:", resp);
+      sendResponse(resp);
+    });
+  }
+  return true;
+});
+
+// Handle discover trending topics requests
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (!msg || msg.type !== "discover_trending_topics") {
+    return;
+  }
+
+  console.log("Processing discover_trending_topics");
+
+  if (USE_MOCK) {
+    // Mock trending topics
+    setTimeout(() => {
+      sendResponse({
+        topics: [
+          { topic: "AI Development", frequency: 12, percentage: 25.3 },
+          { topic: "Cloud Computing", frequency: 8, percentage: 18.7 },
+          { topic: "Cybersecurity", frequency: 6, percentage: 15.2 },
+          { topic: "Web Development", frequency: 5, percentage: 12.1 },
+          { topic: "Data Science", frequency: 4, percentage: 9.8 }
+        ],
+        limit: msg.limit || 5
+      });
+    }, 800);
+  } else {
+    // Native Host mode - forward to native host
+    sendNativeMessage(msg).then(resp => {
+      console.log("Native Discover Trending Topics Response:", resp);
+      sendResponse(resp);
+    });
+  }
+  return true;
+});
+
 // Enable side panel on Feedly
 chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(err => {
   console.error('Failed to set panel behavior:', err);
