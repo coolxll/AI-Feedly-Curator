@@ -45,7 +45,9 @@ def migrate_from_sqlite_to_vector_store(batch_size=100):
     print(f"📊 Vector store records: {vector_count}")
 
     # Get all records from SQLite
-    sqlite_cursor.execute("SELECT article_id, score, data, title, url, updated_at FROM article_scores")
+    sqlite_cursor.execute(
+        "SELECT article_id, score, data, title, url, updated_at FROM article_scores"
+    )
 
     migrated_count = 0
     skipped_count = 0
@@ -58,7 +60,9 @@ def migrate_from_sqlite_to_vector_store(batch_size=100):
         try:
             data = json.loads(data_str) if data_str else {}
         except json.JSONDecodeError:
-            logger.warning(f"Failed to parse JSON for article {article_id}, skipping...")
+            logger.warning(
+                f"Failed to parse JSON for article {article_id}, skipping..."
+            )
             skipped_count += 1
             continue
 
@@ -92,8 +96,12 @@ def migrate_from_sqlite_to_vector_store(batch_size=100):
             # Prepare metadata
             metadata = {
                 "score": score,
-                "title": article_title[:100] if article_title.strip() else "Untitled",  # Limit length
-                "updated_at": updated_at.isoformat() if hasattr(updated_at, "isoformat") else str(updated_at),
+                "title": article_title[:100]
+                if article_title.strip()
+                else "Untitled",  # Limit length
+                "updated_at": updated_at.isoformat()
+                if hasattr(updated_at, "isoformat")
+                else str(updated_at),
             }
 
             if article_url.strip():
@@ -136,7 +144,7 @@ def process_batch(batch):
 
 def main():
     print("🚀 Vector Store Migration Tool")
-    print("="*50)
+    print("=" * 50)
 
     # Show current status
     vector_count = vector_store.get_article_count()
@@ -152,11 +160,15 @@ def main():
     print()
 
     if vector_count >= sqlite_total:
-        print("ℹ️  Vector store already has equal or more records than SQLite. Migration may not be needed.")
+        print(
+            "ℹ️  Vector store already has equal or more records than SQLite. Migration may not be needed."
+        )
         return
 
-    confirm = input(f"⚠️  This will migrate {sqlite_total} records to vector store. Continue? (y/N): ")
-    if confirm.lower() == 'y':
+    confirm = input(
+        f"⚠️  This will migrate {sqlite_total} records to vector store. Continue? (y/N): "
+    )
+    if confirm.lower() == "y":
         migrate_from_sqlite_to_vector_store()
     else:
         print("   Migration cancelled.")

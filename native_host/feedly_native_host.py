@@ -383,10 +383,7 @@ def _handle_get_article_tags(msg: dict) -> dict:
 
     try:
         tags = vector_store.get_article_tags(article_id)
-        return {
-            "article_id": article_id,
-            "tags": tags
-        }
+        return {"article_id": article_id, "tags": tags}
     except Exception as e:
         logging.error(f"Get article tags error: {e}")
         return {"error": "tags_failed", "message": str(e)}
@@ -400,10 +397,7 @@ def _handle_discover_trending_topics(msg: dict) -> dict:
 
     try:
         trending_topics = vector_store.discover_trending_topics(limit)
-        return {
-            "topics": trending_topics,
-            "limit": limit
-        }
+        return {"topics": trending_topics, "limit": limit}
     except Exception as e:
         logging.error(f"Discover trending topics error: {e}")
         return {"error": "trending_failed", "message": str(e)}
@@ -420,10 +414,7 @@ def _handle_delete_article(msg: dict) -> dict:
 
     try:
         success = vector_store.delete_article(article_id)
-        return {
-            "article_id": article_id,
-            "success": success
-        }
+        return {"article_id": article_id, "success": success}
     except Exception as e:
         logging.error(f"Delete article error: {e}")
         return {"error": "delete_failed", "message": str(e)}
@@ -439,7 +430,7 @@ def _handle_clear_vector_store(msg: dict) -> dict:
         return {
             "success": success,
             "remaining_count": count,
-            "message": f"Cleared vector store. {count} items remain."
+            "message": f"Cleared vector store. {count} items remain.",
         }
     except Exception as e:
         logging.error(f"Clear vector store error: {e}")
@@ -456,7 +447,7 @@ def _handle_get_vector_store_stats(msg: dict) -> dict:
         return {
             "article_count": count,
             "sample_ids": all_ids[:10],  # Return first 10 IDs as sample
-            "has_data": count > 0
+            "has_data": count > 0,
         }
     except Exception as e:
         logging.error(f"Get vector store stats error: {e}")
@@ -473,7 +464,7 @@ def _handle_cleanup_invalid_entries(msg: dict) -> dict:
         return {
             "removed_count": removed_count,
             "remaining_count": count_after,
-            "message": f"Cleaned up {removed_count} invalid entries. {count_after} items remain."
+            "message": f"Cleaned up {removed_count} invalid entries. {count_after} items remain.",
         }
     except Exception as e:
         logging.error(f"Cleanup invalid entries error: {e}")

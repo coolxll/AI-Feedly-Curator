@@ -35,7 +35,9 @@ def display_stats():
 
     if count > 0:
         all_ids = vector_store.get_all_article_ids()
-        print(f"   Sample article IDs: {all_ids[:5]}{'...' if len(all_ids) > 5 else ''}")
+        print(
+            f"   Sample article IDs: {all_ids[:5]}{'...' if len(all_ids) > 5 else ''}"
+        )
 
 
 def clear_all_data():
@@ -50,7 +52,9 @@ def clear_all_data():
     success = vector_store.clear_collection()
     if success:
         count_after = vector_store.get_article_count()
-        print(f"   ✅ Cleared all {count_before} articles. Now has {count_after} articles.")
+        print(
+            f"   ✅ Cleared all {count_before} articles. Now has {count_after} articles."
+        )
     else:
         print("   ❌ Failed to clear vector store")
 
@@ -84,9 +88,13 @@ def cleanup_invalid():
 def main():
     parser = argparse.ArgumentParser(description="Vector Store Cleanup Utility")
     parser.add_argument("--stats", action="store_true", help="Show current statistics")
-    parser.add_argument("--clear-all", action="store_true", help="Clear all data from vector store")
+    parser.add_argument(
+        "--clear-all", action="store_true", help="Clear all data from vector store"
+    )
     parser.add_argument("--remove-ids", nargs="+", help="Remove specific article IDs")
-    parser.add_argument("--cleanup-invalid", action="store_true", help="Remove invalid entries")
+    parser.add_argument(
+        "--cleanup-invalid", action="store_true", help="Remove invalid entries"
+    )
 
     args = parser.parse_args()
 
@@ -108,8 +116,10 @@ def main():
         display_stats()
 
     if args.clear_all:
-        confirm = input("\n⚠️  This will remove ALL data from the vector store. Continue? (y/N): ")
-        if confirm.lower() == 'y':
+        confirm = input(
+            "\n⚠️  This will remove ALL data from the vector store. Continue? (y/N): "
+        )
+        if confirm.lower() == "y":
             clear_all_data()
         else:
             print("   Operation cancelled.")
@@ -119,7 +129,7 @@ def main():
         for aid in args.remove_ids:
             print(f"  - {aid}")
         confirm = input("\n⚠️  Continue with removal? (y/N): ")
-        if confirm.lower() == 'y':
+        if confirm.lower() == "y":
             remove_by_ids(args.remove_ids)
         else:
             print("   Operation cancelled.")

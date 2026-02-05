@@ -17,19 +17,21 @@ class DashScopeEmbeddingFunction(EmbeddingFunction):
         # Try various possible environment variable names for DashScope API key
         # in order of preference
         self.api_key = (
-            os.getenv("DASHSCOPE_API_KEY") or
-            os.getenv("ALIYUN_OPENAI_API_KEY") or
-            os.getenv("OPENAI_API_KEY")
+            os.getenv("DASHSCOPE_API_KEY")
+            or os.getenv("ALIYUN_OPENAI_API_KEY")
+            or os.getenv("OPENAI_API_KEY")
         )
         if not self.api_key:
-            logger.warning("No API key found in environment variables (checked DASHSCOPE_API_KEY, ALIYUN_OPENAI_API_KEY, OPENAI_API_KEY).")
+            logger.warning(
+                "No API key found in environment variables (checked DASHSCOPE_API_KEY, ALIYUN_OPENAI_API_KEY, OPENAI_API_KEY)."
+            )
 
         # Use various possible base URL environment variables in order of preference
         self.base_url = (
-            os.getenv("DASHSCOPE_BASE_URL") or
-            os.getenv("ALIYUN_OPENAI_BASE_URL") or
-            os.getenv("OPENAI_BASE_URL") or
-            "https://dashscope.aliyuncs.com/compatible-mode/v1"
+            os.getenv("DASHSCOPE_BASE_URL")
+            or os.getenv("ALIYUN_OPENAI_BASE_URL")
+            or os.getenv("OPENAI_BASE_URL")
+            or "https://dashscope.aliyuncs.com/compatible-mode/v1"
         )
         self.model_name = model_name
         self.client = None
@@ -170,7 +172,9 @@ class ChromaVectorStore:
             logger.debug(f"Deleted article {article_id} from vector store")
             return True
         except Exception as e:
-            logger.error(f"Failed to delete article {article_id} from vector store: {e}")
+            logger.error(
+                f"Failed to delete article {article_id} from vector store: {e}"
+            )
             return False
 
     def delete_articles(self, article_ids: List[str]) -> bool:
@@ -201,9 +205,11 @@ class ChromaVectorStore:
         try:
             # Get all IDs in the collection first
             all_items = self.collection.get(include=[])
-            if all_items['ids']:
-                self.collection.delete(ids=all_items['ids'])
-                logger.info(f"Cleared {len(all_items['ids'])} articles from vector store")
+            if all_items["ids"]:
+                self.collection.delete(ids=all_items["ids"])
+                logger.info(
+                    f"Cleared {len(all_items['ids'])} articles from vector store"
+                )
             else:
                 logger.info("Vector store collection was already empty")
             return True
@@ -234,7 +240,7 @@ class ChromaVectorStore:
         """
         try:
             all_items = self.collection.get(include=[])  # Get only IDs
-            return all_items['ids']
+            return all_items["ids"]
         except Exception as e:
             logger.error(f"Failed to get all article IDs: {e}")
             return []
@@ -247,11 +253,11 @@ class ChromaVectorStore:
             Dictionary containing ids, documents, and metadatas
         """
         try:
-            all_items = self.collection.get(include=['documents', 'metadatas'])
+            all_items = self.collection.get(include=["documents", "metadatas"])
             return all_items
         except Exception as e:
             logger.error(f"Failed to get all articles: {e}")
-            return {'ids': [], 'documents': [], 'metadatas': []}
+            return {"ids": [], "documents": [], "metadatas": []}
 
     def cleanup_invalid_entries(self) -> int:
         """
@@ -262,23 +268,29 @@ class ChromaVectorStore:
         """
         try:
             # Get all documents and their metadata
-            all_items = self.collection.get(include=['documents', 'metadatas', 'ids'])
+            all_items = self.collection.get(include=["documents", "metadatas", "ids"])
 
             invalid_ids = []
-            for i, doc in enumerate(all_items['documents']):
+            for i, doc in enumerate(all_items["documents"]):
                 # Check for empty or invalid content
                 if not doc or len(doc.strip()) == 0:
-                    invalid_ids.append(all_items['ids'][i])
+                    invalid_ids.append(all_items["ids"][i])
 
                 # Optionally check for other invalid conditions
-                metadata = all_items['metadatas'][i] if i < len(all_items['metadatas']) else {}
-                if not metadata.get('title') and len(doc.strip()) < 10:  # Very short without title
-                    if all_items['ids'][i] not in invalid_ids:
-                        invalid_ids.append(all_items['ids'][i])
+                metadata = (
+                    all_items["metadatas"][i] if i < len(all_items["metadatas"]) else {}
+                )
+                if (
+                    not metadata.get("title") and len(doc.strip()) < 10
+                ):  # Very short without title
+                    if all_items["ids"][i] not in invalid_ids:
+                        invalid_ids.append(all_items["ids"][i])
 
             if invalid_ids:
                 self.collection.delete(ids=invalid_ids)
-                logger.info(f"Cleaned up {len(invalid_ids)} invalid entries from vector store")
+                logger.info(
+                    f"Cleaned up {len(invalid_ids)} invalid entries from vector store"
+                )
 
             return len(invalid_ids)
         except Exception as e:
@@ -299,15 +311,19 @@ class ChromaVectorStore:
         try:
             if not text:
                 # Get the article text from the collection
-                article_data = self.collection.get(ids=[article_id], include=['documents', 'metadatas'])
-                if not article_data['documents'] or not article_data['documents']:
+                article_data = self.collection.get(
+                    ids=[article_id], include=["documents", "metadatas"]
+                )
+                if not article_data["documents"] or not article_data["documents"]:
                     logger.warning(f"Article {article_id} not found or has no content")
                     return []
 
                 # Combine title and document for better tagging
-                metadata = article_data['metadatas'][0] if article_data['metadatas'] else {}
-                title = metadata.get('title', '')
-                doc = article_data['documents'][0]
+                metadata = (
+                    article_data["metadatas"][0] if article_data["metadatas"] else {}
+                )
+                title = metadata.get("title", "")
+                doc = article_data["documents"][0]
                 text = f"{title} {doc}"
 
             # Simple keyword extraction based on common terms in tech articles
@@ -317,17 +333,55 @@ class ChromaVectorStore:
 
             # Define common tech and topic-related keywords
             tech_keywords = [
-                'ai', 'artificial intelligence', 'machine learning', 'ml',
-                'data science', 'analytics', 'big data', 'database',
-                'programming', 'software', 'development', 'devops',
-                'cloud', 'aws', 'azure', 'gcp', 'kubernetes', 'docker',
-                'security', 'cybersecurity', 'blockchain', 'crypto',
-                'web development', 'mobile', 'android', 'ios',
-                'algorithm', 'research', 'innovation', 'digital',
-                'automation', 'robotics', 'iot', 'internet of things',
-                'api', 'microservices', 'architecture', 'design',
-                'python', 'javascript', 'java', 'go', 'rust', 'typescript',
-                'startup', 'business', 'product', 'management', 'leadership'
+                "ai",
+                "artificial intelligence",
+                "machine learning",
+                "ml",
+                "data science",
+                "analytics",
+                "big data",
+                "database",
+                "programming",
+                "software",
+                "development",
+                "devops",
+                "cloud",
+                "aws",
+                "azure",
+                "gcp",
+                "kubernetes",
+                "docker",
+                "security",
+                "cybersecurity",
+                "blockchain",
+                "crypto",
+                "web development",
+                "mobile",
+                "android",
+                "ios",
+                "algorithm",
+                "research",
+                "innovation",
+                "digital",
+                "automation",
+                "robotics",
+                "iot",
+                "internet of things",
+                "api",
+                "microservices",
+                "architecture",
+                "design",
+                "python",
+                "javascript",
+                "java",
+                "go",
+                "rust",
+                "typescript",
+                "startup",
+                "business",
+                "product",
+                "management",
+                "leadership",
             ]
 
             found_tags = set()
@@ -336,16 +390,54 @@ class ChromaVectorStore:
             for keyword in tech_keywords:
                 if keyword in text_lower:
                     # Use the original case from the text if possible
-                    matches = re.findall(r'\b' + re.escape(keyword) + r'\b', text, re.IGNORECASE)
+                    matches = re.findall(
+                        r"\b" + re.escape(keyword) + r"\b", text, re.IGNORECASE
+                    )
                     if matches:
                         # Take the first match to preserve original casing
                         found_tags.add(matches[0].title())
 
             # Extract any capitalized words that might be important
             # Look for sequences that look like proper nouns or important terms
-            caps_words = re.findall(r'\b[A-Z]{2,}[a-z]*\b|\b[A-Z][a-z]{2,}\b', text)
+            caps_words = re.findall(r"\b[A-Z]{2,}[a-z]*\b|\b[A-Z][a-z]{2,}\b", text)
             for word in caps_words:
-                if len(word) > 2 and word.lower() not in ['the', 'and', 'for', 'are', 'but', 'not', 'you', 'all', 'can', 'had', 'her', 'was', 'one', 'our', 'out', 'day', 'get', 'has', 'him', 'his', 'how', 'its', 'may', 'new', 'now', 'old', 'see', 'two', 'who', 'boy', 'did', 'man', 'men', 'run', 'too']:
+                if len(word) > 2 and word.lower() not in [
+                    "the",
+                    "and",
+                    "for",
+                    "are",
+                    "but",
+                    "not",
+                    "you",
+                    "all",
+                    "can",
+                    "had",
+                    "her",
+                    "was",
+                    "one",
+                    "our",
+                    "out",
+                    "day",
+                    "get",
+                    "has",
+                    "him",
+                    "his",
+                    "how",
+                    "its",
+                    "may",
+                    "new",
+                    "now",
+                    "old",
+                    "see",
+                    "two",
+                    "who",
+                    "boy",
+                    "did",
+                    "man",
+                    "men",
+                    "run",
+                    "too",
+                ]:
                     found_tags.add(word)
 
             # Return up to 5 tags
@@ -355,7 +447,9 @@ class ChromaVectorStore:
             logger.error(f"Failed to get tags for article {article_id}: {e}")
             return []
 
-    def get_similar_articles_with_tags(self, query: str, limit: int = 5) -> List[Dict[str, Any]]:
+    def get_similar_articles_with_tags(
+        self, query: str, limit: int = 5
+    ) -> List[Dict[str, Any]]:
         """
         Get similar articles with their tags
 
@@ -371,8 +465,8 @@ class ChromaVectorStore:
 
             # Add tags to each result
             for result in results:
-                tags = self.get_article_tags(result['id'], result['text'])
-                result['tags'] = tags
+                tags = self.get_article_tags(result["id"], result["text"])
+                result["tags"] = tags
 
             return results
 
@@ -393,24 +487,28 @@ class ChromaVectorStore:
         """
         try:
             # Get all articles from the collection
-            all_articles = self.collection.get(include=['documents', 'metadatas'])
+            all_articles = self.collection.get(include=["documents", "metadatas"])
 
-            if not all_articles['ids']:
+            if not all_articles["ids"]:
                 return []
 
             # Extract tags for all articles (or a sample if too many)
             all_tags = []
-            article_count = len(all_articles['ids'])
+            article_count = len(all_articles["ids"])
             sample_size = min(20, article_count)  # Don't process too many articles
 
             for i in range(sample_size):
-                if i < len(all_articles['ids']):
-                    article_id = all_articles['ids'][i]
-                    text = all_articles['documents'][i]
-                    metadata = all_articles['metadatas'][i] if i < len(all_articles['metadatas']) else {}
+                if i < len(all_articles["ids"]):
+                    article_id = all_articles["ids"][i]
+                    text = all_articles["documents"][i]
+                    metadata = (
+                        all_articles["metadatas"][i]
+                        if i < len(all_articles["metadatas"])
+                        else {}
+                    )
 
                     # Combine title and content for better tagging
-                    title = metadata.get('title', '')
+                    title = metadata.get("title", "")
                     full_text = f"{title} {text}"
 
                     tags = self.get_article_tags(article_id, full_text)
@@ -418,16 +516,21 @@ class ChromaVectorStore:
 
             # Count tag frequencies
             from collections import Counter
+
             tag_counts = Counter(all_tags)
 
             # Return top tags as trending topics
             trending = []
             for tag, count in tag_counts.most_common(limit):
-                trending.append({
-                    "topic": tag.title(),
-                    "frequency": count,
-                    "percentage": round((count / len(all_tags)) * 100, 2) if all_tags else 0
-                })
+                trending.append(
+                    {
+                        "topic": tag.title(),
+                        "frequency": count,
+                        "percentage": round((count / len(all_tags)) * 100, 2)
+                        if all_tags
+                        else 0,
+                    }
+                )
 
             return trending
 

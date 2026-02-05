@@ -80,7 +80,14 @@ def save_cached_score(article_id: str, score: float, data: dict):
             INSERT OR REPLACE INTO article_scores (article_id, score, data, title, url, updated_at)
             VALUES (?, ?, ?, ?, ?, ?)
         """,
-            (article_id, score, json.dumps(data, ensure_ascii=False), title, url, datetime.now()),
+            (
+                article_id,
+                score,
+                json.dumps(data, ensure_ascii=False),
+                title,
+                url,
+                datetime.now(),
+            ),
         )
         conn.commit()
         conn.close()

@@ -85,7 +85,9 @@ def clean_start():
 
     # 3. Note: We don't clear the ChromaDB directory here as it may be locked by the persistent client
     # The clear_collection() above should be sufficient for clearing the data
-    print("\n🗑️  ChromaDB data cleared via collection API (directory left intact to avoid lock issues)")
+    print(
+        "\n🗑️  ChromaDB data cleared via collection API (directory left intact to avoid lock issues)"
+    )
 
     print("\n🎉 Clean start completed successfully!")
     print("Both databases are now empty and ready for fresh data accumulation.")
@@ -94,7 +96,7 @@ def clean_start():
 
 def main():
     print("🚀 Clean Start Tool")
-    print("="*50)
+    print("=" * 50)
 
     # Show current status
     try:
