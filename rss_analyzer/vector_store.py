@@ -233,11 +233,25 @@ class ChromaVectorStore:
             List of all article IDs
         """
         try:
-            all_items = self.collection.get(include=[])
+            all_items = self.collection.get(include=[])  # Get only IDs
             return all_items['ids']
         except Exception as e:
             logger.error(f"Failed to get all article IDs: {e}")
             return []
+
+    def get_all_articles(self) -> Dict[str, Any]:
+        """
+        Get all articles with their data from the vector store
+
+        Returns:
+            Dictionary containing ids, documents, and metadatas
+        """
+        try:
+            all_items = self.collection.get(include=['documents', 'metadatas'])
+            return all_items
+        except Exception as e:
+            logger.error(f"Failed to get all articles: {e}")
+            return {'ids': [], 'documents': [], 'metadatas': []}
 
     def cleanup_invalid_entries(self) -> int:
         """
