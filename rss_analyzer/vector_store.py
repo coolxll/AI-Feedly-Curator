@@ -14,13 +14,22 @@ class DashScopeEmbeddingFunction(EmbeddingFunction):
     """
 
     def __init__(self, model_name: str = "text-embedding-v3"):
-        self.api_key = os.getenv("DASHSCOPE_API_KEY")
+        # Try various possible environment variable names for DashScope API key
+        # in order of preference
+        self.api_key = (
+            os.getenv("DASHSCOPE_API_KEY") or
+            os.getenv("ALIYUN_OPENAI_API_KEY") or
+            os.getenv("OPENAI_API_KEY")
+        )
         if not self.api_key:
-            logger.warning("DASHSCOPE_API_KEY not found in environment variables.")
+            logger.warning("No API key found in environment variables (checked DASHSCOPE_API_KEY, ALIYUN_OPENAI_API_KEY, OPENAI_API_KEY).")
 
-        # Use provided base URL or default to DashScope compatible endpoint
-        self.base_url = os.getenv(
-            "DASHSCOPE_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1"
+        # Use various possible base URL environment variables in order of preference
+        self.base_url = (
+            os.getenv("DASHSCOPE_BASE_URL") or
+            os.getenv("ALIYUN_OPENAI_BASE_URL") or
+            os.getenv("OPENAI_BASE_URL") or
+            "https://dashscope.aliyuncs.com/compatible-mode/v1"
         )
         self.model_name = model_name
         self.client = None

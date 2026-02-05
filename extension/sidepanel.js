@@ -85,6 +85,37 @@ function displaySearchResults(results, query) {
     const score = result.metadata?.score || 'N/A';
     const distance = result.distance ? result.distance.toFixed(3) : 'N/A';
     const preview = result.text ? result.text.substring(0, 200) + '...' : '';
+    const url = result.metadata?.url || null;
+
+    // Create title element (with link if URL is available)
+    let titleHtml = '';
+    if (url) {
+      titleHtml = `
+        <a href="${url}" target="_blank" rel="noopener noreferrer"
+           style="
+             font-size: 14px;
+             font-weight: 600;
+             color: #2563eb;
+             text-decoration: none;
+             flex: 1;
+             display: block;
+           "
+           onmouseover="this.style.textDecoration='underline'"
+           onmouseout="this.style.textDecoration='none'">
+          ${title}
+        </a>
+      `;
+    } else {
+      titleHtml = `
+        <h3 style="
+          margin: 0;
+          font-size: 14px;
+          font-weight: 600;
+          color: #111827;
+          flex: 1;
+        ">${title}</h3>
+      `;
+    }
 
     resultsHtml += `
       <div style="
@@ -101,13 +132,7 @@ function displaySearchResults(results, query) {
           align-items: flex-start;
           margin-bottom: 8px;
         ">
-          <h3 style="
-            margin: 0;
-            font-size: 14px;
-            font-weight: 600;
-            color: #111827;
-            flex: 1;
-          ">${title}</h3>
+          ${titleHtml}
           <div style="
             font-size: 12px;
             font-weight: 600;

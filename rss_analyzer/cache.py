@@ -96,6 +96,10 @@ def save_cached_score(article_id: str, score: float, data: dict):
                     "updated_at": datetime.now().isoformat(),
                 }
 
+                # Add URL if available
+                if "url" in data and data["url"]:
+                    metadata["url"] = data["url"]
+
                 # Async-like: don't let vector store failure block main flow
                 vector_store.add_article(article_id, document_text, metadata)
                 logger.debug(f"Saved vector embedding for {article_id}")
