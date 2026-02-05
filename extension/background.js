@@ -488,6 +488,46 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 });
 
+// Handle semantic search requests
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (!msg || msg.type !== "semantic_search") {
+    return;
+  }
+
+  console.log("Processing semantic_search for query:", msg.query);
+
+  if (USE_MOCK) {
+    // Mock semantic search
+    setTimeout(() => {
+      const mockResults = [
+        {
+          id: "mock_related_1",
+          text: "This is a mock related article about similar topics.",
+          metadata: { title: "Related Article 1", score: 4.2 },
+          distance: 0.3
+        },
+        {
+          id: "mock_related_2",
+          text: "Another article with similar content and themes.",
+          metadata: { title: "Related Article 2", score: 3.8 },
+          distance: 0.4
+        }
+      ];
+      sendResponse({
+        query: msg.query,
+        results: mockResults
+      });
+    }, 1000);
+  } else {
+    // Native Host mode - forward to native host
+    sendNativeMessage(msg).then(resp => {
+      console.log("Native Semantic Search Response:", resp);
+      sendResponse(resp);
+    });
+  }
+  return true;
+});
+
 // Enable side panel on Feedly
 chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(err => {
   console.error('Failed to set panel behavior:', err);
