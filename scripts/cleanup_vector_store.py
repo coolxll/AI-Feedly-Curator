@@ -9,10 +9,10 @@ This script provides various cleanup operations for the ChromaDB vector store:
 4. Display statistics
 """
 
-import sys
-import os
-from typing import List
 import argparse
+import os
+import sys
+from typing import List
 from dotenv import load_dotenv
 
 # Add project root to path FIRST
@@ -23,8 +23,8 @@ sys.path.insert(0, project_root)
 # Load environment variables
 load_dotenv(os.path.join(project_root, ".env"))
 
-# Import after path is set
-from rss_analyzer.vector_store import vector_store
+# Need to set up path before importing local modules
+from rss_analyzer.vector_store import vector_store  # noqa: E402
 
 
 def display_stats():

@@ -5,13 +5,16 @@ Vector Store Migration Script
 This script migrates historical data from SQLite database to ChromaDB vector store.
 """
 
-import sys
-import os
 import json
-import sqlite3
-from datetime import datetime
 import logging
+import os
+import sqlite3
+import sys
 from dotenv import load_dotenv
+
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Add project root to path
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -21,12 +24,9 @@ sys.path.insert(0, project_root)
 # Load environment variables
 load_dotenv(os.path.join(project_root, ".env"))
 
-from rss_analyzer.cache import DB_PATH
-from rss_analyzer.vector_store import vector_store
-
-# Set up logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# Need to set up path before importing local modules
+from rss_analyzer.cache import DB_PATH  # noqa: E402
+from rss_analyzer.vector_store import vector_store  # noqa: E402
 
 
 def migrate_from_sqlite_to_vector_store(batch_size=100):
@@ -118,7 +118,7 @@ def migrate_from_sqlite_to_vector_store(batch_size=100):
 
     # Final counts
     new_vector_count = vector_store.get_article_count()
-    print(f"\n✅ Migration completed!")
+    print("\n✅ Migration completed!")
     print(f"📊 Records migrated: {migrated_count}")
     print(f"📊 Records skipped: {skipped_count}")
     print(f"📊 Vector store final count: {new_vector_count}")
@@ -146,7 +146,7 @@ def main():
     sqlite_total = sqlite_cursor.fetchone()[0]
     sqlite_conn.close()
 
-    print(f"Current status:")
+    print("Current status:")
     print(f"  - SQLite records: {sqlite_total}")
     print(f"  - Vector store records: {vector_count}")
     print()

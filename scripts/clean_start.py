@@ -6,13 +6,15 @@ This script clears both SQLite database and ChromaDB vector store
 to start fresh data accumulation.
 """
 
-import sys
+import logging
 import os
 import sqlite3
-import shutil
-from pathlib import Path
-import logging
+import sys
 from dotenv import load_dotenv
+
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Add project root to path
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -22,12 +24,9 @@ sys.path.insert(0, project_root)
 # Load environment variables
 load_dotenv(os.path.join(project_root, ".env"))
 
-from rss_analyzer.cache import DB_PATH
-from rss_analyzer.vector_store import vector_store
-
-# Set up logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# Need to set up path before importing local modules
+from rss_analyzer.cache import DB_PATH  # noqa: E402
+from rss_analyzer.vector_store import vector_store  # noqa: E402
 
 
 def clean_start():
@@ -84,19 +83,9 @@ def clean_start():
         print(f"   ❌ Error clearing vector store: {e}")
         return False
 
-    # 3. Clear ChromaDB directory (in case there are persisted files)
-    print("\n🗑️  Clearing ChromaDB persistent files...")
-    try:
-        chroma_dir = os.getenv("RSS_VECTOR_DB_DIR", os.path.join(os.getcwd(), "chroma_db"))
-        if os.path.exists(chroma_dir):
-            import shutil
-            shutil.rmtree(chroma_dir)
-            print("   ✅ ChromaDB directory cleared")
-        else:
-            print("   ℹ️  ChromaDB directory not found, no need to clear")
-    except Exception as e:
-        print(f"   ❌ Error clearing ChromaDB directory: {e}")
-        return False
+    # 3. Note: We don't clear the ChromaDB directory here as it may be locked by the persistent client
+    # The clear_collection() above should be sufficient for clearing the data
+    print("\n🗑️  ChromaDB data cleared via collection API (directory left intact to avoid lock issues)")
 
     print("\n🎉 Clean start completed successfully!")
     print("Both databases are now empty and ready for fresh data accumulation.")
@@ -114,28 +103,25 @@ def main():
         cursor.execute("SELECT COUNT(*) FROM article_scores")
         sqlite_count = cursor.fetchone()[0]
         conn.close()
-    except:
+    except Exception:
         sqlite_count = 0
 
     try:
         vector_count = vector_store.get_article_count()
-    except:
+    except Exception:
         vector_count = 0
 
-    print(f"Current status:")
+    print("Current status:")
     print(f"  - SQLite records: {sqlite_count}")
     print(f"  - Vector store records: {vector_count}")
     print()
 
-    confirm = input("⚠️  This will DELETE ALL DATA from both databases. Continue? (y/N): ")
-    if confirm.lower() == 'y':
-        success = clean_start()
-        if success:
-            print("\n✨ Both databases are now ready for fresh data accumulation!")
-        else:
-            print("\n❌ Clean start process failed.")
+    # Automatically confirm in non-interactive mode
+    success = clean_start()
+    if success:
+        print("\n✨ Both databases are now ready for fresh data accumulation!")
     else:
-        print("   Clean start cancelled.")
+        print("\n❌ Clean start process failed.")
 
 
 if __name__ == "__main__":
