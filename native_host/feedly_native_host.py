@@ -366,10 +366,7 @@ def _handle_semantic_search(msg: dict) -> dict:
 
     try:
         results = vector_store.search_similar(query, limit)
-        return {
-            "query": query,
-            "results": results
-        }
+        return {"query": query, "results": results}
     except Exception as e:
         logging.error(f"Semantic search error: {e}")
         return {"error": "search_failed", "message": str(e)}

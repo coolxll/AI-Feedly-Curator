@@ -92,8 +92,8 @@ def save_cached_score(article_id: str, score: float, data: dict):
                 # Prepare metadata
                 metadata = {
                     "score": score,
-                    "title": title[:100], # Limit length
-                    "updated_at": datetime.now().isoformat()
+                    "title": title[:100],  # Limit length
+                    "updated_at": datetime.now().isoformat(),
                 }
 
                 # Async-like: don't let vector store failure block main flow

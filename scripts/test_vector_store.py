@@ -15,6 +15,7 @@ load_dotenv(os.path.join(project_root, ".env"))
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+
 def test_vector_store():
     logger.info("Initializing vector store...")
     # Import here to ensure env vars are loaded first
@@ -23,10 +24,7 @@ def test_vector_store():
     # 1. Test Adding Article
     article_id = "test_article_001"
     text = "This is a test article about artificial intelligence and machine learning. Vector databases are cool."
-    metadata = {
-        "title": "AI and Vector DBs",
-        "category": "tech"
-    }
+    metadata = {"title": "AI and Vector DBs", "category": "tech"}
 
     logger.info(f"Adding article: {article_id}")
     success = vector_store.add_article(article_id, text, metadata)
@@ -47,13 +45,14 @@ def test_vector_store():
     found = False
     for res in results:
         logger.info(res)
-        if res['id'] == article_id:
+        if res["id"] == article_id:
             found = True
 
     if found:
         logger.info("TEST PASSED: Found the inserted article.")
     else:
         logger.error("TEST FAILED: Did not find the inserted article.")
+
 
 if __name__ == "__main__":
     test_vector_store()
