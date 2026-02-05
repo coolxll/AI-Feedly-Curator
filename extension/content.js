@@ -665,7 +665,7 @@ function renderItem(el, item) {
                                   }
 
                                   const relatedSummary = document.createElement('div');
-                                  relatedSummary.textContent = result.text.substring(0, 150) + '...';
+                                  relatedSummary.textContent = (result.text || "").substring(0, 150) + '...';
                                   relatedSummary.style.cssText = `
                                       color: #64748b;
                                       font-size: 13px;
