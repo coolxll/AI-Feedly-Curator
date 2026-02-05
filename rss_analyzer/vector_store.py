@@ -1,6 +1,6 @@
 import os
 import logging
-from typing import List, Optional, Any
+from typing import List
 import chromadb
 from chromadb import Documents, EmbeddingFunction, Embeddings
 from openai import OpenAI
