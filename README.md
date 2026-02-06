@@ -15,8 +15,16 @@ AI 驱动的 RSS 文章分析器，自动从 Feedly 获取未读文章，使用 
 
 ### 1. 安装依赖
 
+推荐使用 [uv](https://github.com/astral-sh/uv) 进行极速安装：
+
 ```bash
+# 使用 uv (推荐)
+uv pip install -r requirements.txt
+uv pip install rich questionary prompt-toolkit
+
+# 或者使用标准 pip
 pip install -r requirements.txt
+pip install rich questionary prompt-toolkit
 ```
 
 ### 2. 配置环境变量
@@ -28,6 +36,20 @@ cp .env.example .env
 ```
 
 ### 3. 运行
+
+#### 交互式模式 (推荐)
+项目提供了一个全功能的交互式终端界面，支持选择分类、过滤模式和分析配置：
+
+```bash
+# 使用 uv 运行
+uv run feedly_tui.py
+
+# 或者直接运行
+python feedly_tui.py
+```
+
+#### 命令行模式
+你也可以直接调用各组件脚本：
 
 ```bash
 # 从 Feedly 获取文章并分析

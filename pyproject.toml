@@ -1,0 +1,30 @@
+[project]
+name = "rss-opml"
+version = "0.1.0"
+description = "AI-Feedly-Curator: AI-driven RSS analyzer and TUI"
+readme = "README.md"
+authors = [
+    { name = "coolxll", email = "coolxll@gmail.com" }
+]
+requires-python = ">=3.13"
+dependencies = [
+    "beautifulsoup4>=4.14.3",
+    "chromadb>=1.4.1",
+    "openai>=2.17.0",
+    "prompt-toolkit>=3.0.52",
+    "python-dotenv>=1.2.1",
+    "questionary>=2.1.1",
+    "requests>=2.32.5",
+    "rich>=14.3.2",
+    "trafilatura>=2.0.0",
+]
+
+[project.scripts]
+tui = "feedly_tui:main_menu"
+analyze = "article_analyzer:main"
+filter = "feedly_filter:main"
+summary = "regenerate_summary:main"
+
+[build-system]
+requires = ["uv_build>=0.9.28,<0.10.0"]
+build-backend = "uv_build"
