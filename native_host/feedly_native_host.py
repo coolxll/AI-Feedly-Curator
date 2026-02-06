@@ -69,6 +69,11 @@ try:
     os.environ["RSS_SCORES_DB"] = DB_PATH
     logging.info(f"设置 RSS_SCORES_DB: {DB_PATH}")
 
+    # 设置 Vector Store 路径环境变量 (确保与主项目共享)
+    VECTOR_DB_DIR = os.path.join(PROJECT_ROOT, "chroma_db")
+    os.environ["RSS_VECTOR_DB_DIR"] = VECTOR_DB_DIR
+    logging.info(f"设置 RSS_VECTOR_DB_DIR: {VECTOR_DB_DIR}")
+
     from rss_analyzer.cache import get_cached_score, save_cached_score
     from rss_analyzer.article_fetcher import fetch_article_content
     from rss_analyzer.llm_analyzer import (
@@ -382,14 +387,15 @@ def _handle_semantic_search(msg: dict) -> dict:
     """Handle semantic search request"""
     query = msg.get("query")
     limit = msg.get("limit", 5)
+    min_score = msg.get("min_score")  # Optional minimum score threshold
 
     if not query:
         return {"error": "no_query", "message": "Query string is required"}
 
-    logging.info(f"Handling semantic_search: query='{query}', limit={limit}")
+    logging.info(f"Handling semantic_search: query='{query}', limit={limit}, min_score={min_score}")
 
     try:
-        results = vector_store.search_similar(query, limit)
+        results = vector_store.search_similar(query, limit, min_score)
         return {"query": query, "results": results}
     except Exception as e:
         logging.error(f"Semantic search error: {e}")

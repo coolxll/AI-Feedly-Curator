@@ -121,16 +121,23 @@ class ChromaVectorStore:
             logger.error(f"Failed to add article {article_id} to vector store: {e}")
             return False
 
-    def search_similar(self, query: str, limit: int = 5) -> List[dict]:
+    def search_similar(self, query: str, limit: int = 5, min_score: float = None) -> List[dict]:
         """
         Search for similar articles.
         Returns a list of dicts with id, document, metadata, and distance.
+
+        Args:
+            query: Search query text
+            limit: Maximum number of results to return
+            min_score: Minimum score threshold (optional filtering)
         """
         if not self.collection:
             return []
 
         try:
-            results = self.collection.query(query_texts=[query], n_results=limit)
+            # Increase the number of results we fetch to account for potential filtering
+            fetch_limit = limit * 3 if min_score is not None else limit
+            results = self.collection.query(query_texts=[query], n_results=fetch_limit)
 
             # Format results
             # results structure: {'ids': [['id1', 'id2']], 'documents': [['doc1', 'doc2']], ...}
@@ -142,16 +149,23 @@ class ChromaVectorStore:
                 distances = results["distances"][0] if results["distances"] else []
 
                 for i in range(len(ids)):
-                    formatted_results.append(
-                        {
-                            "id": ids[i],
-                            "text": documents[i] if i < len(documents) else "",
-                            "metadata": metadatas[i] if i < len(metadatas) else {},
-                            "distance": distances[i] if i < len(distances) else 0.0,
-                        }
-                    )
+                    result_item = {
+                        "id": ids[i],
+                        "text": documents[i] if i < len(documents) else "",
+                        "metadata": metadatas[i] if i < len(metadatas) else {},
+                        "distance": distances[i] if i < len(distances) else 0.0,
+                    }
 
-            return formatted_results
+                    # Apply score filtering if min_score is specified
+                    if min_score is not None:
+                        score = result_item["metadata"].get("score")
+                        if score is not None and score < min_score:
+                            continue  # Skip this result if below threshold
+
+                    formatted_results.append(result_item)
+
+            # Return only up to the requested limit
+            return formatted_results[:limit]
 
         except Exception as e:
             logger.error(f"Vector search failed: {e}")

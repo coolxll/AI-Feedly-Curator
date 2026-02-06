@@ -440,7 +440,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                 updateSidePanelState(windowId, {
                     title: msg.title,
                     content: fullSummary,
-                    status: 'success'
+                    status: 'success',
+                    id: msg.id // Pass ID so sidepanel can fetch tags
                 });
                 sendResponse({
                     id: msg.id,
