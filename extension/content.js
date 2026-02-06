@@ -716,11 +716,28 @@ function renderItem(el, item) {
                                   }
 
                                   const relatedSummary = document.createElement('div');
-                                  relatedSummary.textContent = (result.text || "").substring(0, 150) + '...';
+
+                                  // Clean up content for display
+                                  let displayText = result.text || "";
+
+                                  // Remove "Content:" prefix if present
+                                  displayText = displayText.replace(/^Content:\s*/i, '');
+                                  displayText = displayText.replace(/\nContent:\s*/i, '\n');
+
+                                  // Remove Title lines if present (since we already show clickable title)
+                                  // This matches "Title: xxxx" at start or after newline
+                                  displayText = displayText.replace(/^Title:.*$/im, '');
+                                  displayText = displayText.replace(/\nTitle:.*$/im, '');
+
+                                  // Clean up extra newlines
+                                  displayText = displayText.trim();
+
+                                  relatedSummary.textContent = displayText.substring(0, 150) + (displayText.length > 150 ? '...' : '');
                                   relatedSummary.style.cssText = `
                                       color: #64748b;
                                       font-size: 13px;
                                       margin-bottom: 4px;
+                                      line-height: 1.4;
                                   `;
 
                                   const metaInfo = document.createElement('div');

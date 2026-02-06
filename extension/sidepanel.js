@@ -186,7 +186,22 @@ function displaySearchResults(results, query) {
         line-height: 1.5;
         margin-bottom: 8px;
       `;
-    previewEl.textContent = preview;
+
+    // Clean up content for display
+    let displayText = result.text || "";
+
+    // Remove "Content:" prefix if present
+    displayText = displayText.replace(/^Content:\s*/i, '');
+    displayText = displayText.replace(/\nContent:\s*/i, '\n');
+
+    // Remove Title lines if present
+    displayText = displayText.replace(/^Title:.*$/im, '');
+    displayText = displayText.replace(/\nTitle:.*$/im, '');
+
+    // Clean up extra newlines
+    displayText = displayText.trim();
+
+    previewEl.textContent = displayText.substring(0, 200) + (displayText.length > 200 ? '...' : '');
 
     const cardFooter = document.createElement('div');
     cardFooter.style.cssText = `
