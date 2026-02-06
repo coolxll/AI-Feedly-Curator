@@ -575,10 +575,61 @@ function renderItem(el, item) {
 
                       if (chrome.runtime.lastError) {
                           console.error("Semantic search error:", chrome.runtime.lastError);
+
+                          // Remove loading indicator
+                          const loadingDiv = contentBody.querySelector('.ai-related-articles-loading');
+                          if (loadingDiv) {
+                              loadingDiv.remove();
+
+                              // Show error message instead
+                              const errorDiv = document.createElement('div');
+                              errorDiv.className = 'ai-related-articles-error';
+                              errorDiv.style.cssText = `
+                                  margin-top: 15px;
+                                  padding: 15px;
+                                  border: 1px solid #fecaca;
+                                  border-radius: 8px;
+                                  background-color: #fef2f2;
+                                  color: #dc2626;
+                              `;
+
+                              const errorTitle = document.createElement('h3');
+                              errorTitle.textContent = 'Related Articles';
+                              errorTitle.style.cssText = `
+                                  margin: 0 0 10px 0;
+                                  color: #dc2626;
+                                  font-size: 16px;
+                                  font-weight: 600;
+                              `;
+
+                              const errorText = document.createElement('div');
+                              errorText.innerHTML = `
+                                  Semantic search is not available: ${chrome.runtime.lastError.message}.<br>
+                                  Please check that:<br>
+                                  • API key is configured in your environment<br>
+                                  • Native host is properly installed and running<br>
+                                  • Vector database contains articles for semantic search
+                              `;
+                              errorText.style.cssText = `
+                                  color: #991b1b;
+                                  font-size: 14px;
+                                  line-height: 1.5;
+                              `;
+
+                              errorDiv.appendChild(errorTitle);
+                              errorDiv.appendChild(errorText);
+                              contentBody.appendChild(errorDiv);
+                          }
                           return;
                       }
 
                       if (resp && resp.results) {
+                          // Remove loading indicator
+                          const loadingDiv = contentBody.querySelector('.ai-related-articles-loading');
+                          if (loadingDiv) {
+                              loadingDiv.remove();
+                          }
+
                           // Create related articles section with results
                           const relatedSection = document.createElement('div');
                           relatedSection.className = 'ai-related-articles-section';
@@ -703,6 +754,44 @@ function renderItem(el, item) {
 
                           // Insert after the summary or at the end of content body
                           contentBody.appendChild(relatedSection);
+                      } else if (resp && resp.error) {
+                          // Remove loading indicator
+                          const loadingDiv = contentBody.querySelector('.ai-related-articles-loading');
+                          if (loadingDiv) {
+                              loadingDiv.remove();
+
+                              // Show error message
+                              const errorDiv = document.createElement('div');
+                              errorDiv.className = 'ai-related-articles-error';
+                              errorDiv.style.cssText = `
+                                  margin-top: 15px;
+                                  padding: 15px;
+                                  border: 1px solid #fecaca;
+                                  border-radius: 8px;
+                                  background-color: #fef2f2;
+                                  color: #dc2626;
+                              `;
+
+                              const errorTitle = document.createElement('h3');
+                              errorTitle.textContent = 'Related Articles';
+                              errorTitle.style.cssText = `
+                                  margin: 0 0 10px 0;
+                                  color: #dc2626;
+                                  font-size: 16px;
+                                  font-weight: 600;
+                              `;
+
+                              const errorText = document.createElement('div');
+                              errorText.textContent = `Semantic search failed: ${resp.message || resp.error}`;
+                              errorText.style.cssText = `
+                                  color: #991b1b;
+                                  font-size: 14px;
+                              `;
+
+                              errorDiv.appendChild(errorTitle);
+                              errorDiv.appendChild(errorText);
+                              contentBody.appendChild(errorDiv);
+                          }
                       }
                   });
               }
