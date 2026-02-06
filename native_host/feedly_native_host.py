@@ -144,7 +144,13 @@ def _perform_analysis(
         analysis = analyze_article_with_llm(title, summary, final_content)
         score = analysis.get("score", 0)
 
-        # 3. 保存缓存
+        # 3. 保存缓存 - 确保URL和标题等原始信息也被保存
+        # 合并原始元数据到分析结果中
+        if url:
+            analysis["url"] = url
+        if title and not analysis.get("title"):
+            analysis["title"] = title
+
         save_cached_score(article_id, score, analysis)
         logging.info(f"Analysis complete. Score: {score}")
 
@@ -250,6 +256,16 @@ def _handle_get_scores(msg: dict) -> dict:
                     article_id = item.get("id")
 
                     score = analyzed.get("score", 0)
+                    # Ensure URL and title are preserved in analyzed data
+                    item_url = item.get("url")
+                    item_title = item.get("title")
+
+                    # Update analyzed data with original metadata if not present
+                    if item_url and not analyzed.get("url"):
+                        analyzed["url"] = item_url
+                    if item_title and not analyzed.get("title"):
+                        analyzed["title"] = item_title
+
                     save_cached_score(article_id, score, analyzed)
 
                     results[article_id] = _normalize_item(
@@ -345,6 +361,14 @@ def _handle_summarize_article(msg: dict) -> dict:
         score = cached.get("score")
         data = cached.get("data") or {}
         data["summary"] = summary
+
+        # Preserve original metadata like URL and title if they exist
+        # Get original item metadata if available in the current request
+        if url and not data.get("url"):
+            data["url"] = url
+        if title and not data.get("title"):
+            data["title"] = title
+
         # If the original analysis didn't include a verdict/reason, we might want to keep it that way
         # or maybe add a note?
         # Just update summary is safe.
