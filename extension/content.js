@@ -516,6 +516,200 @@ function renderItem(el, item) {
     container.appendChild(summaryBtn);
   }
 
+  // Add Related Articles Section
+  if (entryInfo || isExpanded) {
+      const contentBody = el.querySelector('.EntryBody, .entryBody, .ArticleBody, .entry__content');
+      if (contentBody && !contentBody.querySelector('.ai-related-articles-section')) {
+          // Check if we already have cached related articles for this entry
+          const hasRelatedArticles = contentBody.querySelector('.ai-related-articles-results');
+
+          if (!hasRelatedArticles) {
+              // Show loading indicator
+              const loadingDiv = document.createElement('div');
+              loadingDiv.className = 'ai-related-articles-loading';
+              loadingDiv.style.cssText = `
+                  margin-top: 15px;
+                  padding: 15px;
+                  border: 1px solid #e2e8f0;
+                  border-radius: 8px;
+                  background-color: #f8fafc;
+              `;
+
+              const loadingTitle = document.createElement('h3');
+              loadingTitle.textContent = 'Related Articles';
+              loadingTitle.style.cssText = `
+                  margin: 0 0 10px 0;
+                  color: #7c3aed;
+                  font-size: 16px;
+                  font-weight: 600;
+              `;
+
+              const loadingText = document.createElement('div');
+              loadingText.textContent = 'Finding related articles...';
+              loadingText.style.cssText = `
+                  color: #64748b;
+                  font-style: italic;
+              `;
+
+              loadingDiv.appendChild(loadingTitle);
+              loadingDiv.appendChild(loadingText);
+              contentBody.appendChild(loadingDiv);
+
+              // Automatically trigger semantic search
+              const id = getEntryId(el);
+              if (id) {
+                  console.log(`[Feedly AI] Auto-finding related articles for: ${id}`);
+
+                  // Send semantic search request
+                  chrome.runtime.sendMessage({
+                      type: 'semantic_search',
+                      query: summaryContent || titleText, // Use summary or title as query
+                      limit: 5,
+                      current_article_id: id
+                  }, (resp) => {
+                      // Remove loading indicator
+                      const loadingDiv = contentBody.querySelector('.ai-related-articles-loading');
+                      if (loadingDiv) {
+                          loadingDiv.remove();
+                      }
+
+                      if (chrome.runtime.lastError) {
+                          console.error("Semantic search error:", chrome.runtime.lastError);
+                          return;
+                      }
+
+                      if (resp && resp.results) {
+                          // Create related articles section with results
+                          const relatedSection = document.createElement('div');
+                          relatedSection.className = 'ai-related-articles-section';
+                          relatedSection.style.cssText = `
+                              margin-top: 15px;
+                              padding: 15px;
+                              border: 1px solid #e2e8f0;
+                              border-radius: 8px;
+                              background-color: #f8fafc;
+                          `;
+
+                          const relatedTitle = document.createElement('h3');
+                          relatedTitle.textContent = 'Related Articles';
+                          relatedTitle.style.cssText = `
+                              margin: 0 0 10px 0;
+                              color: #7c3aed;
+                              font-size: 16px;
+                              font-weight: 600;
+                          `;
+
+                          const relatedList = document.createElement('div');
+                          relatedList.className = 'ai-related-articles-results';
+                          relatedList.style.cssText = `
+                              display: flex;
+                              flex-direction: column;
+                              gap: 10px;
+                          `;
+
+                          if (resp.results.length === 0) {
+                              const noResults = document.createElement('div');
+                              noResults.textContent = 'No related articles found.';
+                              noResults.style.color = '#64748b';
+                              noResults.style.fontSize = '14px';
+                              relatedList.appendChild(noResults);
+                          } else {
+                              resp.results.forEach((result, index) => {
+                                  if (result.id === id) return; // Skip current article
+
+                                  const relatedItem = document.createElement('div');
+                                  relatedItem.style.cssText = `
+                                      padding: 8px;
+                                      border: 1px solid #cbd5e1;
+                                      border-radius: 4px;
+                                      background: white;
+                                  `;
+
+                                  // Create a link to the article if URL is available in metadata
+                                  const url = result.metadata.url || null;
+                                  let titleElement;
+
+                                  if (url) {
+                                      const linkElement = document.createElement('a');
+                                      linkElement.href = url;
+                                      linkElement.target = '_blank';
+                                      linkElement.rel = 'noopener noreferrer';
+                                      linkElement.style.cssText = `
+                                          font-weight: 600;
+                                          color: #2563eb;
+                                          text-decoration: none;
+                                          display: block;
+                                          margin-bottom: 4px;
+                                          font-size: 14px;
+                                      `;
+                                      linkElement.textContent = result.metadata.title || 'Untitled';
+
+                                      // Add hover effect
+                                      linkElement.addEventListener('mouseover', () => {
+                                          linkElement.style.textDecoration = 'underline';
+                                      });
+                                      linkElement.addEventListener('mouseout', () => {
+                                          linkElement.style.textDecoration = 'none';
+                                      });
+
+                                      titleElement = linkElement;
+                                  } else {
+                                      titleElement = document.createElement('div');
+                                      titleElement.textContent = result.metadata.title || 'Untitled';
+                                      titleElement.style.cssText = `
+                                          font-weight: 600;
+                                          color: #1e293b;
+                                          margin-bottom: 4px;
+                                          font-size: 14px;
+                                      `;
+                                  }
+
+                                  const relatedSummary = document.createElement('div');
+                                  relatedSummary.textContent = (result.text || "").substring(0, 150) + '...';
+                                  relatedSummary.style.cssText = `
+                                      color: #64748b;
+                                      font-size: 13px;
+                                      margin-bottom: 4px;
+                                  `;
+
+                                  const metaInfo = document.createElement('div');
+                                  metaInfo.style.cssText = `
+                                      display: flex;
+                                      justify-content: space-between;
+                                      font-size: 12px;
+                                      color: #6b7280;
+                                  `;
+
+                                  const scoreSpan = document.createElement('span');
+                                  scoreSpan.textContent = `AI Score: ${result.metadata.score || 'N/A'}`;
+                                  scoreSpan.style.fontWeight = '600';
+
+                                  const distanceSpan = document.createElement('span');
+                                  distanceSpan.textContent = `Distance: ${(result.distance || 0).toFixed(3)}`;
+                                  distanceSpan.style.fontWeight = '600';
+
+                                  metaInfo.appendChild(scoreSpan);
+                                  metaInfo.appendChild(distanceSpan);
+
+                                  relatedItem.appendChild(titleElement);
+                                  relatedItem.appendChild(relatedSummary);
+                                  relatedItem.appendChild(metaInfo);
+                                  relatedList.appendChild(relatedItem);
+                              });
+                          }
+
+                          relatedSection.appendChild(relatedTitle);
+                          relatedSection.appendChild(relatedList);
+
+                          // Insert after the summary or at the end of content body
+                          contentBody.appendChild(relatedSection);
+                      }
+                  });
+              }
+          }
+      }
+  }
+
   // Don't auto-show summary panel in list view - only show when user clicks Summary button
   // The summary will be shown in the Chrome side panel instead
 }

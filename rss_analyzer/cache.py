@@ -13,11 +13,14 @@ def init_db():
     try:
         conn = sqlite3.connect(DB_PATH)
         c = conn.cursor()
+        # Create table with additional title and url columns
         c.execute("""
             CREATE TABLE IF NOT EXISTS article_scores (
                 article_id TEXT PRIMARY KEY,
                 score REAL,
                 data TEXT,
+                title TEXT,
+                url TEXT,
                 updated_at TIMESTAMP
             )
         """)
@@ -33,8 +36,9 @@ def get_cached_score(article_id: str) -> dict | None:
     try:
         conn = sqlite3.connect(DB_PATH)
         c = conn.cursor()
+        # Select with new title and url columns
         c.execute(
-            "SELECT score, data, updated_at FROM article_scores WHERE article_id = ?",
+            "SELECT score, data, title, url, updated_at FROM article_scores WHERE article_id = ?",
             (article_id,),
         )
         row = c.fetchone()
@@ -45,7 +49,14 @@ def get_cached_score(article_id: str) -> dict | None:
                 data = json.loads(row[1])
             except Exception:
                 data = {}
-            updated_at = row[2]
+
+            # Enhance data with title and url from separate columns if not in data
+            if not data.get("title") and row[2]:  # title column
+                data["title"] = row[2]
+            if not data.get("url") and row[3]:  # url column
+                data["url"] = row[3]
+
+            updated_at = row[4]
             if hasattr(updated_at, "isoformat"):
                 updated_at = updated_at.isoformat()
             return {"score": row[0], "data": data, "updated_at": updated_at}
@@ -61,12 +72,22 @@ def save_cached_score(article_id: str, score: float, data: dict):
         # 1. Save to SQLite
         conn = sqlite3.connect(DB_PATH)
         c = conn.cursor()
+        # Include title and url in the INSERT/UPDATE
+        title = data.get("title", "")
+        url = data.get("url", "")
         c.execute(
             """
-            INSERT OR REPLACE INTO article_scores (article_id, score, data, updated_at)
-            VALUES (?, ?, ?, ?)
+            INSERT OR REPLACE INTO article_scores (article_id, score, data, title, url, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)
         """,
-            (article_id, score, json.dumps(data, ensure_ascii=False), datetime.now()),
+            (
+                article_id,
+                score,
+                json.dumps(data, ensure_ascii=False),
+                title,
+                url,
+                datetime.now(),
+            ),
         )
         conn.commit()
         conn.close()
@@ -78,7 +99,6 @@ def save_cached_score(article_id: str, score: float, data: dict):
             from rss_analyzer.vector_store import vector_store
 
             text_content = data.get("summary") or data.get("content") or ""
-            title = data.get("title", "")
 
             # Construct a meaningful document for embedding
             # Prefer: Title + Summary. If no summary, Title + Content snippet.
@@ -95,6 +115,10 @@ def save_cached_score(article_id: str, score: float, data: dict):
                     "title": title[:100],  # Limit length
                     "updated_at": datetime.now().isoformat(),
                 }
+
+                # Add URL if available
+                if url:
+                    metadata["url"] = url
 
                 # Async-like: don't let vector store failure block main flow
                 vector_store.add_article(article_id, document_text, metadata)

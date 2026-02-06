@@ -488,6 +488,203 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 });
 
+// Handle semantic search requests
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (!msg || msg.type !== "semantic_search") {
+    return;
+  }
+
+  console.log("Processing semantic_search for query:", msg.query);
+
+  if (USE_MOCK) {
+    // Mock semantic search
+    setTimeout(() => {
+      const mockResults = [
+        {
+          id: "mock_related_1",
+          text: "This is a mock related article about similar topics.",
+          metadata: { title: "Related Article 1", score: 4.2 },
+          distance: 0.3
+        },
+        {
+          id: "mock_related_2",
+          text: "Another article with similar content and themes.",
+          metadata: { title: "Related Article 2", score: 3.8 },
+          distance: 0.4
+        }
+      ];
+      sendResponse({
+        query: msg.query,
+        results: mockResults
+      });
+    }, 1000);
+  } else {
+    // Native Host mode - forward to native host
+    sendNativeMessage(msg).then(resp => {
+      console.log("Native Semantic Search Response:", resp);
+      sendResponse(resp);
+    });
+  }
+  return true;
+});
+
+// Handle get article tags requests
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (!msg || msg.type !== "get_article_tags") {
+    return;
+  }
+
+  console.log("Processing get_article_tags for article:", msg.article_id);
+
+  if (USE_MOCK) {
+    // Mock tags
+    setTimeout(() => {
+      sendResponse({
+        article_id: msg.article_id,
+        tags: ["AI", "Machine Learning", "Technology", "Innovation"]
+      });
+    }, 500);
+  } else {
+    // Native Host mode - forward to native host
+    sendNativeMessage(msg).then(resp => {
+      console.log("Native Get Article Tags Response:", resp);
+      sendResponse(resp);
+    });
+  }
+  return true;
+});
+
+// Handle discover trending topics requests
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (!msg || msg.type !== "discover_trending_topics") {
+    return;
+  }
+
+  console.log("Processing discover_trending_topics");
+
+  if (USE_MOCK) {
+    // Mock trending topics
+    setTimeout(() => {
+      sendResponse({
+        topics: [
+          { topic: "AI Development", frequency: 12, percentage: 25.3 },
+          { topic: "Cloud Computing", frequency: 8, percentage: 18.7 },
+          { topic: "Cybersecurity", frequency: 6, percentage: 15.2 },
+          { topic: "Web Development", frequency: 5, percentage: 12.1 },
+          { topic: "Data Science", frequency: 4, percentage: 9.8 }
+        ],
+        limit: msg.limit || 5
+      });
+    }, 800);
+  } else {
+    // Native Host mode - forward to native host
+    sendNativeMessage(msg).then(resp => {
+      console.log("Native Discover Trending Topics Response:", resp);
+      sendResponse(resp);
+    });
+  }
+  return true;
+});
+
+// Handle delete article requests
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (!msg || msg.type !== "delete_article") {
+    return;
+  }
+
+  console.log("Processing delete_article for:", msg.article_id);
+
+  if (USE_MOCK) {
+    setTimeout(() => {
+      sendResponse({
+        article_id: msg.article_id,
+        success: true
+      });
+    }, 300);
+  } else {
+    sendNativeMessage(msg).then(resp => {
+      console.log("Native Delete Article Response:", resp);
+      sendResponse(resp);
+    });
+  }
+  return true;
+});
+
+// Handle clear vector store requests
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (!msg || msg.type !== "clear_vector_store") {
+    return;
+  }
+
+  console.log("Processing clear_vector_store");
+
+  if (USE_MOCK) {
+    setTimeout(() => {
+      sendResponse({
+        success: true,
+        remaining_count: 0,
+        message: "Vector store cleared (mock)."
+      });
+    }, 500);
+  } else {
+    sendNativeMessage(msg).then(resp => {
+      console.log("Native Clear Vector Store Response:", resp);
+      sendResponse(resp);
+    });
+  }
+  return true;
+});
+
+// Handle get vector store stats requests
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (!msg || msg.type !== "get_vector_store_stats") {
+    return;
+  }
+
+  console.log("Processing get_vector_store_stats");
+
+  if (USE_MOCK) {
+    setTimeout(() => {
+      sendResponse({
+        article_count: 25,
+        sample_ids: ["id1", "id2", "id3", "id4", "id5"],
+        has_data: true
+      });
+    }, 200);
+  } else {
+    sendNativeMessage(msg).then(resp => {
+      console.log("Native Get Vector Store Stats Response:", resp);
+      sendResponse(resp);
+    });
+  }
+  return true;
+});
+
+// Handle cleanup invalid entries requests
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (!msg || msg.type !== "cleanup_invalid_entries") {
+    return;
+  }
+
+  console.log("Processing cleanup_invalid_entries");
+
+  if (USE_MOCK) {
+    setTimeout(() => {
+      sendResponse({
+        removed_count: 3,
+        remaining_count: 22,
+        message: "Cleaned up 3 invalid entries (mock)."
+      });
+    }, 400);
+  } else {
+    sendNativeMessage(msg).then(resp => {
+      console.log("Native Cleanup Invalid Entries Response:", resp);
+      sendResponse(resp);
+    });
+  }
+  return true;
+});
+
 // Enable side panel on Feedly
 chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(err => {
   console.error('Failed to set panel behavior:', err);

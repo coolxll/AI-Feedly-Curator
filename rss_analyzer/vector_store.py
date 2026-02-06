@@ -1,6 +1,6 @@
 import os
 import logging
-from typing import List
+from typing import List, Dict, Any
 import chromadb
 from chromadb import Documents, EmbeddingFunction, Embeddings
 from openai import OpenAI
@@ -14,13 +14,24 @@ class DashScopeEmbeddingFunction(EmbeddingFunction):
     """
 
     def __init__(self, model_name: str = "text-embedding-v3"):
-        self.api_key = os.getenv("DASHSCOPE_API_KEY")
+        # Try various possible environment variable names for DashScope API key
+        # in order of preference
+        self.api_key = (
+            os.getenv("DASHSCOPE_API_KEY")
+            or os.getenv("ALIYUN_OPENAI_API_KEY")
+            or os.getenv("OPENAI_API_KEY")
+        )
         if not self.api_key:
-            logger.warning("DASHSCOPE_API_KEY not found in environment variables.")
+            logger.warning(
+                "No API key found in environment variables (checked DASHSCOPE_API_KEY, ALIYUN_OPENAI_API_KEY, OPENAI_API_KEY)."
+            )
 
-        # Use provided base URL or default to DashScope compatible endpoint
-        self.base_url = os.getenv(
-            "DASHSCOPE_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1"
+        # Use various possible base URL environment variables in order of preference
+        self.base_url = (
+            os.getenv("DASHSCOPE_BASE_URL")
+            or os.getenv("ALIYUN_OPENAI_BASE_URL")
+            or os.getenv("OPENAI_BASE_URL")
+            or "https://dashscope.aliyuncs.com/compatible-mode/v1"
         )
         self.model_name = model_name
         self.client = None
@@ -144,6 +155,387 @@ class ChromaVectorStore:
 
         except Exception as e:
             logger.error(f"Vector search failed: {e}")
+            return []
+
+    def delete_article(self, article_id: str) -> bool:
+        """
+        Delete an article from the vector store
+
+        Args:
+            article_id: ID of the article to delete
+
+        Returns:
+            Boolean indicating success
+        """
+        try:
+            self.collection.delete(ids=[article_id])
+            logger.debug(f"Deleted article {article_id} from vector store")
+            return True
+        except Exception as e:
+            logger.error(
+                f"Failed to delete article {article_id} from vector store: {e}"
+            )
+            return False
+
+    def delete_articles(self, article_ids: List[str]) -> bool:
+        """
+        Delete multiple articles from the vector store
+
+        Args:
+            article_ids: List of IDs of articles to delete
+
+        Returns:
+            Boolean indicating success
+        """
+        try:
+            self.collection.delete(ids=article_ids)
+            logger.debug(f"Deleted {len(article_ids)} articles from vector store")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to delete articles from vector store: {e}")
+            return False
+
+    def clear_collection(self) -> bool:
+        """
+        Clear all articles from the vector store collection
+
+        Returns:
+            Boolean indicating success
+        """
+        try:
+            # Get all IDs in the collection first
+            all_items = self.collection.get(include=[])
+            if all_items["ids"]:
+                self.collection.delete(ids=all_items["ids"])
+                logger.info(
+                    f"Cleared {len(all_items['ids'])} articles from vector store"
+                )
+            else:
+                logger.info("Vector store collection was already empty")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to clear vector store collection: {e}")
+            return False
+
+    def get_article_count(self) -> int:
+        """
+        Get the total number of articles in the vector store
+
+        Returns:
+            Total count of articles
+        """
+        try:
+            count = self.collection.count()
+            return count
+        except Exception as e:
+            logger.error(f"Failed to get article count: {e}")
+            return 0
+
+    def get_all_article_ids(self) -> List[str]:
+        """
+        Get all article IDs in the vector store
+
+        Returns:
+            List of all article IDs
+        """
+        try:
+            all_items = self.collection.get(include=[])  # Get only IDs
+            return all_items["ids"]
+        except Exception as e:
+            logger.error(f"Failed to get all article IDs: {e}")
+            return []
+
+    def get_all_articles(self) -> Dict[str, Any]:
+        """
+        Get all articles with their data from the vector store
+
+        Returns:
+            Dictionary containing ids, documents, and metadatas
+        """
+        try:
+            all_items = self.collection.get(include=["documents", "metadatas"])
+            return all_items
+        except Exception as e:
+            logger.error(f"Failed to get all articles: {e}")
+            return {"ids": [], "documents": [], "metadatas": []}
+
+    def cleanup_invalid_entries(self) -> int:
+        """
+        Clean up invalid entries from the vector store (e.g., with empty content)
+
+        Returns:
+            Number of entries removed
+        """
+        try:
+            # Get all documents and their metadata
+            all_items = self.collection.get(include=["documents", "metadatas", "ids"])
+
+            invalid_ids = []
+            for i, doc in enumerate(all_items["documents"]):
+                # Check for empty or invalid content
+                if not doc or len(doc.strip()) == 0:
+                    invalid_ids.append(all_items["ids"][i])
+
+                # Optionally check for other invalid conditions
+                metadata = (
+                    all_items["metadatas"][i] if i < len(all_items["metadatas"]) else {}
+                )
+                if (
+                    not metadata.get("title") and len(doc.strip()) < 10
+                ):  # Very short without title
+                    if all_items["ids"][i] not in invalid_ids:
+                        invalid_ids.append(all_items["ids"][i])
+
+            if invalid_ids:
+                self.collection.delete(ids=invalid_ids)
+                logger.info(
+                    f"Cleaned up {len(invalid_ids)} invalid entries from vector store"
+                )
+
+            return len(invalid_ids)
+        except Exception as e:
+            logger.error(f"Failed to clean up invalid entries: {e}")
+            return 0
+
+    def get_article_tags(self, article_id: str, text: str = None) -> List[str]:
+        """
+        Get tags for an article using simple keyword extraction from title and content
+
+        Args:
+            article_id: ID of the article to tag
+            text: Article text to analyze (optional, will fetch from collection if not provided)
+
+        Returns:
+            List of tags for the article
+        """
+        try:
+            if not text:
+                # Get the article text from the collection
+                article_data = self.collection.get(
+                    ids=[article_id], include=["documents", "metadatas"]
+                )
+                if not article_data["documents"] or not article_data["documents"]:
+                    logger.warning(f"Article {article_id} not found or has no content")
+                    return []
+
+                # Combine title and document for better tagging
+                metadata = (
+                    article_data["metadatas"][0] if article_data["metadatas"] else {}
+                )
+                title = metadata.get("title", "")
+                doc = article_data["documents"][0]
+                text = f"{title} {doc}"
+
+            # Simple keyword extraction based on common terms in tech articles
+            import re
+
+            text_lower = text.lower()
+
+            # Define common tech and topic-related keywords
+            tech_keywords = [
+                "ai",
+                "artificial intelligence",
+                "machine learning",
+                "ml",
+                "data science",
+                "analytics",
+                "big data",
+                "database",
+                "programming",
+                "software",
+                "development",
+                "devops",
+                "cloud",
+                "aws",
+                "azure",
+                "gcp",
+                "kubernetes",
+                "docker",
+                "security",
+                "cybersecurity",
+                "blockchain",
+                "crypto",
+                "web development",
+                "mobile",
+                "android",
+                "ios",
+                "algorithm",
+                "research",
+                "innovation",
+                "digital",
+                "automation",
+                "robotics",
+                "iot",
+                "internet of things",
+                "api",
+                "microservices",
+                "architecture",
+                "design",
+                "python",
+                "javascript",
+                "java",
+                "go",
+                "rust",
+                "typescript",
+                "startup",
+                "business",
+                "product",
+                "management",
+                "leadership",
+            ]
+
+            found_tags = set()
+
+            # Look for keywords in the text
+            for keyword in tech_keywords:
+                if keyword in text_lower:
+                    # Use the original case from the text if possible
+                    matches = re.findall(
+                        r"\b" + re.escape(keyword) + r"\b", text, re.IGNORECASE
+                    )
+                    if matches:
+                        # Take the first match to preserve original casing
+                        found_tags.add(matches[0].title())
+
+            # Extract any capitalized words that might be important
+            # Look for sequences that look like proper nouns or important terms
+            caps_words = re.findall(r"\b[A-Z]{2,}[a-z]*\b|\b[A-Z][a-z]{2,}\b", text)
+            for word in caps_words:
+                if len(word) > 2 and word.lower() not in [
+                    "the",
+                    "and",
+                    "for",
+                    "are",
+                    "but",
+                    "not",
+                    "you",
+                    "all",
+                    "can",
+                    "had",
+                    "her",
+                    "was",
+                    "one",
+                    "our",
+                    "out",
+                    "day",
+                    "get",
+                    "has",
+                    "him",
+                    "his",
+                    "how",
+                    "its",
+                    "may",
+                    "new",
+                    "now",
+                    "old",
+                    "see",
+                    "two",
+                    "who",
+                    "boy",
+                    "did",
+                    "man",
+                    "men",
+                    "run",
+                    "too",
+                ]:
+                    found_tags.add(word)
+
+            # Return up to 5 tags
+            return list(found_tags)[:5]
+
+        except Exception as e:
+            logger.error(f"Failed to get tags for article {article_id}: {e}")
+            return []
+
+    def get_similar_articles_with_tags(
+        self, query: str, limit: int = 5
+    ) -> List[Dict[str, Any]]:
+        """
+        Get similar articles with their tags
+
+        Args:
+            query: Search query
+            limit: Number of results to return
+
+        Returns:
+            List of articles with their tags
+        """
+        try:
+            results = self.search_similar(query, limit)
+
+            # Add tags to each result
+            for result in results:
+                tags = self.get_article_tags(result["id"], result["text"])
+                result["tags"] = tags
+
+            return results
+
+        except Exception as e:
+            logger.error(f"Failed to get similar articles with tags: {e}")
+            # Return results without tags
+            return self.search_similar(query, limit)
+
+    def discover_trending_topics(self, limit: int = 5) -> List[Dict[str, Any]]:
+        """
+        Discover trending topics based on frequently occurring tags in recent articles
+
+        Args:
+            limit: Number of trending topics to return
+
+        Returns:
+            List of trending topics with frequency
+        """
+        try:
+            # Get all articles from the collection
+            all_articles = self.collection.get(include=["documents", "metadatas"])
+
+            if not all_articles["ids"]:
+                return []
+
+            # Extract tags for all articles (or a sample if too many)
+            all_tags = []
+            article_count = len(all_articles["ids"])
+            sample_size = min(20, article_count)  # Don't process too many articles
+
+            for i in range(sample_size):
+                if i < len(all_articles["ids"]):
+                    article_id = all_articles["ids"][i]
+                    text = all_articles["documents"][i]
+                    metadata = (
+                        all_articles["metadatas"][i]
+                        if i < len(all_articles["metadatas"])
+                        else {}
+                    )
+
+                    # Combine title and content for better tagging
+                    title = metadata.get("title", "")
+                    full_text = f"{title} {text}"
+
+                    tags = self.get_article_tags(article_id, full_text)
+                    all_tags.extend([tag.lower() for tag in tags])
+
+            # Count tag frequencies
+            from collections import Counter
+
+            tag_counts = Counter(all_tags)
+
+            # Return top tags as trending topics
+            trending = []
+            for tag, count in tag_counts.most_common(limit):
+                trending.append(
+                    {
+                        "topic": tag.title(),
+                        "frequency": count,
+                        "percentage": round((count / len(all_tags)) * 100, 2)
+                        if all_tags
+                        else 0,
+                    }
+                )
+
+            return trending
+
+        except Exception as e:
+            logger.error(f"Failed to discover trending topics: {e}")
             return []
 
 

@@ -372,6 +372,105 @@ def _handle_semantic_search(msg: dict) -> dict:
         return {"error": "search_failed", "message": str(e)}
 
 
+def _handle_get_article_tags(msg: dict) -> dict:
+    """Handle request to get tags for an article"""
+    article_id = msg.get("article_id")
+
+    if not article_id:
+        return {"error": "no_article_id", "message": "Article ID is required"}
+
+    logging.info(f"Handling get_article_tags: article_id='{article_id}'")
+
+    try:
+        tags = vector_store.get_article_tags(article_id)
+        return {"article_id": article_id, "tags": tags}
+    except Exception as e:
+        logging.error(f"Get article tags error: {e}")
+        return {"error": "tags_failed", "message": str(e)}
+
+
+def _handle_discover_trending_topics(msg: dict) -> dict:
+    """Handle request to discover trending topics"""
+    limit = msg.get("limit", 5)
+
+    logging.info(f"Handling discover_trending_topics: limit={limit}")
+
+    try:
+        trending_topics = vector_store.discover_trending_topics(limit)
+        return {"topics": trending_topics, "limit": limit}
+    except Exception as e:
+        logging.error(f"Discover trending topics error: {e}")
+        return {"error": "trending_failed", "message": str(e)}
+
+
+def _handle_delete_article(msg: dict) -> dict:
+    """Handle request to delete an article from vector store"""
+    article_id = msg.get("article_id")
+
+    if not article_id:
+        return {"error": "no_article_id", "message": "Article ID is required"}
+
+    logging.info(f"Handling delete_article: article_id='{article_id}'")
+
+    try:
+        success = vector_store.delete_article(article_id)
+        return {"article_id": article_id, "success": success}
+    except Exception as e:
+        logging.error(f"Delete article error: {e}")
+        return {"error": "delete_failed", "message": str(e)}
+
+
+def _handle_clear_vector_store(msg: dict) -> dict:
+    """Handle request to clear the entire vector store"""
+    logging.info("Handling clear_vector_store")
+
+    try:
+        success = vector_store.clear_collection()
+        count = vector_store.get_article_count()
+        return {
+            "success": success,
+            "remaining_count": count,
+            "message": f"Cleared vector store. {count} items remain.",
+        }
+    except Exception as e:
+        logging.error(f"Clear vector store error: {e}")
+        return {"error": "clear_failed", "message": str(e)}
+
+
+def _handle_get_vector_store_stats(msg: dict) -> dict:
+    """Handle request to get vector store statistics"""
+    logging.info("Handling get_vector_store_stats")
+
+    try:
+        count = vector_store.get_article_count()
+        all_ids = vector_store.get_all_article_ids()
+        return {
+            "article_count": count,
+            "sample_ids": all_ids[:10],  # Return first 10 IDs as sample
+            "has_data": count > 0,
+        }
+    except Exception as e:
+        logging.error(f"Get vector store stats error: {e}")
+        return {"error": "stats_failed", "message": str(e)}
+
+
+def _handle_cleanup_invalid_entries(msg: dict) -> dict:
+    """Handle request to cleanup invalid entries in vector store"""
+    logging.info("Handling cleanup_invalid_entries")
+
+    try:
+        removed_count = vector_store.cleanup_invalid_entries()
+        count_after = vector_store.get_article_count()
+        return {
+            "removed_count": removed_count,
+            "remaining_count": count_after,
+            "message": f"Cleaned up {removed_count} invalid entries. {count_after} items remain.",
+        }
+    except Exception as e:
+        logging.error(f"Cleanup invalid entries error: {e}")
+        return {"error": "cleanup_failed", "message": str(e)}
+
+
 def _handle_health(_: dict) -> dict:
     return {"ok": True}
 
@@ -388,6 +487,18 @@ def _handle_message(msg: dict) -> dict:
         return _handle_summarize_article(msg)
     if msg_type == "semantic_search":
         return _handle_semantic_search(msg)
+    if msg_type == "get_article_tags":
+        return _handle_get_article_tags(msg)
+    if msg_type == "discover_trending_topics":
+        return _handle_discover_trending_topics(msg)
+    if msg_type == "delete_article":
+        return _handle_delete_article(msg)
+    if msg_type == "clear_vector_store":
+        return _handle_clear_vector_store(msg)
+    if msg_type == "get_vector_store_stats":
+        return _handle_get_vector_store_stats(msg)
+    if msg_type == "cleanup_invalid_entries":
+        return _handle_cleanup_invalid_entries(msg)
     if msg_type == "health":
         return _handle_health(msg)
     return {"error": "unknown_type"}
