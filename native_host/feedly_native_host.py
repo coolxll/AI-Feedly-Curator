@@ -135,7 +135,13 @@ def _perform_analysis(
 
     # 1. 准备内容
     final_content = content or summary
-    if url and (not content or len(content) < 200):
+
+    # 优先尝试通过内容长度判断是否需要补全
+    # 如果内容太短，且没有 URL，或者虽然有 URL 但我们想优先用 Feedly 内容（由外部传入或后期处理）
+    # 注意：Native Host 无法直接访问用户的浏览器 Session 去调 Feedly API
+    # 所以我们依赖前端传过来的 content 字段
+
+    if url and (not final_content or len(final_content) < 200):
         logging.info(f"Fetching content from {url}...")
         fetched = fetch_article_content(url)
         if fetched and len(fetched) > 100:
@@ -422,12 +428,14 @@ def _handle_get_article_tags(msg: dict) -> dict:
 def _handle_discover_trending_topics(msg: dict) -> dict:
     """Handle request to discover trending topics"""
     limit = msg.get("limit", 5)
+    sample_size = msg.get("sample_size", 100)
+    hours = msg.get("hours", 24)
 
-    logging.info(f"Handling discover_trending_topics: limit={limit}")
+    logging.info(f"Handling discover_trending_topics: limit={limit}, sample_size={sample_size}, hours={hours}")
 
     try:
-        trending_topics = vector_store.discover_trending_topics(limit)
-        return {"topics": trending_topics, "limit": limit}
+        trending_topics = vector_store.discover_trending_topics(limit, sample_size, hours)
+        return {"topics": trending_topics, "limit": limit, "sample_size": sample_size, "hours": hours}
     except Exception as e:
         logging.error(f"Discover trending topics error: {e}")
         return {"error": "trending_failed", "message": str(e)}
