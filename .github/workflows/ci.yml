@@ -32,7 +32,7 @@ jobs:
         run: uv sync --all-extras
 
       - name: Compile check
-        run: python -m compileall .
+        run: uv run python -m compileall .
 
       - name: Unit tests
-        run: python -m pytest tests/
+        run: uv run pytest tests/
