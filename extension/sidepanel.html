@@ -264,6 +264,35 @@
       color: #111827;
       transform: translateY(-1px);
     }
+
+    /* Search Bar Styles */
+    .sticky-header {
+      padding: 10px 20px;
+      background: #f3f4f6;
+      border-bottom: 1px solid #e5e7eb;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+    .search-container {
+      display: flex;
+      gap: 8px;
+    }
+    .search-input {
+      flex: 1;
+      padding: 8px 12px;
+      border: 1px solid #d1d5db;
+      border-radius: 4px;
+      font-size: 14px;
+    }
+    .search-button {
+      padding: 8px 12px;
+      background: #8b5cf6;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+    }
   </style>
 </head>
 <body>
@@ -292,11 +321,10 @@
 
   <!-- Tab Content: Search -->
   <div id="tab-search" class="tab-content">
-    <div style="padding: 10px 20px; background: #f3f4f6; border-bottom: 1px solid #e5e7eb; position: sticky; top: 0; z-index: 10;">
-      <div style="display: flex; gap: 8px;">
-        <input type="text" id="semanticSearchInput" placeholder="🔍 Semantic search..."
-               style="flex: 1; padding: 8px 12px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 14px;">
-        <button id="semanticSearchBtn" style="padding: 8px 12px; background: #8b5cf6; color: white; border: none; border-radius: 4px; cursor: pointer;">Go</button>
+    <div class="sticky-header">
+      <div class="search-container">
+        <input type="text" id="semanticSearchInput" placeholder="🔍 Semantic search..." class="search-input">
+        <button id="semanticSearchBtn" class="search-button">Go</button>
       </div>
     </div>
     <div class="content" id="search-results">
@@ -309,7 +337,7 @@
 
   <!-- Tab Content: Trending -->
   <div id="tab-trending" class="tab-content">
-    <div style="padding: 10px 20px; background: #f3f4f6; border-bottom: 1px solid #e5e7eb; position: sticky; top: 0; z-index: 10;">
+    <div class="sticky-header">
         <button id="refreshTrendingBtn" class="btn-secondary" style="width: 100%">Refresh Topics</button>
     </div>
     <div class="content" id="trending-content">

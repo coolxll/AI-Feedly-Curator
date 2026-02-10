@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import sqlite3
+import json
 import plotly.express as px
 from datetime import datetime
 import os
@@ -37,9 +38,9 @@ def load_data():
 
     # 解析分析数据中的额外信息
     if 'analysis' in df.columns and not df.empty:
-        df['summary'] = df['analysis'].apply(lambda x: eval(x).get('summary', '') if x else '')
-        df['verdict'] = df['analysis'].apply(lambda x: eval(x).get('verdict', '') if x else '')
-        df['reason'] = df['analysis'].apply(lambda x: eval(x).get('reason', '') if x else '')
+        df['summary'] = df['analysis'].apply(lambda x: json.loads(x).get('summary', '') if x else '')
+        df['verdict'] = df['analysis'].apply(lambda x: json.loads(x).get('verdict', '') if x else '')
+        df['reason'] = df['analysis'].apply(lambda x: json.loads(x).get('reason', '') if x else '')
 
     # 转换日期格式
     df['created_at'] = pd.to_datetime(df['created_at'])
@@ -208,9 +209,8 @@ def main():
 
             with col2:
                 st.write("**操作:**")
-                if st.button(f"🔗 打开", key=f"btn_{row['article_id']}"):
-                    if pd.notna(row.get('url')) and row['url']:
-                        st.markdown(f'<script>window.open("{row["url"]}", "_blank")</script>', unsafe_allow_html=True)
+                if pd.notna(row.get('url')) and row['url']:
+                    st.link_button("🔗 打开", row["url"])
 
     # 下载数据
     st.sidebar.subheader("导出数据")

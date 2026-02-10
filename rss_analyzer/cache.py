@@ -68,7 +68,6 @@ def set_app_cache(key: str, value: dict, ttl_seconds: int):
     try:
         conn = sqlite3.connect(DB_PATH)
         c = conn.cursor()
-        expires_at = datetime.now().isoformat()
         # Calculate expiration
         from datetime import timedelta
 

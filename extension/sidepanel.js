@@ -176,7 +176,7 @@ function displayTrendingTopics(topics) {
     item.addEventListener('click', () => {
       document.getElementById('semanticSearchInput').value = t.topic;
       switchTab('search');
-      const performSearch = document.getElementById('semanticSearchBtn').click();
+      document.getElementById('semanticSearchBtn').click();
     });
 
     list.appendChild(item);
@@ -233,11 +233,11 @@ function cleanupInvalidEntries() {
 }
 
 function clearVectorStore() {
+  const btn = document.getElementById('clearDbBtn');
   if (!confirm('Are you sure you want to clear the entire vector database? This cannot be undone.')) {
     return;
   }
 
-  const btn = document.getElementById('clearDbBtn');
   const originalText = btn.textContent;
   btn.textContent = 'Clearing...';
   btn.disabled = true;

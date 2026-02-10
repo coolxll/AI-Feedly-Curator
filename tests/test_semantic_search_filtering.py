@@ -25,6 +25,7 @@ def test_basic_functionality_and_filtering():
     print(f"   Sample IDs: {all_ids[:5]}")
 
     # If we have articles, let's examine their metadata directly
+    sample_articles = None
     if all_ids:
         sample_articles = vector_store.get_all_articles()
 
@@ -45,7 +46,7 @@ def test_basic_functionality_and_filtering():
     print(f"\n🧪 Testing score filtering implementation...")
 
     # Let's test the filtering logic by examining all articles
-    if sample_articles['ids']:
+    if sample_articles and sample_articles['ids']:
         print("\n   Testing filtering logic on all articles:")
         all_metadata = sample_articles['metadatas']
 
