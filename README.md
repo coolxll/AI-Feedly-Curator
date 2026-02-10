@@ -161,6 +161,28 @@ AI-Feedly-Curator/
 └── tests/                # 单元测试
 ```
 
+## Streamlit 可视化界面
+
+项目还提供了 Streamlit Web 应用，用于可视化浏览和分析 RSS 文章数据。
+
+### 启动 Streamlit 应用
+
+```bash
+# 使用 uv 运行 (推荐)
+uv run streamlit run rss_analyzer/streamlit_app.py
+
+# 或者直接运行
+streamlit run rss_analyzer/streamlit_app.py
+```
+
+### 功能特性
+
+- 📈 **数据概览** - 显示文章总数、评分分布、时间趋势等统计信息
+- 🔍 **交互式搜索** - 支持按标题、内容、评分范围等条件搜索文章
+- 📊 **可视化图表** - 评分分布直方图、时间趋势图、标签词云等
+- 📋 **文章列表** - 分页显示文章列表，支持排序和筛选
+- 🎯 **个性化推荐** - 基于评分和标签的智能推荐
+
 ## 测试
 
 运行所有测试：

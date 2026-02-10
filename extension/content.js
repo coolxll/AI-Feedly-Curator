@@ -242,11 +242,11 @@ function renderItem(el, item) {
 
       // 提取内容
       const titleEl = el.querySelector('.EntryTitleLink, .entry-title-link, .entry__title, .ArticleTitle');
-      const summaryEl = el.querySelector('.EntrySummary, .entry__summary, .content, .entryContent');
-      const contentEl = el.querySelector('.EntryBody, .content, .entryContent, .entryBody'); // 尝试获取全文
+      const summaryEl = el.querySelector('.EntrySummary, .entry__summary, .content, .entryContent, .entry-content');
+      const contentEl = el.querySelector('.EntryBody, .content, .entryContent, .entryBody, .entry__content, .ArticleBody, .Article__content, .entry-content'); // 尝试获取全文
 
       // 优先使用全文，其次摘要
-      const contentText = contentEl ? contentEl.innerText : (summaryEl ? summaryEl.textContent.trim() : '');
+      const contentText = contentEl ? contentEl.innerText.trim() : (summaryEl ? summaryEl.textContent.trim() : '');
       const titleText = titleEl ? titleEl.textContent.trim() : 'Unknown Title';
 
       console.log(`[Feedly AI] Analyzing article: ${id} - ${titleText}`);
@@ -857,17 +857,22 @@ function scanEntries() {
         continue;
     }
     const titleEl = entry.querySelector('.EntryTitleLink, .entry-title-link, .entry__title, .ArticleTitle');
-    const summaryEl = entry.querySelector('.EntrySummary, .entry__summary, .content, .entryContent');
+    const summaryEl = entry.querySelector('.EntrySummary, .entry__summary, .content, .entryContent, .entry-content');
+    const contentEl = entry.querySelector('.EntryBody, .content, .entryContent, .entryBody, .entry__content, .ArticleBody, .Article__content, .entry-content');
     const link = titleEl ? titleEl.getAttribute('href') : null;
 
     // Fix relative URLs
     const url = link ? (link.startsWith('http') ? link : window.location.origin + link) : null;
 
+    // 优先使用全文，其次摘要
+    const fullText = contentEl ? contentEl.innerText.trim() : (summaryEl ? summaryEl.textContent.trim() : '');
+
     itemsToFetch.push({
       id: id,
       title: titleEl ? titleEl.textContent.trim() : 'Unknown Title',
       url: url,
-      summary: summaryEl ? summaryEl.textContent.trim() : ''
+      summary: summaryEl ? summaryEl.textContent.trim() : '',
+      content: fullText // 同时发送 content 字段
     });
 
     map.set(id, entry);
@@ -946,15 +951,20 @@ function fastProcessEntry(entry, mapToFetch, itemsToFetch) {
   if (STATE.pending.has(id)) return;
 
   const titleEl = entry.querySelector('.EntryTitleLink, .entry-title-link, .entry__title, .ArticleTitle');
-  const summaryEl = entry.querySelector('.EntrySummary, .entry__summary, .content, .entryContent');
+  const summaryEl = entry.querySelector('.EntrySummary, .entry__summary, .content, .entryContent, .entry-content');
+  const contentEl = entry.querySelector('.EntryBody, .content, .entryContent, .entryBody, .entry__content, .ArticleBody, .Article__content, .entry-content');
   const link = titleEl ? titleEl.getAttribute('href') : null;
   const url = link ? (link.startsWith('http') ? link : window.location.origin + link) : null;
+
+  // 优先使用全文，其次摘要
+  const fullText = contentEl ? contentEl.innerText.trim() : (summaryEl ? summaryEl.textContent.trim() : '');
 
   const item = {
     id: id,
     title: titleEl ? titleEl.textContent.trim() : 'Unknown Title',
     url: url,
-    summary: summaryEl ? summaryEl.textContent.trim() : ''
+    summary: summaryEl ? summaryEl.textContent.trim() : '',
+    content: fullText
   };
 
   STATE.pending.set(id, entry);

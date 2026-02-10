@@ -158,7 +158,39 @@ async function callOpenAIStream(content, title, onChunk, onComplete, onError) {
   }
 }
 
-// Fetch article content from URL
+// Fetch article content from Feedly API (Preferred)
+async function fetchFromFeedlyAPI(entryId) {
+  try {
+    console.log(`[Feedly AI] Fetching entry from Feedly API: ${entryId}`);
+    // Feedly API requires the ID to be encoded
+    const encodedId = encodeURIComponent(entryId);
+    const response = await fetch(`https://cloud.feedly.com/v3/entries/${encodedId}`);
+
+    if (!response.ok) {
+        console.warn(`Feedly API fetch failed: ${response.status}`);
+        return null;
+    }
+
+    const data = await response.json();
+    // Feedly usually puts content in .content.content or .summary.content
+    const content = data.content?.content || data.summary?.content || '';
+
+    if (content) {
+        // Strip HTML
+        const cleanContent = content.replace(/<[^>]+>/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+        console.log(`[Feedly AI] Successfully fetched ${cleanContent.length} chars from Feedly API`);
+        return cleanContent;
+    }
+    return null;
+  } catch (err) {
+    console.error('Feedly API fetch failed:', err);
+    return null;
+  }
+}
+
+// Fetch article content from URL (Fallback)
 async function fetchArticleContent(url) {
   try {
     console.log(`[Feedly AI] Fetching article content from: ${url}`);
@@ -396,14 +428,20 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     (async () => {
         let content = msg.content || '';
 
-        // If content is very short (likely just a snippet), try to fetch from URL
-        // Increased threshold to 500 to catch more incomplete previews
-        // But respect user's request: if it's not "extremely short", don't fetch
+        // Try Feedly API first if we have an ID
+        if (msg.id) {
+            const feedlyContent = await fetchFromFeedlyAPI(msg.id);
+            if (feedlyContent && feedlyContent.length > content.length) {
+                content = feedlyContent;
+            }
+        }
+
+        // If content is still short and we have a URL, try fetching from URL as fallback
         if (content.length < 200 && msg.url) {
-            console.log('[Feedly AI] Content too short (< 200 chars), fetching from URL...');
+            console.log('[Feedly AI] Content still short, trying fallback to URL fetch...');
             updateSidePanelState(windowId, {
                 title: msg.title,
-                content: '正在获取全文...',
+                content: '正在从原网页获取全文...',
                 status: 'loading'
             });
 
@@ -440,7 +478,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                 updateSidePanelState(windowId, {
                     title: msg.title,
                     content: fullSummary,
-                    status: 'success'
+                    status: 'success',
+                    id: msg.id // Pass ID so sidepanel can fetch tags
                 });
                 sendResponse({
                     id: msg.id,

@@ -77,6 +77,8 @@ class ChromaVectorStore:
         self.collection_name = collection_name
         self.client = None
         self.collection = None
+        self._trending_cache = None
+        self._trending_cache_time = None
         self._initialize()
 
     def _initialize(self):
@@ -121,16 +123,23 @@ class ChromaVectorStore:
             logger.error(f"Failed to add article {article_id} to vector store: {e}")
             return False
 
-    def search_similar(self, query: str, limit: int = 5) -> List[dict]:
+    def search_similar(self, query: str, limit: int = 5, min_score: float = None) -> List[dict]:
         """
         Search for similar articles.
         Returns a list of dicts with id, document, metadata, and distance.
+
+        Args:
+            query: Search query text
+            limit: Maximum number of results to return
+            min_score: Minimum score threshold (optional filtering)
         """
         if not self.collection:
             return []
 
         try:
-            results = self.collection.query(query_texts=[query], n_results=limit)
+            # Increase the number of results we fetch to account for potential filtering
+            fetch_limit = limit * 3 if min_score is not None else limit
+            results = self.collection.query(query_texts=[query], n_results=fetch_limit)
 
             # Format results
             # results structure: {'ids': [['id1', 'id2']], 'documents': [['doc1', 'doc2']], ...}
@@ -142,16 +151,23 @@ class ChromaVectorStore:
                 distances = results["distances"][0] if results["distances"] else []
 
                 for i in range(len(ids)):
-                    formatted_results.append(
-                        {
-                            "id": ids[i],
-                            "text": documents[i] if i < len(documents) else "",
-                            "metadata": metadatas[i] if i < len(metadatas) else {},
-                            "distance": distances[i] if i < len(distances) else 0.0,
-                        }
-                    )
+                    result_item = {
+                        "id": ids[i],
+                        "text": documents[i] if i < len(documents) else "",
+                        "metadata": metadatas[i] if i < len(metadatas) else {},
+                        "distance": distances[i] if i < len(distances) else 0.0,
+                    }
 
-            return formatted_results
+                    # Apply score filtering if min_score is specified
+                    if min_score is not None:
+                        score = result_item["metadata"].get("score")
+                        if score is not None and score < min_score:
+                            continue  # Skip this result if below threshold
+
+                    formatted_results.append(result_item)
+
+            # Return only up to the requested limit
+            return formatted_results[:limit]
 
         except Exception as e:
             logger.error(f"Vector search failed: {e}")
@@ -437,6 +453,8 @@ class ChromaVectorStore:
                     "men",
                     "run",
                     "too",
+                    "title",
+                    "content",
                 ]:
                     found_tags.add(word)
 
@@ -475,44 +493,80 @@ class ChromaVectorStore:
             # Return results without tags
             return self.search_similar(query, limit)
 
-    def discover_trending_topics(self, limit: int = 5) -> List[Dict[str, Any]]:
+    def discover_trending_topics(self, limit: int = 5, sample_size: int = 100, hours: int = 24) -> List[Dict[str, Any]]:
         """
         Discover trending topics based on frequently occurring tags in recent articles
 
         Args:
             limit: Number of trending topics to return
-
-        Returns:
-            List of trending topics with frequency
+            sample_size: Number of recent articles to sample for trends
+            hours: Number of hours to look back for trending topics (default 24h)
         """
         try:
-            # Get all articles from the collection
+            from datetime import datetime, timedelta
+            from rss_analyzer.cache import get_app_cache, set_app_cache
+
+            # Check persistent cache (15 minutes TTL)
+            current_time = datetime.now()
+            cache_key = f"trending_{limit}_{sample_size}_{hours}"
+            cached_data = get_app_cache(cache_key)
+            if cached_data:
+                logger.info("Returning trending topics from persistent cache")
+                return cached_data
+
+            # Get articles with metadatas
             all_articles = self.collection.get(include=["documents", "metadatas"])
 
             if not all_articles["ids"]:
                 return []
 
-            # Extract tags for all articles (or a sample if too many)
+            # Filter by time if hours is specified
+            cutoff_time = (current_time - timedelta(hours=hours)).isoformat()
+
+            items = []
+            for i in range(len(all_articles["ids"])):
+                metadata = all_articles["metadatas"][i] if i < len(all_articles["metadatas"]) else {}
+                updated_at = metadata.get("updated_at", "")
+
+                # Only include articles within the time window
+                if updated_at >= cutoff_time:
+                    items.append({
+                        "id": all_articles["ids"][i],
+                        "document": all_articles["documents"][i],
+                        "metadata": metadata,
+                        "updated_at": updated_at
+                    })
+
+            if not items:
+                logger.info(f"No articles found in the last {hours} hours. Falling back to latest {sample_size} articles.")
+                # Fallback to latest sample_size articles if no articles in the last 24h
+                # Re-process all articles without time filter
+                items = []
+                for i in range(len(all_articles["ids"])):
+                    metadata = all_articles["metadatas"][i] if i < len(all_articles["metadatas"]) else {}
+                    items.append({
+                        "id": all_articles["ids"][i],
+                        "document": all_articles["documents"][i],
+                        "metadata": metadata,
+                        "updated_at": metadata.get("updated_at", "")
+                    })
+                items.sort(key=lambda x: x["updated_at"], reverse=True)
+                items = items[:sample_size]
+            else:
+                # Sort by updated_at descending (newest first)
+                items.sort(key=lambda x: x["updated_at"], reverse=True)
+
+            # Extract tags for the results
             all_tags = []
-            article_count = len(all_articles["ids"])
-            sample_size = min(20, article_count)  # Don't process too many articles
 
-            for i in range(sample_size):
-                if i < len(all_articles["ids"]):
-                    article_id = all_articles["ids"][i]
-                    text = all_articles["documents"][i]
-                    metadata = (
-                        all_articles["metadatas"][i]
-                        if i < len(all_articles["metadatas"])
-                        else {}
-                    )
+            for item in items:
+                article_id = item["id"]
+                text = item["document"]
+                title = item["metadata"].get("title", "")
+                full_text = f"{title} {text}"
 
-                    # Combine title and content for better tagging
-                    title = metadata.get("title", "")
-                    full_text = f"{title} {text}"
-
-                    tags = self.get_article_tags(article_id, full_text)
-                    all_tags.extend([tag.lower() for tag in tags])
+                tags = self.get_article_tags(article_id, full_text)
+                all_tags.extend([tag.lower() for tag in tags])
 
             # Count tag frequencies
             from collections import Counter
@@ -531,6 +585,9 @@ class ChromaVectorStore:
                         else 0,
                     }
                 )
+
+            # Update persistent cache (15 mins TTL)
+            set_app_cache(cache_key, trending, 900)
 
             return trending
 

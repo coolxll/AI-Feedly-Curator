@@ -24,10 +24,75 @@ def init_db():
                 updated_at TIMESTAMP
             )
         """)
+        # Create table for general app cache (e.g. trending topics)
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS app_cache (
+                cache_key TEXT PRIMARY KEY,
+                cache_value TEXT,
+                expires_at TIMESTAMP
+            )
+        """)
         conn.commit()
         conn.close()
     except Exception as e:
         logger.error(f"Failed to init cache db: {e}")
+
+
+def get_app_cache(key: str) -> dict | None:
+    """Retrieve a value from the app cache if not expired"""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        c.execute(
+            "SELECT cache_value, expires_at FROM app_cache WHERE cache_key = ?", (key,)
+        )
+        row = c.fetchone()
+        conn.close()
+
+        if row:
+            value_json, expires_at_str = row
+            # Check expiration
+            expires_at = datetime.fromisoformat(expires_at_str)
+            if expires_at > datetime.now():
+                return json.loads(value_json)
+            else:
+                # Cleanup expired
+                delete_app_cache(key)
+    except Exception as e:
+        logger.error(f"App cache read error: {e}")
+    return None
+
+
+def set_app_cache(key: str, value: dict, ttl_seconds: int):
+    """Store a value in the app cache with a TTL"""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        # Calculate expiration
+        from datetime import timedelta
+
+        expires_at = (datetime.now() + timedelta(seconds=ttl_seconds)).isoformat()
+
+        c.execute(
+            "INSERT OR REPLACE INTO app_cache (cache_key, cache_value, expires_at) VALUES (?, ?, ?)",
+            (key, json.dumps(value, ensure_ascii=False), expires_at),
+        )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        logger.error(f"App cache write error: {e}")
+
+
+def delete_app_cache(key: str):
+    """Delete a value from the app cache"""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        c.execute("DELETE FROM app_cache WHERE cache_key = ?", (key,))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        logger.error(f"App cache delete error: {e}")
 
 
 def get_cached_score(article_id: str) -> dict | None:
@@ -98,13 +163,18 @@ def save_cached_score(article_id: str, score: float, data: dict):
             # Local import to avoid circular dependency if cache is imported early
             from rss_analyzer.vector_store import vector_store
 
+            # Double check metadata if they are missing but might be in the row
+            # (Though in this specific function we already have them from data.get)
+            final_title = title
+            final_url = url
+
             text_content = data.get("summary") or data.get("content") or ""
 
             # Construct a meaningful document for embedding
             # Prefer: Title + Summary. If no summary, Title + Content snippet.
             document_text = ""
-            if title:
-                document_text += f"Title: {title}\n"
+            if final_title:
+                document_text += f"Title: {final_title}\n"
             if text_content:
                 document_text += f"Content: {text_content}"
 
@@ -112,13 +182,13 @@ def save_cached_score(article_id: str, score: float, data: dict):
                 # Prepare metadata
                 metadata = {
                     "score": score,
-                    "title": title[:100],  # Limit length
+                    "title": final_title[:100] if final_title else "Untitled",
                     "updated_at": datetime.now().isoformat(),
                 }
 
                 # Add URL if available
-                if url:
-                    metadata["url"] = url
+                if final_url:
+                    metadata["url"] = final_url
 
                 # Async-like: don't let vector store failure block main flow
                 vector_store.add_article(article_id, document_text, metadata)

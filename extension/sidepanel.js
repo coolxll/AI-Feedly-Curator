@@ -1,9 +1,272 @@
 // Listen for messages from content script via background
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === 'update_sidepanel') {
+    // Switch to summary tab automatically when update comes in
+    switchTab('summary');
     updatePanel(msg.title, msg.content, msg.status);
+
+    // If we have an article ID and the summary is done/streaming, try to fetch tags
+    if (msg.status === 'success' || msg.status === 'streaming') {
+        if (msg.id) {
+            fetchArticleTags(msg.id);
+        }
+    }
   }
 });
+
+function fetchArticleTags(articleId) {
+    chrome.runtime.sendMessage({
+        type: 'get_article_tags',
+        article_id: articleId
+    }, (resp) => {
+        if (chrome.runtime.lastError) {
+            console.warn('Failed to fetch tags:', chrome.runtime.lastError);
+            return;
+        }
+
+        if (resp && resp.tags && resp.tags.length > 0) {
+            displayTags(resp.tags);
+        }
+    });
+}
+
+function displayTags(tags) {
+    // Only display tags if we are on the summary tab and the tags container doesn't exist or is empty
+    const summaryContent = document.querySelector('.summary-content');
+    if (!summaryContent) return;
+
+    // improved check: check if tags are already displayed
+    let tagsContainer = document.getElementById('article-tags');
+    if (!tagsContainer) {
+        tagsContainer = document.createElement('div');
+        tagsContainer.id = 'article-tags';
+        tagsContainer.className = 'tags-container';
+        tagsContainer.innerHTML = '<div class="tags-label">Tags</div><div class="tag-cloud"></div>';
+        summaryContent.appendChild(tagsContainer);
+    }
+
+    const cloud = tagsContainer.querySelector('.tag-cloud');
+    cloud.innerHTML = ''; // clear existing
+
+    tags.forEach(tag => {
+        const chip = document.createElement('span');
+        chip.className = 'tag-chip';
+        chip.textContent = tag;
+
+        // Make tags clickable to search
+        chip.style.cursor = 'pointer';
+        chip.addEventListener('click', () => {
+             document.getElementById('semanticSearchInput').value = tag;
+             switchTab('search');
+             document.getElementById('semanticSearchBtn').click();
+        });
+
+        cloud.appendChild(chip);
+    });
+}
+
+// Tab Switching Logic
+function switchTab(tabId) {
+  // Update tab buttons
+  document.querySelectorAll('.tab').forEach(tab => {
+    if (tab.dataset.tab === tabId) {
+      tab.classList.add('active');
+    } else {
+      tab.classList.remove('active');
+    }
+  });
+
+  // Update tab content
+  document.querySelectorAll('.tab-content').forEach(content => {
+    if (content.id === `tab-${tabId}`) {
+      content.classList.add('active');
+    } else {
+      content.classList.remove('active');
+    }
+  });
+
+  // Trigger data loading for specific tabs
+  if (tabId === 'trending') {
+    loadTrendingTopics();
+  } else if (tabId === 'manage') {
+    loadStats();
+  }
+}
+
+// Initialize Tabs
+document.addEventListener('DOMContentLoaded', () => {
+  document.querySelectorAll('.tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      switchTab(tab.dataset.tab);
+    });
+  });
+
+  // Manage Tab Buttons
+  document.getElementById('refreshStatsBtn')?.addEventListener('click', loadStats);
+  document.getElementById('cleanupBtn')?.addEventListener('click', cleanupInvalidEntries);
+  document.getElementById('clearDbBtn')?.addEventListener('click', clearVectorStore);
+
+  // Trending Tab Buttons
+  document.getElementById('refreshTrendingBtn')?.addEventListener('click', loadTrendingTopics);
+});
+
+// --- Trending Topics ---
+function loadTrendingTopics() {
+  const contentEl = document.getElementById('trending-content');
+  contentEl.innerHTML = `
+    <div class="loading">
+      <div class="spinner"></div>
+      <div>Loading trending topics...</div>
+    </div>
+  `;
+
+  chrome.runtime.sendMessage({
+    type: 'discover_trending_topics',
+    limit: 10
+  }, (resp) => {
+    if (chrome.runtime.lastError) {
+      contentEl.innerHTML = `<div class="error">Error: ${chrome.runtime.lastError.message}</div>`;
+      return;
+    }
+
+    if (!resp || !resp.topics || resp.topics.length === 0) {
+      contentEl.innerHTML = `
+        <div class="empty-state">
+          <div class="icon">📉</div>
+          <div>No trending topics found yet.<br>Add more articles to the vector store.</div>
+        </div>
+      `;
+      return;
+    }
+
+    displayTrendingTopics(resp.topics);
+  });
+}
+
+function displayTrendingTopics(topics) {
+  const contentEl = document.getElementById('trending-content');
+  contentEl.innerHTML = '';
+
+  const list = document.createElement('div');
+
+  // Find max frequency for bar scaling
+  const maxFreq = Math.max(...topics.map(t => t.frequency));
+
+  topics.forEach(t => {
+    const item = document.createElement('div');
+    item.className = 'trending-item';
+
+    // Calculate width percentage relative to max
+    const widthPercent = Math.max(5, (t.frequency / maxFreq) * 100);
+
+    item.innerHTML = `
+      <div style="width: 100%">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <span class="trending-topic">${t.topic}</span>
+          <span class="trending-count">${t.frequency}</span>
+        </div>
+        <div class="trending-bar">
+          <div class="trending-fill" style="width: ${widthPercent}%"></div>
+        </div>
+      </div>
+    `;
+
+    // Clicking a topic could trigger a search
+    item.style.cursor = 'pointer';
+    item.addEventListener('click', () => {
+      document.getElementById('semanticSearchInput').value = t.topic;
+      switchTab('search');
+      document.getElementById('semanticSearchBtn').click();
+    });
+
+    list.appendChild(item);
+  });
+
+  contentEl.appendChild(list);
+}
+
+// --- Management & Stats ---
+function loadStats() {
+  const statsEl = document.getElementById('stats-display');
+  statsEl.innerHTML = 'Loading stats...';
+
+  chrome.runtime.sendMessage({
+    type: 'get_vector_store_stats'
+  }, (resp) => {
+    if (chrome.runtime.lastError) {
+      statsEl.innerHTML = `<span style="color:red">Error: ${chrome.runtime.lastError.message}</span>`;
+      return;
+    }
+
+    if (resp) {
+      statsEl.innerHTML = `
+        <div style="font-size: 24px; font-weight: 700; color: #111827;">${resp.article_count || 0}</div>
+        <div>Articles in Vector Store</div>
+        ${resp.last_updated ? `<div style="font-size: 11px; margin-top: 4px; color: #9ca3af;">Last updated: ${new Date(resp.last_updated).toLocaleString()}</div>` : ''}
+      `;
+    } else {
+      statsEl.innerHTML = 'No stats available.';
+    }
+  });
+}
+
+function cleanupInvalidEntries() {
+  const btn = document.getElementById('cleanupBtn');
+  const originalText = btn.textContent;
+  btn.textContent = 'Cleaning...';
+  btn.disabled = true;
+
+  chrome.runtime.sendMessage({
+    type: 'cleanup_invalid_entries'
+  }, (resp) => {
+    btn.textContent = originalText;
+    btn.disabled = false;
+
+    if (chrome.runtime.lastError) {
+      alert(`Error: ${chrome.runtime.lastError.message}`);
+      return;
+    }
+
+    alert(resp.message || `Cleanup complete. Removed ${resp.removed_count} entries.`);
+    loadStats(); // Refresh stats
+  });
+}
+
+function clearVectorStore() {
+  const btn = document.getElementById('clearDbBtn');
+  if (!confirm('Are you sure you want to clear the entire vector database? This cannot be undone.')) {
+    return;
+  }
+
+  const originalText = btn.textContent;
+  btn.textContent = 'Clearing...';
+  btn.disabled = true;
+
+  chrome.runtime.sendMessage({
+    type: 'clear_vector_store'
+  }, (resp) => {
+    btn.textContent = originalText;
+    btn.disabled = false;
+
+    if (chrome.runtime.lastError) {
+      alert(`Error: ${chrome.runtime.lastError.message}`);
+      return;
+    }
+
+    alert(resp.message || 'Vector store cleared successfully.');
+    loadStats(); // Refresh stats
+
+    // Also clear other views
+    document.getElementById('trending-content').innerHTML = '';
+    document.getElementById('search-results').innerHTML = `
+      <div class="empty-state">
+        <div class="icon">🔍</div>
+        <div>Search your vector database<br>for similar articles</div>
+      </div>
+    `;
+  });
+}
+
 
 // Semantic Search functionality
 document.addEventListener('DOMContentLoaded', () => {
@@ -19,7 +282,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // Show loading state
-    const contentEl = document.getElementById('content');
+    const contentEl = document.getElementById('search-results');
     contentEl.innerHTML = '';
 
     const loadingDiv = document.createElement('div');
@@ -77,7 +340,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // Function to display search results
 function displaySearchResults(results, query) {
-  const contentEl = document.getElementById('content');
+  const contentEl = document.getElementById('search-results');
   contentEl.innerHTML = '';
 
   if (results.length === 0) {
@@ -226,6 +489,7 @@ function displaySearchResults(results, query) {
     contentEl.appendChild(resultCard);
   });
 }
+
 
 const RENDER_INTERVAL_MS = 180;
 let renderTimer = null;

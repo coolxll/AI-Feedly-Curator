@@ -17,6 +17,8 @@
       line-height: 1.7;
       padding: 0;
       min-height: 100vh;
+      display: flex;
+      flex-direction: column;
     }
     .header {
       background: #8b5cf6;
@@ -25,6 +27,7 @@
       position: sticky;
       top: 0;
       z-index: 100;
+      flex-shrink: 0;
     }
     .header h1 {
       font-size: 16px;
@@ -33,14 +36,43 @@
       align-items: center;
       gap: 8px;
     }
-    .article-title {
+
+    /* Tabs Styles */
+    .tabs {
+      display: flex;
       background: #fff;
-      padding: 12px 20px;
       border-bottom: 1px solid #e5e7eb;
-      font-weight: 600;
-      color: #111827;
-      font-size: 15px;
+      flex-shrink: 0;
     }
+    .tab {
+      flex: 1;
+      text-align: center;
+      padding: 12px 0;
+      font-size: 13px;
+      font-weight: 600;
+      color: #6b7280;
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      transition: all 0.2s;
+    }
+    .tab:hover {
+      color: #8b5cf6;
+      background: #f9fafb;
+    }
+    .tab.active {
+      color: #8b5cf6;
+      border-bottom-color: #8b5cf6;
+    }
+    .tab-content {
+      display: none;
+      flex: 1;
+      overflow-y: auto;
+    }
+    .tab-content.active {
+      display: block;
+    }
+
+    /* Content Area */
     .content {
       padding: 20px;
       background: #fff;
@@ -79,6 +111,16 @@
       font-size: 48px;
       margin-bottom: 16px;
     }
+
+    .article-title {
+      background: #fff;
+      padding: 12px 20px;
+      border-bottom: 1px solid #e5e7eb;
+      font-weight: 600;
+      color: #111827;
+      font-size: 15px;
+    }
+
     .summary-content h2, .summary-content h3, .summary-content h4 {
       margin: 20px 0 10px 0;
       color: #111827;
@@ -107,27 +149,230 @@
       border-radius: 8px;
       margin: 20px;
     }
+
+    /* Button Styles */
+    .btn-secondary {
+      padding: 8px 16px;
+      background: #fff;
+      border: 1px solid #d1d5db;
+      border-radius: 6px;
+      color: #374151;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 500;
+      transition: all 0.2s;
+    }
+    .btn-secondary:hover {
+      background: #f3f4f6;
+      border-color: #9ca3af;
+    }
+    .btn-danger {
+      padding: 8px 16px;
+      background: #fff;
+      border: 1px solid #fca5a5;
+      border-radius: 6px;
+      color: #ef4444;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 500;
+      transition: all 0.2s;
+    }
+    .btn-danger:hover {
+      background: #fef2f2;
+      border-color: #ef4444;
+    }
+
+    /* Trending Styles */
+    .trending-list {
+      padding: 0;
+    }
+    .trending-item {
+      padding: 12px 16px;
+      border-bottom: 1px solid #e5e7eb;
+      transition: background 0.2s;
+      cursor: pointer;
+    }
+    .trending-item:hover {
+      background: #f9fafb;
+    }
+    .trending-topic {
+      font-weight: 600;
+      color: #111827;
+      font-size: 14px;
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 6px;
+    }
+    .trending-count {
+      background: #f3f4f6;
+      padding: 2px 8px;
+      border-radius: 12px;
+      font-size: 12px;
+      color: #6b7280;
+    }
+    .trending-bar {
+      height: 4px;
+      background: #e5e7eb;
+      border-radius: 2px;
+      width: 100%;
+      overflow: hidden;
+    }
+    .trending-fill {
+      height: 100%;
+      background: #8b5cf6;
+      border-radius: 2px;
+    }
+
+    /* Manage Section */
+    .manage-section h3 {
+      font-size: 15px;
+      margin-bottom: 12px;
+      color: #111827;
+    }
+
+    /* Tags Styles */
+    .tags-container {
+      margin-top: 24px;
+      padding-top: 16px;
+      border-top: 1px solid #e5e7eb;
+    }
+    .tags-label {
+      font-size: 11px;
+      font-weight: 600;
+      color: #6b7280;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 8px;
+    }
+    .tag-cloud {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+    .tag-chip {
+      background: #f3f4f6;
+      color: #4b5563;
+      padding: 4px 10px;
+      border-radius: 100px;
+      font-size: 12px;
+      font-weight: 500;
+      transition: all 0.2s;
+      cursor: pointer;
+    }
+    .tag-chip:hover {
+      background: #e5e7eb;
+      color: #111827;
+      transform: translateY(-1px);
+    }
+
+    /* Search Bar Styles */
+    .sticky-header {
+      padding: 10px 20px;
+      background: #f3f4f6;
+      border-bottom: 1px solid #e5e7eb;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+    .search-container {
+      display: flex;
+      gap: 8px;
+    }
+    .search-input {
+      flex: 1;
+      padding: 8px 12px;
+      border: 1px solid #d1d5db;
+      border-radius: 4px;
+      font-size: 14px;
+    }
+    .search-button {
+      padding: 8px 12px;
+      background: #8b5cf6;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+    }
   </style>
 </head>
 <body>
   <div class="header">
     <h1>🤖 AI Summary</h1>
   </div>
-  <div class="article-title" id="articleTitle">等待文章...</div>
-  <!-- Semantic Search Bar -->
-  <div style="padding: 10px 20px; background: #f3f4f6; border-bottom: 1px solid #e5e7eb;">
-    <div style="display: flex; gap: 8px;">
-      <input type="text" id="semanticSearchInput" placeholder="🔍 Semantic search..."
-             style="flex: 1; padding: 8px 12px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 14px;">
-      <button id="semanticSearchBtn" style="padding: 8px 12px; background: #8b5cf6; color: white; border: none; border-radius: 4px; cursor: pointer;">Go</button>
+
+  <!-- Tabs Navigation -->
+  <div class="tabs">
+    <div class="tab active" data-tab="summary">Summary</div>
+    <div class="tab" data-tab="search">Search</div>
+    <div class="tab" data-tab="trending">Trending</div>
+    <div class="tab" data-tab="manage">Manage</div>
+  </div>
+
+  <!-- Tab Content: Summary -->
+  <div id="tab-summary" class="tab-content active">
+    <div class="article-title" id="articleTitle">Waiting for article...</div>
+    <div class="content" id="content">
+      <div class="empty-state">
+        <div class="icon">📄</div>
+        <div>Click "Summary" on an article<br>to generate AI summary</div>
+      </div>
     </div>
   </div>
-  <div class="content" id="content">
-    <div class="empty-state">
-      <div class="icon">📄</div>
-      <div>点击文章的 "Summary" 按钮<br>开始生成AI总结</div>
+
+  <!-- Tab Content: Search -->
+  <div id="tab-search" class="tab-content">
+    <div class="sticky-header">
+      <div class="search-container">
+        <input type="text" id="semanticSearchInput" placeholder="🔍 Semantic search..." class="search-input">
+        <button id="semanticSearchBtn" class="search-button">Go</button>
+      </div>
+    </div>
+    <div class="content" id="search-results">
+      <div class="empty-state">
+        <div class="icon">🔍</div>
+        <div>Search your vector database<br>for similar articles</div>
+      </div>
     </div>
   </div>
+
+  <!-- Tab Content: Trending -->
+  <div id="tab-trending" class="tab-content">
+    <div class="sticky-header">
+        <button id="refreshTrendingBtn" class="btn-secondary" style="width: 100%">Refresh Topics</button>
+    </div>
+    <div class="content" id="trending-content">
+      <div class="loading">
+        <div class="spinner"></div>
+        <div>Loading trending topics...</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tab Content: Manage -->
+  <div id="tab-manage" class="tab-content">
+    <div class="content" style="padding: 20px;">
+      <div class="manage-section">
+        <h3>Vector Store Stats</h3>
+        <div id="stats-display" style="margin: 10px 0; font-size: 24px; font-weight: 700; color: #111827; margin-bottom: 4px;">
+          --
+        </div>
+        <div style="font-size: 13px; color: #6b7280; margin-bottom: 16px;">Articles in Vector Store</div>
+        <button id="refreshStatsBtn" class="btn-secondary" style="width: 100%">Refresh Stats</button>
+      </div>
+
+      <div class="manage-section" style="margin-top: 20px; border-top: 1px solid #e5e7eb; padding-top: 20px;">
+        <h3>Maintenance</h3>
+        <p style="font-size: 13px; color: #6b7280; margin-bottom: 16px;">
+          Manage your local vector database.
+        </p>
+        <div style="display: flex; flex-direction: column; gap: 10px;">
+          <button id="cleanupBtn" class="btn-secondary">Cleanup Invalid Entries</button>
+          <button id="clearDbBtn" class="btn-danger">Clear Vector Database</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <script src="lib/marked.min.js"></script>
   <script src="sidepanel.js"></script>
 </body>
