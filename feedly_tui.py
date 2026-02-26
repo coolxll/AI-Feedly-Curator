@@ -7,6 +7,7 @@ Interactive menu for running Feedly filters.
 import sys
 import logging
 import os
+import json
 from rss_analyzer.config import PROJ_CONFIG
 from rss_analyzer.feedly_client import (
     feedly_get_categories,
@@ -21,6 +22,9 @@ from rich.traceback import install as install_rich_traceback
 
 # Configure Rich Tracebacks
 install_rich_traceback()
+
+# Feedly 配置文件路径
+FEEDLY_CONFIG_FILE = os.path.join(os.getcwd(), "feedly_config.json")
 
 # Re-configure logging to use RichHandler
 log_level_str = os.environ.get("RSS_NATIVE_LOG_LEVEL", "INFO").upper()
@@ -77,6 +81,91 @@ def get_input(prompt_text, default=None):
     return val
 
 
+def load_feedly_config():
+    """加载 Feedly 配置"""
+    if os.path.exists(FEEDLY_CONFIG_FILE):
+        with open(FEEDLY_CONFIG_FILE, "r") as f:
+            return json.load(f)
+    return None
+
+
+def save_feedly_config(token: str, user_id: str) -> bool:
+    """保存 Feedly 配置"""
+    try:
+        config = {
+            "token": token,
+            "user_id": user_id
+        }
+        with open(FEEDLY_CONFIG_FILE, "w") as f:
+            json.dump(config, f, indent=2)
+        return True
+    except Exception as e:
+        logger.error(f"保存配置失败：{str(e)}")
+        return False
+
+
+def manage_feedly_config():
+    """Feedly 配置管理界面"""
+    console.clear()
+    console.print(
+        Panel.fit(
+            "⚙️ Feedly 配置管理", style="bold cyan", subtitle="Token Management"
+        )
+    )
+    
+    current_config = load_feedly_config()
+    
+    if current_config:
+        console.print("\n[green]✅ 当前 Feedly 已配置[/green]")
+        console.print(f"[dim]User ID:[/dim] {current_config.get('user_id', 'N/A')}")
+        token_display = current_config.get('token', 'N/A')
+        console.print(f"[dim]Token:[/dim] {token_display[:10]}...{token_display[-5:] if len(token_display) > 15 else ''}")
+    else:
+        console.print("\n[yellow]⚠️ Feedly 未配置[/yellow]")
+    
+    console.print("\n" + "="*50)
+    console.print("\n请输入新的 Feedly Token")
+    console.print("[dim]（直接按 Enter 返回上一级）[/dim]\n")
+    
+    # 获取新 token
+    new_token = get_input("🔑 Feedly Token").strip()
+    
+    if not new_token:
+        console.print("\n[dim]取消操作[/dim]")
+        return
+    
+    # User ID 通常不需要更新，直接使用现有值或询问
+    if current_config and current_config.get('user_id'):
+        existing_user_id = current_config.get('user_id')
+        console.print(f"\n[dim]使用现有 User ID: {existing_user_id}[/dim]")
+        change_user_id = get_input("要修改 User ID 吗？(y/n)", default="n").strip().lower()
+        
+        if change_user_id.startswith('y'):
+            new_user_id = get_input("新的 User ID").strip()
+            if not new_user_id:
+                console.print("\n[red]User ID 不能为空[/red]")
+                return
+        else:
+            new_user_id = existing_user_id
+    else:
+        new_user_id = get_input("Feedly User ID").strip()
+        if not new_user_id:
+            console.print("\n[red]User ID 不能为空[/red]")
+            return
+    
+    # 保存配置
+    console.print("\n[cyan]正在保存配置...[/cyan]")
+    if save_feedly_config(new_token, new_user_id):
+        console.print("\n[green]✅ 配置已成功保存！[/green]")
+        console.print(f"[dim]新 Token:[/dim] {new_token[:10]}...{new_token[-5:] if len(new_token) > 15 else ''}")
+        console.print(f"[dim]User ID:[/dim] {new_user_id}")
+    else:
+        console.print("\n[red]❌ 保存失败，请重试[/red]")
+    
+    console.print("\n[dim]按 Enter 键继续...[/dim]")
+    input()
+
+
 def simple_menu():
     """Fallback menu using standard input"""
     console.clear()
@@ -92,11 +181,12 @@ def simple_menu():
         console.print("2. Analyze Articles")
         console.print("3. Regenerate Summary")
         console.print("4. Export Articles")
-        console.print("5. Exit")
+        console.print("5. Feedly 配置")
+        console.print("6. Exit")
 
         choice = get_input("Select an option")
 
-        if choice == "5":
+        if choice == "6":
             console.print("[cyan]Goodbye![/cyan]")
             sys.exit()
         elif choice == "1":
@@ -107,6 +197,14 @@ def simple_menu():
             run_summary_flow()
         elif choice == "4":
             simple_export_flow()
+        elif choice == "5":
+            manage_feedly_config()
+            console.clear()
+            console.print(
+                Panel.fit(
+                    "Feedly AI Filter (Simple Mode)", style="bold cyan", subtitle="Basic Runner"
+                )
+            )
         else:
             console.print("[red]Invalid choice[/red]")
 
@@ -501,6 +599,7 @@ def main_menu():
                 questionary.Choice("Analyze Articles", value="analyze"),
                 questionary.Choice("Regenerate Summary", value="summary"),
                 questionary.Choice("Export Articles", value="export"),
+                questionary.Choice("⚙️ Feedly 配置", value="config"),
                 questionary.Choice("Exit", value="exit"),
             ],
             style=questionary.Style(
@@ -554,6 +653,16 @@ def main_menu():
         elif action == "export":
             run_export_flow()
             input("\nPress Enter to return to menu...")
+            console.clear()
+            console.print(
+                Panel.fit(
+                    "Feedly AI Filter TUI",
+                    style="bold cyan",
+                    subtitle="Interactive Runner",
+                )
+            )
+        elif action == "config":
+            manage_feedly_config()
             console.clear()
             console.print(
                 Panel.fit(

@@ -5,6 +5,7 @@ import json
 import plotly.express as px
 from datetime import datetime
 import os
+import webbrowser
 
 # 设置页面配置
 st.set_page_config(
@@ -12,6 +13,9 @@ st.set_page_config(
     page_icon="📰",
     layout="wide"
 )
+
+# Feedly 配置文件路径
+FEEDLY_CONFIG_FILE = os.path.join(os.getcwd(), "feedly_config.json")
 
 def init_connection():
     """初始化数据库连接"""
@@ -47,8 +51,89 @@ def load_data():
 
     return df
 
+def load_feedly_config():
+    """加载 Feedly 配置"""
+    if os.path.exists(FEEDLY_CONFIG_FILE):
+        with open(FEEDLY_CONFIG_FILE, "r") as f:
+            return json.load(f)
+    return None
+
+def save_feedly_config(token: str, user_id: str) -> bool:
+    """保存 Feedly 配置"""
+    try:
+        config = {
+            "token": token,
+            "user_id": user_id
+        }
+        with open(FEEDLY_CONFIG_FILE, "w") as f:
+            json.dump(config, f, indent=2)
+        return True
+    except Exception as e:
+        st.error(f"保存配置失败：{str(e)}")
+        return False
+
 def main():
     st.title("📰 RSS 文章分析仪表板")
+    
+    # 侧边栏 - Feedly 配置管理
+    with st.sidebar:
+        st.header("⚙️ Feedly 配置")
+        
+        # 加载当前配置
+        current_config = load_feedly_config()
+        
+        if current_config:
+            st.success("✅ Feedly 已配置")
+            st.write(f"**User ID:** `{current_config.get('user_id', 'N/A')}`")
+            st.write(f"**Token:** `{current_config.get('token', 'N/A')[:10]}...`")
+            
+            if st.button("🔄 更新 Token", key="update_token_btn"):
+                st.session_state.show_token_form = True
+        else:
+            st.warning("⚠️ Feedly 未配置")
+            if st.button("➕ 添加配置", key="add_config_btn"):
+                st.session_state.show_token_form = True
+        
+        # 显示配置表单
+        if st.session_state.get("show_token_form", False):
+            with st.form("feedly_config_form"):
+                st.subheader("配置 Feedly")
+                
+                token = st.text_input(
+                    "Feedly Token",
+                    value=current_config.get("token", "") if current_config else "",
+                    help="从 https://feedly.com/i/console 获取你的 API token",
+                    type="password" if current_config else "default"
+                )
+                
+                user_id = st.text_input(
+                    "Feedly User ID",
+                    value=current_config.get("user_id", "") if current_config else "",
+                    help="你的 Feedly User ID"
+                )
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    submitted = st.form_submit_button("💾 保存", use_container_width=True)
+                with col2:
+                    cancelled = st.form_submit_button("❌ 取消", use_container_width=True)
+                
+                if submitted and token and user_id:
+                    if save_feedly_config(token, user_id):
+                        st.success("✅ 配置已保存！")
+                        st.session_state.show_token_form = False
+                        st.rerun()
+                elif cancelled:
+                    st.session_state.show_token_form = False
+                    st.rerun()
+        
+        st.divider()
+        
+        # 打开 Feedly 按钮
+        if st.button("🌐 打开 Feedly", use_container_width=True):
+            webbrowser.open("https://feedly.com/i/console")
+        
+        st.divider()
 
     # 加载数据
     with st.spinner("正在加载数据..."):
@@ -103,7 +188,7 @@ def main():
     st.subheader("🔍 文章搜索和筛选")
 
     # 侧边栏筛选器
-    st.sidebar.header("筛选选项")
+    st.sidebar.header("🔍 筛选选项")
 
     # 评分范围筛选
     score_range = st.sidebar.slider(
@@ -112,6 +197,8 @@ def main():
         float(df['score'].max()) if not df.empty else 5.0,
         (0.0, 5.0)
     )
+    
+    st.divider()
 
     # 日期范围筛选
     if not df.empty:

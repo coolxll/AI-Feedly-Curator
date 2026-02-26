@@ -83,21 +83,44 @@ class ChromaVectorStore:
 
     def _initialize(self):
         try:
-            self.client = chromadb.PersistentClient(path=self.persist_dir)
-            embedding_fn = DashScopeEmbeddingFunction()
-            self.collection = self.client.get_or_create_collection(
-                name=self.collection_name, embedding_function=embedding_fn
+            # 延迟初始化 ChromaDB，避免启动时就加载所有底层库
+            # 只有在真正需要使用时才创建客户端
+            self.persist_dir = os.getenv(
+                "RSS_VECTOR_DB_DIR", os.path.join(os.getcwd(), "chroma_db")
             )
+            self.collection_name = collection_name
             logger.info(
-                f"ChromaDB initialized at {self.persist_dir}, collection: {self.collection_name}"
+                f"ChromaDB 配置完成，数据目录：{self.persist_dir}"
             )
         except Exception as e:
             logger.error(f"Failed to initialize ChromaDB: {e}")
+    
+    def _get_client(self):
+        """Lazy initialization of ChromaDB client"""
+        if self.client is None:
+            try:
+                import chromadb
+                self.client = chromadb.PersistentClient(path=self.persist_dir)
+                embedding_fn = DashScopeEmbeddingFunction()
+                self.collection = self.client.get_or_create_collection(
+                    name=self.collection_name, embedding_function=embedding_fn
+                )
+                logger.info(
+                    f"ChromaDB initialized at {self.persist_dir}, collection: {self.collection_name}"
+                )
+            except Exception as e:
+                logger.error(f"Failed to initialize ChromaDB client: {e}")
+                raise
 
     def add_article(self, article_id: str, text: str, metadata: dict = None) -> bool:
         """
         Add or update an article in the vector store.
         """
+        try:
+            self._get_client()
+        except Exception:
+            return False
+        
         if not self.collection:
             return False
 
@@ -133,6 +156,11 @@ class ChromaVectorStore:
             limit: Maximum number of results to return
             min_score: Minimum score threshold (optional filtering)
         """
+        try:
+            self._get_client()
+        except Exception:
+            return []
+        
         if not self.collection:
             return []
 
@@ -184,6 +212,7 @@ class ChromaVectorStore:
             Boolean indicating success
         """
         try:
+            self._get_client()
             self.collection.delete(ids=[article_id])
             logger.debug(f"Deleted article {article_id} from vector store")
             return True
@@ -204,6 +233,7 @@ class ChromaVectorStore:
             Boolean indicating success
         """
         try:
+            self._get_client()
             self.collection.delete(ids=article_ids)
             logger.debug(f"Deleted {len(article_ids)} articles from vector store")
             return True
@@ -219,6 +249,7 @@ class ChromaVectorStore:
             Boolean indicating success
         """
         try:
+            self._get_client()
             # Get all IDs in the collection first
             all_items = self.collection.get(include=[])
             if all_items["ids"]:
@@ -241,6 +272,7 @@ class ChromaVectorStore:
             Total count of articles
         """
         try:
+            self._get_client()
             count = self.collection.count()
             return count
         except Exception as e:
@@ -255,6 +287,7 @@ class ChromaVectorStore:
             List of all article IDs
         """
         try:
+            self._get_client()
             all_items = self.collection.get(include=[])  # Get only IDs
             return all_items["ids"]
         except Exception as e:
@@ -269,6 +302,7 @@ class ChromaVectorStore:
             Dictionary containing ids, documents, and metadatas
         """
         try:
+            self._get_client()
             all_items = self.collection.get(include=["documents", "metadatas"])
             return all_items
         except Exception as e:
@@ -283,6 +317,7 @@ class ChromaVectorStore:
             Number of entries removed
         """
         try:
+            self._get_client()
             # Get all documents and their metadata
             all_items = self.collection.get(include=["documents", "metadatas", "ids"])
 
@@ -325,6 +360,7 @@ class ChromaVectorStore:
             List of tags for the article
         """
         try:
+            self._get_client()
             if not text:
                 # Get the article text from the collection
                 article_data = self.collection.get(
@@ -479,6 +515,7 @@ class ChromaVectorStore:
             List of articles with their tags
         """
         try:
+            self._get_client()
             results = self.search_similar(query, limit)
 
             # Add tags to each result
@@ -503,6 +540,7 @@ class ChromaVectorStore:
             hours: Number of hours to look back for trending topics (default 24h)
         """
         try:
+            self._get_client()
             from datetime import datetime, timedelta
             from rss_analyzer.cache import get_app_cache, set_app_cache
 

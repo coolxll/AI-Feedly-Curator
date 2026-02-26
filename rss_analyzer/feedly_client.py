@@ -7,6 +7,7 @@ import os
 import json
 import logging
 import requests
+import webbrowser
 from typing import Optional
 
 from .config import PROJ_CONFIG
@@ -88,7 +89,18 @@ def feedly_fetch_unread(
             )
 
             if response.status_code == 401:
-                logger.error("Feedly认证失败，请检查token")
+                logger.error("Feedly 认证失败，请检查 token")
+                # 自动打开 Feedly 配置页面方便用户更新 token
+                logger.info("正在打开 Feedly 控制台...")
+                webbrowser.open("https://feedly.com/i/console")
+                
+                # 提示用户可以在 TUI 中更新 token
+                print("\n" + "="*60)
+                print("💡 提示：请在 Feedly 控制台复制新的 token")
+                print("   然后运行以下命令更新：")
+                print("   python feedly_tui.py → 选择 '⚙️ Feedly 配置'")
+                print("="*60 + "\n")
+                
                 return None if not articles else articles
             if response.status_code != 200:
                 logger.error(
