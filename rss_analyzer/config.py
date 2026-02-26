@@ -21,6 +21,7 @@ PROJ_CONFIG = {
     "batch_scoring": True,  # 是否启用分析批量评分
     "batch_size": 10,  # 单次 LLM 评分的文章数
     "max_workers": 3,  # 批量评分的并发线程数
+    "enable_vector_store": True,  # 是否启用 ChromaDB 向量写入
     # API Profile 配置 (指定使用哪个 profile，使用大写)
     # 可选值: "LOCAL_QWEN", "ALIYUN", "DEEPSEEK", None (使用默认)
     "analysis_profile": "LOCAL_QWEN",  # 文章分析使用的 profile

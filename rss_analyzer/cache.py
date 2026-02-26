@@ -3,10 +3,18 @@ import json
 import os
 import logging
 from datetime import datetime
+from rss_analyzer.config import PROJ_CONFIG
 
 logger = logging.getLogger(__name__)
 
 DB_PATH = os.getenv("RSS_SCORES_DB", os.path.join(os.getcwd(), "rss_scores.db"))
+
+
+def _is_vector_store_enabled() -> bool:
+    env_value = os.getenv("RSS_ENABLE_VECTOR_STORE")
+    if env_value is not None:
+        return env_value.lower() in ("1", "true", "yes", "on")
+    return bool(PROJ_CONFIG.get("enable_vector_store", False))
 
 
 def init_db():
@@ -158,7 +166,10 @@ def save_cached_score(article_id: str, score: float, data: dict):
         conn.close()
 
         # 2. Save to Vector Store (ChromaDB)
-        # Only save if we have meaningful text (summary or content)
+        # Only save if explicitly enabled and we have meaningful text
+        if not _is_vector_store_enabled():
+            return
+
         try:
             # Local import to avoid circular dependency if cache is imported early
             from rss_analyzer.vector_store import vector_store

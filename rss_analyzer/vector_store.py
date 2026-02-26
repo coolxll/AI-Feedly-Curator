@@ -1,14 +1,23 @@
 import os
 import logging
+import subprocess
+import sys
+import time
 from typing import List, Dict, Any
-import chromadb
-from chromadb import Documents, EmbeddingFunction, Embeddings
 from openai import OpenAI
+from rss_analyzer.config import PROJ_CONFIG
 
 logger = logging.getLogger(__name__)
 
 
-class DashScopeEmbeddingFunction(EmbeddingFunction):
+def _is_vector_store_enabled() -> bool:
+    env_value = os.getenv("RSS_ENABLE_VECTOR_STORE")
+    if env_value is not None:
+        return env_value.lower() in ("1", "true", "yes", "on")
+    return bool(PROJ_CONFIG.get("enable_vector_store", True))
+
+
+class DashScopeEmbeddingFunction:
     """
     Custom EmbeddingFunction for ChromaDB using Aliyun DashScope via OpenAI SDK.
     """
@@ -39,7 +48,10 @@ class DashScopeEmbeddingFunction(EmbeddingFunction):
         if self.api_key:
             self.client = OpenAI(api_key=self.api_key, base_url=self.base_url)
 
-    def __call__(self, input: Documents) -> Embeddings:
+    def name(self) -> str:
+        return f"dashscope-openai-{self.model_name}"
+
+    def __call__(self, input: List[str]) -> List[List[float]]:
         if not self.client:
             logger.error(
                 "Cannot generate embeddings: OpenAI client not initialized (missing API key)."
@@ -77,33 +89,70 @@ class ChromaVectorStore:
         self.collection_name = collection_name
         self.client = None
         self.collection = None
+        self.embedding_fn = None
         self._trending_cache = None
         self._trending_cache_time = None
+        self.enabled = _is_vector_store_enabled()
         self._initialize()
 
     def _initialize(self):
         try:
-            # 延迟初始化 ChromaDB，避免启动时就加载所有底层库
-            # 只有在真正需要使用时才创建客户端
             self.persist_dir = os.getenv(
                 "RSS_VECTOR_DB_DIR", os.path.join(os.getcwd(), "chroma_db")
             )
-            self.collection_name = collection_name
+            if not self.collection_name:
+                self.collection_name = "rss_articles"
             logger.info(
                 f"ChromaDB 配置完成，数据目录：{self.persist_dir}"
             )
         except Exception as e:
             logger.error(f"Failed to initialize ChromaDB: {e}")
+
+    def _is_collection_healthy(self, collection_name: str) -> bool:
+        """Check collection health in a subprocess to avoid crashing current process."""
+        probe_code = (
+            "import chromadb; "
+            f"client=chromadb.PersistentClient(path={self.persist_dir!r}); "
+            f"col=client.get_or_create_collection(name={collection_name!r}); "
+            "col.count(); "
+            "print('ok')"
+        )
+        try:
+            result = subprocess.run(
+                [sys.executable, "-c", probe_code],
+                capture_output=True,
+                text=True,
+                timeout=20,
+            )
+            return result.returncode == 0
+        except Exception:
+            return False
+
+    def _resolve_collection_name(self) -> str:
+        if self._is_collection_healthy(self.collection_name):
+            return self.collection_name
+
+        fallback_name = f"{self.collection_name}_rebuild_{int(time.time())}"
+        logger.warning(
+            "Collection '%s' seems corrupted. Falling back to '%s'.",
+            self.collection_name,
+            fallback_name,
+        )
+        return fallback_name
     
     def _get_client(self):
         """Lazy initialization of ChromaDB client"""
+        if not self.enabled:
+            return
+
         if self.client is None:
             try:
                 import chromadb
                 self.client = chromadb.PersistentClient(path=self.persist_dir)
-                embedding_fn = DashScopeEmbeddingFunction()
+                self.embedding_fn = DashScopeEmbeddingFunction()
+                self.collection_name = self._resolve_collection_name()
                 self.collection = self.client.get_or_create_collection(
-                    name=self.collection_name, embedding_function=embedding_fn
+                    name=self.collection_name
                 )
                 logger.info(
                     f"ChromaDB initialized at {self.persist_dir}, collection: {self.collection_name}"
@@ -138,8 +187,14 @@ class ChromaVectorStore:
                         safe_metadata[k] = str(v)
 
             # Upsert
+            embeddings = (
+                self.embedding_fn([text]) if self.embedding_fn else None
+            )
             self.collection.upsert(
-                ids=[article_id], documents=[text], metadatas=[safe_metadata]
+                ids=[article_id],
+                documents=[text],
+                metadatas=[safe_metadata],
+                embeddings=embeddings,
             )
             return True
         except Exception as e:
@@ -167,7 +222,16 @@ class ChromaVectorStore:
         try:
             # Increase the number of results we fetch to account for potential filtering
             fetch_limit = limit * 3 if min_score is not None else limit
-            results = self.collection.query(query_texts=[query], n_results=fetch_limit)
+            query_embeddings = (
+                self.embedding_fn([query]) if self.embedding_fn else None
+            )
+            if not query_embeddings:
+                return []
+
+            results = self.collection.query(
+                query_embeddings=query_embeddings,
+                n_results=fetch_limit,
+            )
 
             # Format results
             # results structure: {'ids': [['id1', 'id2']], 'documents': [['doc1', 'doc2']], ...}
