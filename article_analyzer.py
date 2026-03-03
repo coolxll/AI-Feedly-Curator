@@ -176,7 +176,22 @@ def main():
     def record_analysis_result(article_item, analysis_result):
         """将评分结果标准化记录到输出列表"""
         verdict = analysis_result.get("verdict", "未知")
-        score = analysis_result["score"]
+        score = analysis_result.get("score", 0.0)
+        reason = analysis_result.get("reason", "")
+        summary = analysis_result.get("summary", "")
+
+        # 检查是否为失败请求：分数为0.0，且带有错误提示，则跳过不记录
+        if score == 0.0 and (
+            "解析错误" in verdict
+            or "API调用错误" in reason
+            or "分析失败" in summary
+            or "失败" in reason
+            or "Exception" in reason
+            or "解析异常" in reason
+        ):
+            logger.warning(f"  ❌ 分析失败，跳过记录: {article_item.get('title', 'Unknown')} ({reason or summary})")
+            return
+
         if (
             "red_flags" in analysis_result.get("detailed_scores", {})
             and analysis_result["detailed_scores"]["red_flags"]

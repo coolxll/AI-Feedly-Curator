@@ -141,6 +141,23 @@ def get_cached_score(article_id: str) -> dict | None:
 def save_cached_score(article_id: str, score: float, data: dict):
     if not article_id:
         return
+
+    # 检查是否为失败请求：分数为0.0，且带有错误提示，则拒绝缓存
+    if score == 0.0:
+        reason = data.get('reason', '')
+        summary = data.get('summary', '')
+        verdict = data.get('verdict', '')
+        if (
+            '解析错误' in verdict
+            or 'API调用错误' in reason
+            or '分析失败' in summary
+            or '失败' in reason
+            or 'Exception' in reason
+            or '解析异常' in reason
+        ):
+            logger.warning(f'   分析失败，拒绝缓存 0.0 分: {article_id}')
+            return
+
     try:
         # 1. Save to SQLite
         conn = sqlite3.connect(DB_PATH)
