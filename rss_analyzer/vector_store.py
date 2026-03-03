@@ -17,6 +17,17 @@ def _is_vector_store_enabled() -> bool:
     return bool(PROJ_CONFIG.get("enable_vector_store", True))
 
 
+def _get_int_env(name: str, default: int) -> int:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except ValueError:
+        logger.warning("Invalid integer for %s=%r, fallback to %s", name, value, default)
+        return default
+
+
 class DashScopeEmbeddingFunction:
     """
     Custom EmbeddingFunction for ChromaDB using Aliyun DashScope via OpenAI SDK.
@@ -86,6 +97,15 @@ class ChromaVectorStore:
         self.persist_dir = os.getenv(
             "RSS_VECTOR_DB_DIR", os.path.join(os.getcwd(), "chroma_db")
         )
+        self.db_mode = os.getenv("RSS_VECTOR_DB_MODE", "http").lower()
+        self.host = os.getenv("RSS_VECTOR_DB_HOST", "127.0.0.1")
+        self.port = _get_int_env("RSS_VECTOR_DB_PORT", 8001)
+        self.ssl = os.getenv("RSS_VECTOR_DB_SSL", "false").lower() in (
+            "1",
+            "true",
+            "yes",
+            "on",
+        )
         self.collection_name = collection_name
         self.client = None
         self.collection = None
@@ -100,16 +120,37 @@ class ChromaVectorStore:
             self.persist_dir = os.getenv(
                 "RSS_VECTOR_DB_DIR", os.path.join(os.getcwd(), "chroma_db")
             )
+            self.db_mode = os.getenv("RSS_VECTOR_DB_MODE", "http").lower()
+            self.host = os.getenv("RSS_VECTOR_DB_HOST", "127.0.0.1")
+            self.port = _get_int_env("RSS_VECTOR_DB_PORT", 8001)
+            self.ssl = os.getenv("RSS_VECTOR_DB_SSL", "false").lower() in (
+                "1",
+                "true",
+                "yes",
+                "on",
+            )
             if not self.collection_name:
                 self.collection_name = "rss_articles"
-            logger.info(
-                f"ChromaDB 配置完成，数据目录：{self.persist_dir}"
-            )
+            if self._use_http_mode():
+                logger.info(
+                    "ChromaDB 配置完成，模式：HTTP，地址：%s:%s，SSL：%s",
+                    self.host,
+                    self.port,
+                    self.ssl,
+                )
+            else:
+                logger.info(f"ChromaDB 配置完成，模式：本地，数据目录：{self.persist_dir}")
         except Exception as e:
             logger.error(f"Failed to initialize ChromaDB: {e}")
 
+    def _use_http_mode(self) -> bool:
+        return self.db_mode in {"http", "remote", "docker"}
+
     def _is_collection_healthy(self, collection_name: str) -> bool:
         """Check collection health in a subprocess to avoid crashing current process."""
+        if self._use_http_mode():
+            return True
+
         probe_code = (
             "import chromadb; "
             f"client=chromadb.PersistentClient(path={self.persist_dir!r}); "
@@ -148,14 +189,23 @@ class ChromaVectorStore:
         if self.client is None:
             try:
                 import chromadb
-                self.client = chromadb.PersistentClient(path=self.persist_dir)
+                if self._use_http_mode():
+                    self.client = chromadb.HttpClient(
+                        host=self.host,
+                        port=self.port,
+                        ssl=self.ssl,
+                    )
+                else:
+                    self.client = chromadb.PersistentClient(path=self.persist_dir)
                 self.embedding_fn = DashScopeEmbeddingFunction()
                 self.collection_name = self._resolve_collection_name()
                 self.collection = self.client.get_or_create_collection(
                     name=self.collection_name
                 )
                 logger.info(
-                    f"ChromaDB initialized at {self.persist_dir}, collection: {self.collection_name}"
+                    "ChromaDB initialized, mode: %s, collection: %s",
+                    "HTTP" if self._use_http_mode() else "LOCAL",
+                    self.collection_name,
                 )
             except Exception as e:
                 logger.error(f"Failed to initialize ChromaDB client: {e}")
