@@ -69,10 +69,25 @@ try:
     os.environ["RSS_SCORES_DB"] = DB_PATH
     logging.info(f"设置 RSS_SCORES_DB: {DB_PATH}")
 
-    # 设置 Vector Store 路径环境变量 (确保与主项目共享)
-    VECTOR_DB_DIR = os.path.join(PROJECT_ROOT, "chroma_db")
-    os.environ["RSS_VECTOR_DB_DIR"] = VECTOR_DB_DIR
-    logging.info(f"设置 RSS_VECTOR_DB_DIR: {VECTOR_DB_DIR}")
+    # Vector Store 默认配置：
+    # - 优先使用外部环境变量（例如 Docker Chroma HTTP）
+    # - 若未配置则回退到本地持久化目录
+    if not os.environ.get("RSS_VECTOR_DB_MODE"):
+        os.environ["RSS_VECTOR_DB_MODE"] = "http"
+    if not os.environ.get("RSS_VECTOR_DB_HOST"):
+        os.environ["RSS_VECTOR_DB_HOST"] = "127.0.0.1"
+    if not os.environ.get("RSS_VECTOR_DB_PORT"):
+        os.environ["RSS_VECTOR_DB_PORT"] = "8001"
+    if not os.environ.get("RSS_VECTOR_DB_DIR"):
+        os.environ["RSS_VECTOR_DB_DIR"] = os.path.join(PROJECT_ROOT, "chroma_db")
+
+    logging.info(
+        "Vector Store config: mode=%s host=%s port=%s dir=%s",
+        os.environ.get("RSS_VECTOR_DB_MODE"),
+        os.environ.get("RSS_VECTOR_DB_HOST"),
+        os.environ.get("RSS_VECTOR_DB_PORT"),
+        os.environ.get("RSS_VECTOR_DB_DIR"),
+    )
 
     from rss_analyzer.cache import get_cached_score, save_cached_score
     from rss_analyzer.article_fetcher import fetch_article_content

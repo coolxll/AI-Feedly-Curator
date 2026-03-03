@@ -65,6 +65,47 @@ python article_analyzer.py --refresh --limit 50 --mark-read
 python regenerate_summary.py
 ```
 
+### ChromaDB 迁移到 Docker
+
+项目默认已支持通过 HTTP 连接 ChromaDB（适配 Docker 部署）。
+
+1. 启动 ChromaDB 容器：
+
+```bash
+docker compose up -d chromadb
+```
+
+2. 在 `.env` 中确认向量库配置：
+
+```env
+RSS_VECTOR_DB_MODE=http
+RSS_VECTOR_DB_HOST=127.0.0.1
+RSS_VECTOR_DB_PORT=8001
+RSS_VECTOR_DB_SSL=false
+```
+
+3. （可选）将历史数据重建到 Docker ChromaDB：
+
+```bash
+python scripts/migrate_to_vector_store.py
+```
+
+迁移脚本已支持断点续传（checkpoint 保存在 `data/vector_migration_checkpoint.json`），
+中断后再次运行会自动从上次位置继续。常用参数：
+
+```bash
+# 指定批大小
+python scripts/migrate_to_vector_store.py --batch-size 200
+
+# 指定 embedding 批大小（通常 32~128）
+python scripts/migrate_to_vector_store.py --embedding-batch-size 64
+
+# 从头开始（清理断点）
+python scripts/migrate_to_vector_store.py --reset-checkpoint
+```
+
+如果你之前使用的是本地目录模式（`chroma_db/`），可以在迁移完成后不再依赖该目录。
+
 ### 4. Feedly Web UI AI 覆盖（Chrome 扩展 + Native Messaging）
 
 #### 4.1 Native Host 安装（一次性）
