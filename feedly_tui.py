@@ -23,8 +23,9 @@ from rich.traceback import install as install_rich_traceback
 # Configure Rich Tracebacks
 install_rich_traceback()
 
-# Feedly 配置文件路径
+# 配置文件路径
 FEEDLY_CONFIG_FILE = os.path.join(os.getcwd(), "feedly_config.json")
+AI_CONFIG_FILE = os.path.join(os.getcwd(), "ai_config.json")
 
 # Re-configure logging to use RichHandler
 log_level_str = os.environ.get("RSS_NATIVE_LOG_LEVEL", "INFO").upper()
@@ -109,7 +110,7 @@ def manage_feedly_config():
     console.clear()
     console.print(
         Panel.fit(
-            "⚙️ Feedly 配置管理", style="bold cyan", subtitle="Token Management"
+            "Feedly 配置管理", style="bold cyan", subtitle="Token Management"
         )
     )
     
@@ -166,6 +167,85 @@ def manage_feedly_config():
     input()
 
 
+def manage_llm_config():
+    """AI 配置管理界面"""
+    console.clear()
+    console.print(
+        Panel.fit(
+            "AI 模型配置管理", style="bold magenta", subtitle="LLM Settings"
+        )
+    )
+
+    # 重新加载当前配置
+    current_config = {}
+    if os.path.exists(AI_CONFIG_FILE):
+        try:
+            with open(AI_CONFIG_FILE, "r", encoding="utf-8") as f:
+                current_config = json.load(f)
+        except Exception:
+            pass
+
+    # 获取当前实际使用的配置（合并了默认值）
+    from rss_analyzer.config import get_config
+    
+    analysis_profile = current_config.get("analysis_profile") or PROJ_CONFIG.get("analysis_profile", "LOCAL_QWEN")
+    current_model = get_config("OPENAI_MODEL", profile=analysis_profile)
+    current_base_url = get_config("OPENAI_BASE_URL", profile=analysis_profile)
+
+    console.print(f"\n[bold]当前分析 Profile:[/bold] [cyan]{analysis_profile}[/cyan]")
+    console.print(f"[bold]当前分析模型:[/bold] [green]{current_model}[/green]")
+    console.print(f"[bold]API 路径 (Base URL):[/bold] [blue]{current_base_url}[/blue]")
+    
+    console.print("\n" + "="*50)
+    
+    import questionary
+    choices = [
+        "修改分析模型 (Model Name)",
+        "修改 API 路径 (Base URL)",
+        "修改分析 Profile",
+        "返回上一级"
+    ]
+    
+    sub_action = questionary.select(
+        "选择要修改的项目:",
+        choices=choices
+    ).ask()
+
+    if not sub_action or sub_action == "返回上一级":
+        return
+
+    if sub_action == "修改分析模型 (Model Name)":
+        new_model = get_input("新的模型名称", default=current_model)
+        if new_model:
+            if analysis_profile not in current_config:
+                current_config[analysis_profile] = {}
+            current_config[analysis_profile]["OPENAI_MODEL"] = new_model
+            
+    elif sub_action == "修改 API 路径 (Base URL)":
+        new_url = get_input("新的 API 路径 (例如 http://127.0.0.1:8000/v1)", default=current_base_url)
+        if new_url:
+            if analysis_profile not in current_config:
+                current_config[analysis_profile] = {}
+            current_config[analysis_profile]["OPENAI_BASE_URL"] = new_url
+            
+    elif sub_action == "修改分析 Profile":
+        new_profile = get_input("新的分析 Profile (例如 LOCAL, DEEPSEEK)", default=analysis_profile)
+        if new_profile:
+            current_config["analysis_profile"] = new_profile.upper()
+
+    # 保存配置
+    try:
+        with open(AI_CONFIG_FILE, "w", encoding="utf-8") as f:
+            json.dump(current_config, f, indent=2, ensure_ascii=False)
+        console.print("\n[green]✅ AI 配置已成功保存到 ai_config.json！[/green]")
+        console.print("[dim]重启程序或下一次运行分析时生效[/dim]")
+    except Exception as e:
+        console.print(f"\n[red]❌ 保存失败：{str(e)}[/red]")
+    
+    console.print("\n[dim]按 Enter 键继续...[/dim]")
+    input()
+
+
 def simple_menu():
     """Fallback menu using standard input"""
     console.clear()
@@ -182,11 +262,12 @@ def simple_menu():
         console.print("3. Regenerate Summary")
         console.print("4. Export Articles")
         console.print("5. Feedly 配置")
-        console.print("6. Exit")
+        console.print("6. AI 配置")
+        console.print("7. Exit")
 
         choice = get_input("Select an option")
 
-        if choice == "6":
+        if choice == "7":
             console.print("[cyan]Goodbye![/cyan]")
             sys.exit()
         elif choice == "1":
@@ -199,6 +280,14 @@ def simple_menu():
             simple_export_flow()
         elif choice == "5":
             manage_feedly_config()
+            console.clear()
+            console.print(
+                Panel.fit(
+                    "Feedly AI Filter (Simple Mode)", style="bold cyan", subtitle="Basic Runner"
+                )
+            )
+        elif choice == "6":
+            manage_llm_config()
             console.clear()
             console.print(
                 Panel.fit(
@@ -599,7 +688,8 @@ def main_menu():
                 questionary.Choice("Analyze Articles", value="analyze"),
                 questionary.Choice("Regenerate Summary", value="summary"),
                 questionary.Choice("Export Articles", value="export"),
-                questionary.Choice("⚙️ Feedly 配置", value="config"),
+                questionary.Choice("Feedly 配置", value="config"),
+                questionary.Choice("AI 配置", value="ai_config"),
                 questionary.Choice("Exit", value="exit"),
             ],
             style=questionary.Style(
@@ -663,6 +753,16 @@ def main_menu():
             )
         elif action == "config":
             manage_feedly_config()
+            console.clear()
+            console.print(
+                Panel.fit(
+                    "Feedly AI Filter TUI",
+                    style="bold cyan",
+                    subtitle="Interactive Runner",
+                )
+            )
+        elif action == "ai_config":
+            manage_llm_config()
             console.clear()
             console.print(
                 Panel.fit(

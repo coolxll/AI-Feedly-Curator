@@ -4,11 +4,22 @@
 """
 
 import os
+import json
 import logging
 from dotenv import load_dotenv
 
 # 加载环境变量
 load_dotenv()
+
+# --- 动态用户配置加载 (支持 TUI 修改并持久化) ---
+USER_CONFIG_PATH = os.path.join(os.getcwd(), "ai_config.json")
+USER_DYNAMIC_CONFIG = {}
+if os.path.exists(USER_CONFIG_PATH):
+    try:
+        with open(USER_CONFIG_PATH, "r", encoding="utf-8") as f:
+            USER_DYNAMIC_CONFIG = json.load(f)
+    except Exception:
+        pass
 
 # === 用户配置区域 (方便IDE直接运行) ===
 PROJ_CONFIG = {
@@ -82,6 +93,11 @@ PROJ_CONFIG = {
 }
 # ==========================================
 
+# 把动态配置合并到 PROJ_CONFIG 中
+for key, val in USER_DYNAMIC_CONFIG.items():
+    if key in PROJ_CONFIG and not isinstance(val, dict):
+        PROJ_CONFIG[key] = val
+
 # 配置日志
 logger = logging.getLogger(__name__)
 
@@ -106,6 +122,7 @@ def get_config(key: str, default=None, profile: str = None):
     获取配置项，支持多环境配置切换。
 
     逻辑：
+    0. 优先从动态配置 (ai_config.json) 获取
     1. 如果指定了 profile 参数，优先使用该 profile
     2. 否则检查环境变量 ACTIVE_PROFILE
     3. 如果存在 profile，优先查找 {PROFILE}_{KEY} 的环境变量
@@ -119,17 +136,26 @@ def get_config(key: str, default=None, profile: str = None):
     Returns:
         配置值
     """
-    # 优先使用传入的 profile，否则从环境变量读取
-    active_profile = profile or os.getenv("ACTIVE_PROFILE")
-
+    # 0. 优先从动态配置 (ai_config.json) 获取
+    active_profile = profile or USER_DYNAMIC_CONFIG.get("analysis_profile") or os.getenv("ACTIVE_PROFILE")
+    
     if active_profile:
-        # 尝试查找带前缀的配置 (profile 已经是大写)
+        # A. 尝试从动态配置中获取 profile 特有的值 (例如 USER_DYNAMIC_CONFIG["LOCAL_QWEN"]["OPENAI_MODEL"])
+        profile_cfg = USER_DYNAMIC_CONFIG.get(active_profile, {})
+        if isinstance(profile_cfg, dict) and key in profile_cfg:
+            return profile_cfg[key]
+            
+        # B. 尝试查找带前缀的环境变量
         prefixed_key = f"{active_profile}_{key}"
         val = os.getenv(prefixed_key)
         if val is not None:
             return val
 
-    # 回退到默认配置
+    # 1. 尝试从动态配置的根部查找 (例如 USER_DYNAMIC_CONFIG["OPENAI_MODEL"])
+    if key in USER_DYNAMIC_CONFIG:
+        return USER_DYNAMIC_CONFIG[key]
+
+    # 2. 回退到默认环境变量
     return os.getenv(key, default)
 
 

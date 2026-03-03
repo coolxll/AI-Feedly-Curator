@@ -27,6 +27,7 @@ wheels/
 # Environment variables
 .env
 feedly_config.json
+ai_config.json
 
 
 # IDE
