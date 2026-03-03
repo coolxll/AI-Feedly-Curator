@@ -43,6 +43,7 @@ unread_news.json
 articles_summary.md
 rss-summary-*.md
 output/
+data/
 
 # Claude skills
 .claude/
