@@ -37,6 +37,11 @@
 
 ## Next
 
+- [ ] Gradually converge TUI onto the shared backend/service layer
+  - Move TUI orchestration away from direct script/module calls where practical
+  - Reuse `rss_analyzer/backend_service.py` capabilities as the common execution layer
+  - Target architecture: one backend, multiple clients (TUI / Chrome extension / future GUI / Skills)
+
 - [ ] Evaluate migrating local embedded `chroma_db/` to a Dockerized ChromaDB service
   - Decide whether this should replace embedded mode or coexist as an optional backend
   - Define service startup, persistence path, and client connection config
