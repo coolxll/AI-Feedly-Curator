@@ -65,27 +65,32 @@ python article_analyzer.py --refresh --limit 50 --mark-read
 python regenerate_summary.py
 ```
 
-### 4. Feedly Web UI AI 覆盖（Chrome 扩展 + Native Messaging）
+### 4. Feedly Web UI AI 覆盖（Chrome 扩展 + 本地 HTTP 服务）
 
-#### 4.1 Native Host 安装（一次性）
+#### 4.1 启动本地服务
 
-```powershell
-# 1) 修改 native_host/feedly_ai_overlay.json
-#    - path: Python 可执行路径
-#    - arguments: feedly_native_host.py 绝对路径
-#    - allowed_origins: 你的 Chrome 扩展 ID
+```bash
+# 使用 uv 运行（推荐）
+uv run python rss_backend_service.py --host 127.0.0.1 --port 8765
 
-# 2) 注册 native host
-powershell -ExecutionPolicy Bypass -File .\scripts\install_native_host.ps1
+# 或者直接运行
+python rss_backend_service.py --host 127.0.0.1 --port 8765
 ```
 
-可选：如需指定数据库路径，设置环境变量 `RSS_SCORES_DB` 指向 `rss_scores.db`。
+服务默认共享仓库根目录下的：
+- `rss_scores.db`
+- `chroma_db/`
+
+如需覆盖路径，可设置环境变量：
+- `RSS_SCORES_DB`
+- `RSS_VECTOR_DB_DIR`
 
 #### 4.2 加载扩展
 
 1. 打开 `chrome://extensions`，启用开发者模式
 2. 选择“加载已解压的扩展”，选择 `extension/` 目录
-3. 复制扩展 ID 并填入 `native_host/feedly_ai_overlay.json` 的 `allowed_origins`
+3. 打开扩展设置页，确认 `Server Base URL` 指向本地服务，例如 `http://127.0.0.1:8765`
+4. 点击 `Test Backend` 验证连通性
 
 #### 4.3 使用
 
@@ -94,6 +99,14 @@ powershell -ExecutionPolicy Bypass -File .\scripts\install_native_host.ps1
 - `https://cloud.feedly.com/*`
 
 列表与详情中会展示评分与摘要覆盖层。
+
+#### 4.4 架构说明
+
+- Chrome 扩展现在只负责 UI 注入、页面内容提取和交互展示
+- AI 分析、摘要生成、缓存和向量检索统一由本地 Python 服务处理
+- 这让 Chrome 扩展和本地 GUI/TUI/Streamlit 可以共享同一后端，而不是各自直连模型或宿主进程
+
+详细边界设计见 [docs/client-server-architecture.md](docs/client-server-architecture.md)。
 
 ## 命令行参数
 

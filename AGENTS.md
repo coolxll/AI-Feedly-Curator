@@ -10,16 +10,22 @@
 *   **Task-Scoped Model Config:** Configure separate models/providers for analysis and overall summary.
 *   **Reporting:** Generates daily/monthly Markdown summaries and archives analyzed data.
 *   **Pre-filtering:** Filters out low-quality or irrelevant content (ads, short posts) before LLM processing.
+*   **Local Service + Extension:** A local HTTP backend powers the Chrome Feedly overlay and can be shared by other local clients.
 
 ## Architecture & Key Files
 
 *   **`article_analyzer.py`**: The main CLI entry point. Orchestrates fetching, filtering, analyzing, and reporting.
+*   **`rss_backend_service.py`**: Local HTTP service entry point for the Chrome extension and other local clients.
 *   **`rss_analyzer/`**: Core package directory.
     *   `config.py`: Configuration management. Handles task-scoped model settings, environment variables, and scoring weights.
     *   `llm_analyzer.py`: Interface for LLM interactions (scoring and summarizing).
     *   `feedly_client.py`: Client for the Feedly API.
     *   `article_fetcher.py`: Fetches article content from URLs (using `trafilatura`).
-    *   `scoring.py`:  (Inferred) Logic for calculating scores.
+    *   `scoring.py`: Logic for calculating scores.
+    *   `backend_service.py`: Shared message dispatcher for service/native/local clients.
+    *   `http_service.py`: Thin HTTP wrapper exposing `/health` and `/api/message`.
+*   **`extension/`**: Chrome extension that injects scores/summaries into Feedly and talks to the local HTTP service.
+*   **`native_host/`**: Legacy native host adapter, now reduced to a thin stdio transport over the shared backend dispatcher.
 *   **`requirements.txt`**: Python dependencies (`requests`, `openai`, `trafilatura`, `beautifulsoup4`, etc.).
 *   **`.env`**: (User-created) Stores API keys and secrets.
 *   **`output/`**: Directory where analyzed JSON data and Markdown summaries are saved, organized by month.
@@ -69,6 +75,11 @@
     python regenerate_summary.py
     ```
 
+*   **Run Local Backend Service:**
+    ```bash
+    python rss_backend_service.py --host 127.0.0.1 --port 8765
+    ```
+
 ## Development Conventions
 
 *   **Configuration:** 
@@ -79,6 +90,7 @@
 *   **Testing:** `unittest` framework. Tests are located in `tests/`.
     *   Run all tests: `python -m unittest discover tests`
 *   **Output:** Analyzed data is saved as JSON, summaries as Markdown. Files are timestamped and archived.
+*   **Architecture:** Treat this repo as one product with multiple deployable clients. Shared logic belongs in `rss_analyzer/`; UI clients should stay thin and call the local service rather than duplicating AI logic.
 
 ## Key Configuration Concepts
 

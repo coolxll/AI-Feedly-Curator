@@ -8,30 +8,38 @@
       box-sizing: border-box;
     }
     body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      background: #f3f4f6;
+      font-family: "Segoe UI", "PingFang SC", sans-serif;
+      background: linear-gradient(180deg, #f3f4f6 0%, #e5e7eb 100%);
       margin: 0;
-      padding: 20px;
+      padding: 24px;
       min-width: 400px;
     }
     .container {
-      background: #fff;
-      border-radius: 12px;
-      padding: 24px;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-      max-width: 500px;
+      background: #ffffff;
+      border-radius: 14px;
+      padding: 28px;
+      box-shadow: 0 12px 32px rgba(15, 23, 42, 0.08);
+      max-width: 560px;
       margin: 0 auto;
     }
     h1 {
-      margin: 0 0 20px;
-      font-size: 20px;
-      color: #111827;
-      display: flex;
-      align-items: center;
-      gap: 8px;
+      margin: 0 0 8px;
+      font-size: 24px;
+      color: #0f172a;
     }
-    h1::before {
-      content: "🤖";
+    .lead {
+      margin: 0 0 24px;
+      color: #475569;
+      line-height: 1.6;
+      font-size: 14px;
+    }
+    .section-title {
+      font-size: 14px;
+      font-weight: 700;
+      color: #0f172a;
+      margin: 20px 0 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
     }
     .form-group {
       margin-bottom: 16px;
@@ -40,121 +48,108 @@
       display: block;
       font-weight: 600;
       margin-bottom: 6px;
-      color: #374151;
+      color: #1e293b;
       font-size: 14px;
     }
-    input[type="text"],
-    input[type="password"],
-    select {
+    input[type="text"] {
       width: 100%;
-      padding: 10px 12px;
-      border: 1px solid #d1d5db;
-      border-radius: 8px;
+      padding: 11px 12px;
+      border: 1px solid #cbd5e1;
+      border-radius: 10px;
       font-size: 14px;
       transition: border-color 0.2s, box-shadow 0.2s;
     }
-    input:focus,
-    select:focus {
+    input[type="text"]:focus {
       outline: none;
-      border-color: #8b5cf6;
-      box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.1);
+      border-color: #0f766e;
+      box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.12);
     }
     .hint {
       font-size: 12px;
-      color: #6b7280;
+      color: #64748b;
       margin-top: 4px;
+      line-height: 1.5;
     }
-    .btn {
-      background: #8b5cf6;
-      color: #fff;
-      border: none;
-      padding: 10px 20px;
-      border-radius: 8px;
-      font-size: 14px;
-      font-weight: 600;
-      cursor: pointer;
-      transition: background 0.2s;
-    }
-    .btn:hover {
-      background: #7c3aed;
-    }
-    .btn-secondary {
-      background: #6b7280;
-    }
-    .btn-secondary:hover {
-      background: #4b5563;
+    .callout {
+      margin-top: 18px;
+      padding: 14px 16px;
+      border-radius: 10px;
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      color: #334155;
+      font-size: 13px;
+      line-height: 1.6;
     }
     .btn-group {
       display: flex;
       gap: 10px;
-      margin-top: 20px;
+      margin-top: 24px;
+    }
+    .btn {
+      border: none;
+      border-radius: 10px;
+      padding: 11px 18px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: transform 0.15s ease, opacity 0.15s ease;
+    }
+    .btn:hover {
+      transform: translateY(-1px);
+    }
+    .btn-primary {
+      background: #0f766e;
+      color: #ffffff;
+    }
+    .btn-secondary {
+      background: #e2e8f0;
+      color: #0f172a;
     }
     .status {
       margin-top: 16px;
-      padding: 10px 12px;
-      border-radius: 8px;
+      padding: 11px 12px;
+      border-radius: 10px;
       font-size: 13px;
       display: none;
     }
     .status.success {
-      background: #d1fae5;
-      color: #065f46;
       display: block;
+      background: #ccfbf1;
+      color: #115e59;
     }
     .status.error {
+      display: block;
       background: #fee2e2;
       color: #991b1b;
-      display: block;
     }
-    .section-title {
-      font-size: 16px;
-      font-weight: 600;
-      color: #111827;
-      margin: 24px 0 12px;
-      padding-bottom: 8px;
-      border-bottom: 1px solid #e5e7eb;
-    }
-    .section-title:first-of-type {
-      margin-top: 0;
+    code {
+      font-family: "Cascadia Code", Consolas, monospace;
+      font-size: 12px;
     }
   </style>
 </head>
 <body>
   <div class="container">
-    <h1>Feedly AI Settings</h1>
+    <h1>Feedly AI Backend Settings</h1>
+    <p class="lead">扩展现在只连接本地后端服务，不再依赖 Chrome Native Messaging 和浏览器内 API Key 配置。</p>
 
-    <div class="section-title">Summary API Configuration</div>
+    <div class="section-title">Backend</div>
 
     <div class="form-group">
-      <label for="apiEndpoint">API Endpoint</label>
-      <input type="text" id="apiEndpoint" placeholder="https://api.openai.com/v1">
-      <div class="hint">OpenAI-compatible API endpoint (e.g., https://api.openai.com/v1)</div>
+      <label for="serverBaseUrl">Server Base URL</label>
+      <input type="text" id="serverBaseUrl" placeholder="http://127.0.0.1:8765">
+      <div class="hint">推荐本机回环地址，例如 <code>http://127.0.0.1:8765</code>。</div>
     </div>
 
-    <div class="form-group">
-      <label for="apiKey">API Key</label>
-      <input type="password" id="apiKey" placeholder="sk-...">
-      <div class="hint">Your API key (stored locally, never sent elsewhere)</div>
-    </div>
-
-    <div class="form-group">
-      <label for="model">Model</label>
-      <input type="text" id="model" placeholder="gpt-4o-mini">
-      <div class="hint">Model name (e.g., gpt-4o-mini, gpt-4o, claude-3-haiku)</div>
-    </div>
-
-    <div class="section-title">Summary Prompt</div>
-
-    <div class="form-group">
-      <label for="summaryPrompt">System Prompt</label>
-      <textarea id="summaryPrompt" rows="8" style="width:100%; padding:10px 12px; border:1px solid #d1d5db; border-radius:8px; font-size:13px; font-family:monospace; resize:vertical;"></textarea>
-      <div class="hint">Customize how the AI summarizes articles</div>
+    <div class="callout">
+      先启动项目里的本地服务，再加载扩展。
+      推荐命令：<code>uv run python rss_backend_service.py --host 127.0.0.1 --port 8765</code>
     </div>
 
     <div class="btn-group">
-      <button class="btn" id="saveBtn">Save Settings</button>
-      <button class="btn btn-secondary" id="testBtn">Test API</button>
-      <button class="btn btn-secondary" id="resetBtn">Reset to Default</button>
+      <button class="btn btn-primary" id="saveBtn">Save Settings</button>
+      <button class="btn btn-secondary" id="testBtn">Test Backend</button>
+      <button class="btn btn-secondary" id="resetBtn">Reset</button>
     </div>
 
     <div class="status" id="status"></div>
