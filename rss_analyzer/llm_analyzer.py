@@ -121,7 +121,7 @@ def analyze_articles_with_llm_batch(articles: list[dict]) -> list[dict]:
         return fallback
 
 
-def summarize_single_article(text: str, task: str = "analysis") -> str:
+def summarize_single_article(text: str, task: str = "summary") -> str:
     """
     Summarize a single article using a task-scoped model configuration.
 

@@ -221,7 +221,13 @@ def _handle_summarize_article(msg: dict) -> dict:
     if not final_content:
         return {"error": "no_content", "message": "Could not retrieve article content"}
 
-    summary = summarize_single_article(final_content)
+    summary = summarize_single_article(final_content, task="summary")
+
+    if not summary or summary.startswith("Summarization failed:"):
+        return {
+            "error": "summary_failed",
+            "message": summary or "Summarization failed",
+        }
 
     cached = get_cached_score(article_id)
     if cached:

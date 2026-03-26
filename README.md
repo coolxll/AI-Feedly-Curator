@@ -133,24 +133,11 @@ ANALYSIS_OPENAI_MODEL=qwen-flash
 SUMMARY_OPENAI_MODEL=deepseek-v3.2
 ```
 
-### 可选的 `ai_config.json`
-
-也可以在仓库根目录放一个本地配置文件：
-
-```json
-{
-  "ANALYSIS_OPENAI_MODEL": "qwen3-coder-plus",
-  "SUMMARY_OPENAI_MODEL": "deepseek-v3.2"
-}
-```
-
 ### 配置优先级
 
-1. `ai_config.json` 中的 task model，例如 `ANALYSIS_OPENAI_MODEL`
-2. `ai_config.json` 中的普通键，例如 `OPENAI_MODEL`
-3. 环境变量中的 task model，例如 `SUMMARY_OPENAI_MODEL`
-4. 普通环境变量，例如 `OPENAI_MODEL`
-5. 通用 `OPENAI_API_KEY` / `OPENAI_BASE_URL`
+1. 环境变量中的 task model，例如 `SUMMARY_OPENAI_MODEL`
+2. 普通环境变量，例如 `OPENAI_MODEL`
+3. 通用 `OPENAI_API_KEY` / `OPENAI_BASE_URL`
 
 ## 评分系统
 

@@ -6,11 +6,9 @@
 - ANALYSIS_OPENAI_MODEL / SUMMARY_OPENAI_MODEL 按任务切模型
 """
 
-import json
 import logging
 import os
 from dataclasses import dataclass
-from pathlib import Path
 
 from dotenv import load_dotenv
 
@@ -19,8 +17,6 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 OPENAI_DEFAULT_BASE_URL = "https://api.openai.com/v1"
-REPO_ROOT = Path(__file__).resolve().parents[1]
-AI_CONFIG_PATH = REPO_ROOT / "ai_config.json"
 
 
 @dataclass(frozen=True)
@@ -28,26 +24,6 @@ class OpenAIConfig:
     api_key: str | None
     base_url: str
     model: str
-
-
-def load_user_dynamic_config() -> dict:
-    """从仓库根目录加载可选的 ai_config.json。"""
-    if not AI_CONFIG_PATH.exists():
-        return {}
-
-    try:
-        with AI_CONFIG_PATH.open("r", encoding="utf-8") as handle:
-            data = json.load(handle)
-        if isinstance(data, dict):
-            return data
-        logger.warning("ai_config.json is not a JSON object, ignoring it")
-    except Exception as exc:
-        logger.warning(f"Failed to load ai_config.json: {exc}")
-    return {}
-
-
-USER_DYNAMIC_CONFIG = load_user_dynamic_config()
-
 
 PROJ_CONFIG = {
     "input_file": "unread_news.json",
@@ -126,20 +102,10 @@ def get_config(key: str, default=None, task: str | None = None):
     获取配置项。
 
     优先级：
-    1. ai_config.json 中的 TASK_KEY，例如 ANALYSIS_OPENAI_MODEL
-    2. ai_config.json 中的 KEY
-    3. 环境变量中的 TASK_KEY
-    4. 环境变量中的 KEY
-    5. default
+    1. 环境变量中的 TASK_KEY
+    2. 环境变量中的 KEY
+    3. default
     """
-    if task:
-        task_key = f"{task.upper()}_{key}"
-        if task_key in USER_DYNAMIC_CONFIG:
-            return USER_DYNAMIC_CONFIG[task_key]
-
-    if key in USER_DYNAMIC_CONFIG:
-        return USER_DYNAMIC_CONFIG[key]
-
     if task:
         val = os.getenv(f"{task.upper()}_{key}")
         if val is not None:

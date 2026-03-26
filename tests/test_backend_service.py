@@ -57,10 +57,37 @@ class TestBackendService(unittest.TestCase):
         )
 
         self.assertEqual(response["summary"], "summary body")
+        mock_summarize.assert_called_once_with("Long enough content" * 20, task="summary")
         mock_save.assert_called_once()
         _, _, saved_data = mock_save.call_args.args
         self.assertEqual(saved_data["summary"], "summary body")
         self.assertEqual(saved_data["url"], "https://example.com/article")
+
+    @patch("rss_analyzer.backend_service.get_cached_score")
+    @patch("rss_analyzer.backend_service.save_cached_score")
+    @patch("rss_analyzer.backend_service.summarize_single_article")
+    def test_summarize_article_returns_error_without_caching_on_failure(
+        self, mock_summarize, mock_save, mock_cached
+    ):
+        mock_summarize.return_value = "Summarization failed: invalid model"
+        mock_cached.return_value = {
+            "score": 3.9,
+            "data": {"title": "Existing title"},
+            "updated_at": "2026-03-26T10:00:00",
+        }
+
+        response = handle_message(
+            {
+                "type": "summarize_article",
+                "id": "article-3",
+                "title": "Title",
+                "content": "Long enough content" * 20,
+            }
+        )
+
+        self.assertEqual(response["error"], "summary_failed")
+        self.assertIn("invalid model", response["message"])
+        mock_save.assert_not_called()
 
     def test_unknown_message_type(self):
         response = handle_message({"type": "does_not_exist"})

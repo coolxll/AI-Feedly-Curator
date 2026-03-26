@@ -84,7 +84,7 @@
 
 *   **Configuration:** 
     *   Use `PROJ_CONFIG` in `rss_analyzer/config.py` for defaults and scoring logic.
-    *   Use environment variables (via `.env`) or `ai_config.json` for shared provider settings plus task-scoped model settings.
+    *   Use environment variables (via `.env`) for shared provider settings plus task-scoped model settings.
     *   Recommended pattern: global `OPENAI_API_KEY` / `OPENAI_BASE_URL`, task model overrides via `ANALYSIS_OPENAI_MODEL` and `SUMMARY_OPENAI_MODEL`.
 *   **Logging:** Uses standard Python `logging`. Debug mode can be enabled via `--debug` flag or `DEBUG` env var.
 *   **Testing:** `unittest` framework. Tests are located in `tests/`.
