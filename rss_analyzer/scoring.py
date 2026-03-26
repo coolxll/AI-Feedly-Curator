@@ -13,7 +13,7 @@ from datetime import datetime
 
 from openai import OpenAI, RateLimitError
 
-from .config import PROJ_CONFIG, get_config, log_debug
+from .config import PROJ_CONFIG, get_openai_task_config, log_debug
 
 logger = logging.getLogger(__name__)
 
@@ -488,24 +488,21 @@ def score_article(title: str, summary: str, content: str) -> Dict[str, Any]:
     对文章进行多维度评分
     """
     try:
-        analysis_profile = PROJ_CONFIG.get("analysis_profile")
-
-        base_url = get_config("OPENAI_BASE_URL", profile=analysis_profile)
-        logger.info(f"Single Scoring - Connecting to: {base_url}")
+        openai_config = get_openai_task_config("analysis", default_model="gpt-4o-mini")
+        logger.info(f"Single Scoring - Connecting to: {openai_config.base_url}")
 
         client = OpenAI(
-            api_key=get_config("OPENAI_API_KEY", profile=analysis_profile),
-            base_url=base_url,
+            api_key=openai_config.api_key,
+            base_url=openai_config.base_url,
         )
 
-        model = get_config("OPENAI_MODEL", "gpt-4o-mini", profile=analysis_profile)
-        logger.info(f"Single Scoring - Using Model: {model}")
+        logger.info(f"Single Scoring - Using Model: {openai_config.model}")
 
         prompt = build_scoring_prompt(title, summary, content)
         log_debug("Scoring Prompt", prompt)
 
         response = client.chat.completions.create(
-            model=model,
+            model=openai_config.model,
             messages=[{"role": "user", "content": prompt}],
             temperature=0.2,  # 稍微降低一点，更稳定
             max_tokens=16000,  # 增加 Token 上限以容纳 Analysis
@@ -521,7 +518,7 @@ def score_article(title: str, summary: str, content: str) -> Dict[str, Any]:
 
         # 补全 score 字段，兼容旧的 article_analyzer 调用
         result["score"] = result["overall_score"]
-        result["model"] = model
+        result["model"] = openai_config.model
 
         return result
 
@@ -659,15 +656,13 @@ def score_articles_batch(
     articles: list[dict], max_retries: int = 3
 ) -> list[Dict[str, Any]] | None:
     """对多篇文章进行批量评分，支持重试和部分恢复，失败时返回 None。"""
-    analysis_profile = PROJ_CONFIG.get("analysis_profile")
-
     try:
-        base_url = get_config("OPENAI_BASE_URL", profile=analysis_profile)
-        logger.info(f"Batch Scoring - Connecting to: {base_url}")
+        openai_config = get_openai_task_config("analysis", default_model="gpt-4o-mini")
+        logger.info(f"Batch Scoring - Connecting to: {openai_config.base_url}")
 
         client = OpenAI(
-            api_key=get_config("OPENAI_API_KEY", profile=analysis_profile),
-            base_url=base_url,
+            api_key=openai_config.api_key,
+            base_url=openai_config.base_url,
         )
     except Exception as e:
         logger.error(f"Client init failed: {e}")
@@ -679,12 +674,10 @@ def score_articles_batch(
     for attempt in range(max_retries):
         try:
             logger.info(f"Batch scoring attempt {attempt + 1}/{max_retries}...")
-
-            model = get_config("OPENAI_MODEL", "gpt-4o-mini", profile=analysis_profile)
-            logger.info(f"Batch Scoring - Using Model: {model}")
+            logger.info(f"Batch Scoring - Using Model: {openai_config.model}")
 
             response = client.chat.completions.create(
-                model=model,
+                model=openai_config.model,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.2,
                 max_tokens=16000,  # Explicitly set high limit for Gemini
@@ -707,7 +700,7 @@ def score_articles_batch(
                 # 为所有成功的结果添加模型信息
                 for res in batch_results:
                     if res:
-                        res["model"] = model
+                        res["model"] = openai_config.model
 
                 if not missing_indices:
                     return batch_results  # 完美成功
@@ -766,3 +759,7 @@ def score_articles_batch(
 
     logger.error("All batch scoring attempts failed.")
     return None
+
+
+
+

@@ -7,7 +7,7 @@
 **Key Features:**
 *   **Feedly Integration:** Automatically fetches unread articles.
 *   **AI Analysis:** Scores articles based on relevance, informativeness, depth, etc., using customizable personas.
-*   **Multi-Profile Support:** Switch between different LLM providers (e.g., Local Qwen, DeepSeek, Aliyun) via configuration.
+*   **Task-Scoped Model Config:** Configure separate models/providers for analysis and overall summary.
 *   **Reporting:** Generates daily/monthly Markdown summaries and archives analyzed data.
 *   **Pre-filtering:** Filters out low-quality or irrelevant content (ads, short posts) before LLM processing.
 
@@ -15,7 +15,7 @@
 
 *   **`article_analyzer.py`**: The main CLI entry point. Orchestrates fetching, filtering, analyzing, and reporting.
 *   **`rss_analyzer/`**: Core package directory.
-    *   `config.py`: Configuration management. Handles environment variables, profiles, and scoring weights.
+    *   `config.py`: Configuration management. Handles task-scoped model settings, environment variables, and scoring weights.
     *   `llm_analyzer.py`: Interface for LLM interactions (scoring and summarizing).
     *   `feedly_client.py`: Client for the Feedly API.
     *   `article_fetcher.py`: Fetches article content from URLs (using `trafilatura`).
@@ -42,7 +42,7 @@
 2.  **Configuration:**
     *   Copy `.env.example` to `.env`.
     *   Fill in the required API keys (Feedly, OpenAI/LLM providers).
-    *   Define profiles in `.env` (e.g., `DEEPSEEK_OPENAI_API_KEY`, `LOCAL_QWEN_OPENAI_BASE_URL`).
+    *   Define task-scoped keys in `.env` (e.g., `ANALYSIS_OPENAI_MODEL`, `SUMMARY_OPENAI_BASE_URL`).
 
 ### Usage Commands
 
@@ -51,7 +51,7 @@
     python article_analyzer.py --refresh
     ```
     *   Fetches latest unread articles from Feedly.
-    *   Analyzes them using the configured LLM profile.
+    *   Analyzes them using the configured task-scoped LLM settings.
     *   Generates a report.
 
 *   **Analyze Local File:**
@@ -72,9 +72,9 @@
 ## Development Conventions
 
 *   **Configuration:** 
-    *   Use `PROJ_CONFIG` in `rss_analyzer/config.py` for defaults and logic.
-    *   Use environment variables (via `.env`) for secrets and profile-specific overrides.
-    *   Profile naming convention: Uppercase (e.g., `DEEPSEEK`, `LOCAL_QWEN`).
+    *   Use `PROJ_CONFIG` in `rss_analyzer/config.py` for defaults and scoring logic.
+    *   Use environment variables (via `.env`) or `ai_config.json` for task-scoped model settings.
+    *   Task naming convention: uppercase prefixes such as `ANALYSIS_OPENAI_MODEL` and `SUMMARY_OPENAI_MODEL`.
 *   **Logging:** Uses standard Python `logging`. Debug mode can be enabled via `--debug` flag or `DEBUG` env var.
 *   **Testing:** `unittest` framework. Tests are located in `tests/`.
     *   Run all tests: `python -m unittest discover tests`
@@ -82,6 +82,9 @@
 
 ## Key Configuration Concepts
 
-*   **Profiles:** Allow switching between different LLM backends for different tasks (e.g., a cheaper/faster model for individual article scoring, and a stronger model for the overall summary).
-    *   Configured in `PROJ_CONFIG["analysis_profile"]` and `PROJ_CONFIG["summary_profile"]`.
+*   **Task Config:** Use task prefixes to route different LLM backends for different jobs (e.g., a cheaper analysis model and a stronger summary model).
+    *   Configured via `ANALYSIS_*` / `SUMMARY_*` environment variables or `ai_config.json`.
 *   **Scoring Persona:** A text prompt in `config.py` that defines the "personality" and criteria the LLM uses to evaluate articles.
+
+
+

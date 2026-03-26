@@ -80,7 +80,7 @@ class TestScoring(unittest.TestCase):
     @patch("rss_analyzer.scoring.OpenAI")
     @patch(
         "rss_analyzer.scoring.PROJ_CONFIG",
-        {"analysis_profile": None, "scoring_persona": "", "scoring_weights": {}},
+        {"scoring_persona": "", "scoring_weights": {}},
     )
     def test_score_article_success(self, mock_openai_class):
         """测试成功评分"""
@@ -116,3 +116,4 @@ class TestScoring(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

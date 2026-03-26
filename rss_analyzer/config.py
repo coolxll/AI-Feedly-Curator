@@ -1,31 +1,62 @@
 """
 配置管理模块
-支持多环境配置切换和Profile管理
+支持按任务读取配置。
 """
 
-import os
+import json
 import logging
+import os
+from dataclasses import dataclass
+from pathlib import Path
+
 from dotenv import load_dotenv
 
-# 加载环境变量
 load_dotenv()
 
-# === 用户配置区域 (方便IDE直接运行) ===
+logger = logging.getLogger(__name__)
+
+OPENAI_DEFAULT_BASE_URL = "https://api.openai.com/v1"
+REPO_ROOT = Path(__file__).resolve().parents[1]
+AI_CONFIG_PATH = REPO_ROOT / "ai_config.json"
+
+
+@dataclass(frozen=True)
+class OpenAIConfig:
+    api_key: str | None
+    base_url: str
+    model: str
+
+
+def load_user_dynamic_config() -> dict:
+    """从仓库根目录加载可选的 ai_config.json。"""
+    if not AI_CONFIG_PATH.exists():
+        return {}
+
+    try:
+        with AI_CONFIG_PATH.open("r", encoding="utf-8") as handle:
+            data = json.load(handle)
+        if isinstance(data, dict):
+            return data
+        logger.warning("ai_config.json is not a JSON object, ignoring it")
+    except Exception as exc:
+        logger.warning(f"Failed to load ai_config.json: {exc}")
+    return {}
+
+
+USER_DYNAMIC_CONFIG = load_user_dynamic_config()
+
+
 PROJ_CONFIG = {
     "input_file": "unread_news.json",
     "limit": 100,
-    "mark_read": False,  # 是否默认标记已读
-    "debug": False,  # 是否默认开启Debug
-    "refresh": True,  # 是否默认刷新
-    "proxy": "127.0.0.1:7890",  # 代理服务器
-    "batch_scoring": True,  # 是否启用分析批量评分
-    "batch_size": 10,  # 单次 LLM 评分的文章数
-    "max_workers": 3,  # 批量评分的并发线程数
-    # API Profile 配置 (指定使用哪个 profile，使用大写)
-    # 可选值: "LOCAL_QWEN", "ALIYUN", "DEEPSEEK", None (使用默认)
-    "analysis_profile": "LOCAL_QWEN",  # 文章分析使用的 profile
-    "summary_profile": "DEEPSEEK",  # 总结生成使用的 profile
-    # 评分偏好设定 (Persona)
+    "mark_read": False,
+    "debug": False,
+    "refresh": True,
+    "proxy": "127.0.0.1:7890",
+    "batch_scoring": True,
+    "batch_size": 10,
+    "max_workers": 3,
+    "enable_vector_store": True,
     "scoring_persona": """
 你是一名关注广泛的资深程序员。
 你的核心身份是：
@@ -37,19 +68,14 @@ PROJ_CONFIG = {
 
 打分时，请根据**这三个维度的综合价值**来评估。如果文章主要讲技术，按技术标准评；如果讲投资或政治，按其深度和价值评。
 """,
-    # Pre-filtering (前置过滤)
     "filter_keywords": ["推广", "广告", "特惠", "中奖", "开奖", "通知", "招聘"],
-    "filter_min_length": 200,  # 正文最少字符数
-    "filter_url_patterns": [
-        "36kr.com/newsflashes/"
-    ],  # URL过滤模式（包含这些模式的URL会被跳过）
-    # Dynamic Weighting (动态权重 - 百分比形式)
-    # 格式: {文章类型: {维度: 权重百分比}}（总和为1.0）
+    "filter_min_length": 200,
+    "filter_url_patterns": ["36kr.com/newsflashes/"],
     "scoring_weights": {
         "news": {
-            "relevance": 0.40,  # 相关性最重要
-            "informativeness_accuracy": 0.35,  # 信息准确性次之
-            "depth_opinion": 0.05,  # 资讯不需要深度！大幅降低
+            "relevance": 0.40,
+            "informativeness_accuracy": 0.35,
+            "depth_opinion": 0.05,
             "readability": 0.15,
             "non_redundancy": 0.05,
         },
@@ -57,13 +83,13 @@ PROJ_CONFIG = {
             "relevance": 0.35,
             "informativeness_accuracy": 0.25,
             "depth_opinion": 0.10,
-            "readability": 0.20,  # 教程需要清晰的步骤
-            "non_redundancy": 0.10,  # 实用性 > 原创性
+            "readability": 0.20,
+            "non_redundancy": 0.10,
         },
         "opinion": {
             "relevance": 0.30,
             "informativeness_accuracy": 0.20,
-            "depth_opinion": 0.35,  # 观点文章核心看深度
+            "depth_opinion": 0.35,
             "readability": 0.10,
             "non_redundancy": 0.05,
         },
@@ -75,14 +101,8 @@ PROJ_CONFIG = {
             "non_redundancy": 0.05,
         },
     },
-    # 相关性熔断阈值（一票否决机制）
-    # 如果相关性分数低于此阈值，总分将被限制在此阈值以下
     "relevance_threshold": 2.5,
 }
-# ==========================================
-
-# 配置日志
-logger = logging.getLogger(__name__)
 
 
 def setup_logging(debug_mode: bool = False) -> None:
@@ -93,43 +113,45 @@ def setup_logging(debug_mode: bool = False) -> None:
         format="%(asctime)s - %(levelname)s - %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
-
-    # 将HTTP请求日志设置为WARNING级别，避免干扰
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("urllib3").setLevel(logging.WARNING)
     logging.getLogger("openai").setLevel(logging.WARNING)
 
 
-def get_config(key: str, default=None, profile: str = None):
+def get_config(key: str, default=None, task: str | None = None):
     """
-    获取配置项，支持多环境配置切换。
+    获取配置项。
 
-    逻辑：
-    1. 如果指定了 profile 参数，优先使用该 profile
-    2. 否则检查环境变量 ACTIVE_PROFILE
-    3. 如果存在 profile，优先查找 {PROFILE}_{KEY} 的环境变量
-    4. 如果未找到 profile 特有的配置，回退到默认 KEY
-
-    Args:
-        key: 配置键名
-        default: 默认值
-        profile: 指定使用的 profile (例如: "LOCAL_QWEN", "ALIYUN")
-
-    Returns:
-        配置值
+    优先级：
+    1. ai_config.json 中的 TASK_KEY，例如 ANALYSIS_OPENAI_MODEL
+    2. ai_config.json 中的 KEY
+    3. 环境变量中的 TASK_KEY
+    4. 环境变量中的 KEY
+    5. default
     """
-    # 优先使用传入的 profile，否则从环境变量读取
-    active_profile = profile or os.getenv("ACTIVE_PROFILE")
+    if task:
+        task_key = f"{task.upper()}_{key}"
+        if task_key in USER_DYNAMIC_CONFIG:
+            return USER_DYNAMIC_CONFIG[task_key]
 
-    if active_profile:
-        # 尝试查找带前缀的配置 (profile 已经是大写)
-        prefixed_key = f"{active_profile}_{key}"
-        val = os.getenv(prefixed_key)
+    if key in USER_DYNAMIC_CONFIG:
+        return USER_DYNAMIC_CONFIG[key]
+
+    if task:
+        val = os.getenv(f"{task.upper()}_{key}")
         if val is not None:
             return val
 
-    # 回退到默认配置
     return os.getenv(key, default)
+
+
+def get_openai_task_config(task: str, default_model: str) -> OpenAIConfig:
+    """解析某个任务使用的 OpenAI 兼容配置。"""
+    return OpenAIConfig(
+        api_key=get_config("OPENAI_API_KEY", task=task),
+        base_url=get_config("OPENAI_BASE_URL", OPENAI_DEFAULT_BASE_URL, task=task),
+        model=get_config("OPENAI_MODEL", default_model, task=task),
+    )
 
 
 def log_debug(title: str, content: str) -> None:
