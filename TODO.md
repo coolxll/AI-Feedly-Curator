@@ -3,7 +3,7 @@
 ## Current Branch
 
 - `feature/extension-client-server`
-- Branch status: ahead of `origin/feature/extension-client-server` by 1 commit
+- Branch status: synced with `origin/feature/extension-client-server`
 
 ## Done
 
@@ -17,27 +17,11 @@
   - `EMBEDDING_BASE_URL`
   - `EMBEDDING_MODEL`
 - [x] Added embedding fingerprint check for vector store rebuild warnings
-- [x] Added tests for embedding config and fingerprint behavior
-- [x] Added an explicit `rebuild_vector_store.py` command to rebuild Chroma from cached SQLite data
-
-## In Progress
-
-- [ ] Commit and/or push the follow-up chromadb environment guidance change
-  - Current uncommitted files:
-    - `README.md`
-    - `rss_analyzer/vector_store.py`
-  - Goal:
-    - make runtime error message explicitly point to `uv run python ...` or project `.venv`
-    - document that global Python may have broken `chromadb` / `opentelemetry` dependency mix
-
-## Next
-
-- [ ] Decide whether to commit `COVERAGE.md` relocation as a separate commit
-  - Current workspace state:
-    - delete `COVERAGE.md`
-    - add `docs/COVERAGE.md`
-
-- [ ] Push current branch to remote after the remaining local changes are committed
+- [x] Added explicit `rebuild_vector_store.py` command to rebuild Chroma from cached SQLite data
+- [x] Clarified chromadb runtime guidance:
+  - prefer `uv run python ...` or project `.venv`
+  - avoid relying on polluted global Python packages
+- [x] Moved `COVERAGE.md` under `docs/`
 
 ## Environment Notes
 
@@ -49,11 +33,16 @@
   - `uv run python -c "import chromadb"` succeeds
 - Recommended command pattern:
   - `uv run python rss_backend_service.py --host 127.0.0.1 --port 8765`
+  - `uv run python rebuild_vector_store.py`
 
-## Later
+## Next
+
+- [ ] Evaluate migrating local embedded `chroma_db/` to a Dockerized ChromaDB service
+  - Decide whether this should replace embedded mode or coexist as an optional backend
+  - Define service startup, persistence path, and client connection config
+
+- [ ] Revisit larger repo layout only if needed later (`apps/`, `clients/`, etc.)
+
+## Operational Notes
 
 - [ ] If embedding model/provider changes, rebuild `chroma_db/`
-- [ ] Evaluate migrating local embedded `chroma_db/` to a Dockerized ChromaDB service
-  - Clarify whether this should replace embedded mode or coexist as an optional backend
-  - If adopted, define service startup, persistence path, and client connection config
-- [ ] Revisit larger repo layout only if needed later (`apps/`, `clients/`, etc.)
