@@ -3,6 +3,7 @@ import json
 import os
 import logging
 from datetime import datetime
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -130,6 +131,88 @@ def get_cached_score(article_id: str) -> dict | None:
     return None
 
 
+def iter_cached_scores() -> list[dict[str, Any]]:
+    """
+    Return all cached article scores with normalized data payloads.
+    """
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        c.execute(
+            """
+            SELECT article_id, score, data, title, url, updated_at
+            FROM article_scores
+            ORDER BY updated_at DESC
+            """
+        )
+        rows = c.fetchall()
+        conn.close()
+
+        items = []
+        for article_id, score, data_json, title, url, updated_at in rows:
+            try:
+                data = json.loads(data_json) if data_json else {}
+            except Exception:
+                data = {}
+
+            if title and not data.get("title"):
+                data["title"] = title
+            if url and not data.get("url"):
+                data["url"] = url
+
+            if hasattr(updated_at, "isoformat"):
+                updated_at = updated_at.isoformat()
+
+            items.append(
+                {
+                    "article_id": article_id,
+                    "score": score,
+                    "data": data,
+                    "updated_at": updated_at,
+                }
+            )
+
+        return items
+    except Exception as e:
+        logger.error(f"Cache list error: {e}")
+        return []
+
+
+def build_vector_store_payload(
+    article_id: str, score: float, data: dict, updated_at: str | None = None
+) -> dict[str, Any] | None:
+    """
+    Build a normalized vector-store payload from cached article data.
+    """
+    title = data.get("title", "")
+    url = data.get("url", "")
+    text_content = data.get("summary") or data.get("content") or ""
+
+    parts = []
+    if title:
+        parts.append(f"Title: {title}")
+    if text_content:
+        parts.append(f"Content: {text_content}")
+
+    document_text = "\n".join(parts).strip()
+    if not document_text:
+        return None
+
+    metadata = {
+        "score": score,
+        "title": title[:100] if title else "Untitled",
+        "updated_at": updated_at or datetime.now().isoformat(),
+    }
+    if url:
+        metadata["url"] = url
+
+    return {
+        "article_id": article_id,
+        "document_text": document_text,
+        "metadata": metadata,
+    }
+
+
 def save_cached_score(article_id: str, score: float, data: dict):
     if not article_id:
         return
@@ -158,40 +241,17 @@ def save_cached_score(article_id: str, score: float, data: dict):
         conn.close()
 
         # 2. Save to Vector Store (ChromaDB)
-        # Only save if we have meaningful text (summary or content)
         try:
             # Local import to avoid circular dependency if cache is imported early
             from rss_analyzer.vector_store import vector_store
-
-            # Double check metadata if they are missing but might be in the row
-            # (Though in this specific function we already have them from data.get)
-            final_title = title
-            final_url = url
-
-            text_content = data.get("summary") or data.get("content") or ""
-
-            # Construct a meaningful document for embedding
-            # Prefer: Title + Summary. If no summary, Title + Content snippet.
-            document_text = ""
-            if final_title:
-                document_text += f"Title: {final_title}\n"
-            if text_content:
-                document_text += f"Content: {text_content}"
-
-            if document_text.strip():
-                # Prepare metadata
-                metadata = {
-                    "score": score,
-                    "title": final_title[:100] if final_title else "Untitled",
-                    "updated_at": datetime.now().isoformat(),
-                }
-
-                # Add URL if available
-                if final_url:
-                    metadata["url"] = final_url
-
+            payload = build_vector_store_payload(article_id, score, data)
+            if payload:
                 # Async-like: don't let vector store failure block main flow
-                vector_store.add_article(article_id, document_text, metadata)
+                vector_store.add_article(
+                    payload["article_id"],
+                    payload["document_text"],
+                    payload["metadata"],
+                )
                 logger.debug(f"Saved vector embedding for {article_id}")
 
         except Exception as ve:

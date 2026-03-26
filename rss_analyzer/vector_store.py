@@ -194,6 +194,21 @@ class ChromaVectorStore:
         )
         self._write_embedding_fingerprint(current)
 
+    def refresh_embedding_fingerprint(self) -> bool:
+        """
+        Re-check fingerprint metadata against the current embedding config.
+        """
+        if not self.collection:
+            logger.error("Cannot refresh embedding fingerprint: vector store unavailable")
+            return False
+
+        try:
+            self._ensure_embedding_fingerprint(DashScopeEmbeddingFunction())
+            return True
+        except Exception as e:
+            logger.error(f"Failed to refresh embedding fingerprint: {e}")
+            return False
+
     def add_article(self, article_id: str, text: str, metadata: dict = None) -> bool:
         """
         Add or update an article in the vector store.

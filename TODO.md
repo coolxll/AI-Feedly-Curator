@@ -18,6 +18,7 @@
   - `EMBEDDING_MODEL`
 - [x] Added embedding fingerprint check for vector store rebuild warnings
 - [x] Added tests for embedding config and fingerprint behavior
+- [x] Added an explicit `rebuild_vector_store.py` command to rebuild Chroma from cached SQLite data
 
 ## In Progress
 
@@ -52,5 +53,7 @@
 ## Later
 
 - [ ] If embedding model/provider changes, rebuild `chroma_db/`
-- [ ] Optionally add an explicit rebuild command for vector DB instead of manual cleanup
+- [ ] Evaluate migrating local embedded `chroma_db/` to a Dockerized ChromaDB service
+  - Clarify whether this should replace embedded mode or coexist as an optional backend
+  - If adopted, define service startup, persistence path, and client connection config
 - [ ] Revisit larger repo layout only if needed later (`apps/`, `clients/`, etc.)

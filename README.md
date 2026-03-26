@@ -64,6 +64,9 @@ python article_analyzer.py --refresh --limit 50 --mark-read
 
 # 重新生成总体摘要（基于已分析的文章，不重新调用 API 评分）
 python regenerate_summary.py
+
+# 从 SQLite 缓存重建本地向量库
+python rebuild_vector_store.py
 ```
 
 ### 4. Feedly Web UI AI 覆盖（Chrome 扩展 + 本地 HTTP 服务）
@@ -154,6 +157,24 @@ EMBEDDING_MODEL=text-embedding-v3
 - 推荐显式配置 `EMBEDDING_API_KEY` / `EMBEDDING_BASE_URL` / `EMBEDDING_MODEL`
 - 若未显式配置，embedding 仍会兼容已有 DashScope / Aliyun 环境变量，并默认使用 `text-embedding-v3`
 - `chroma_db/` 下会记录 embedding 指纹；若你改了 embedding base URL 或 model，服务会警告需要重建向量库
+
+### 重建向量库
+
+当以下情况出现时，建议重建本地向量库：
+- 你切换了 `EMBEDDING_MODEL`
+- 你切换了 `EMBEDDING_BASE_URL` 或 embedding provider
+- 你怀疑历史向量和当前缓存数据不一致
+
+可直接运行：
+
+```bash
+uv run python rebuild_vector_store.py
+```
+
+该命令会：
+- 清空当前 Chroma collection
+- 用当前 embedding 配置刷新指纹
+- 从 `rss_scores.db` 中的缓存文章重新写入向量
 
 ## 评分系统
 

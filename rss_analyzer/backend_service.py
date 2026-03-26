@@ -13,7 +13,12 @@ os.environ.setdefault("RSS_SCORES_DB", str(PROJECT_ROOT / "rss_scores.db"))
 os.environ.setdefault("RSS_VECTOR_DB_DIR", str(PROJECT_ROOT / "chroma_db"))
 
 from rss_analyzer.article_fetcher import fetch_article_content
-from rss_analyzer.cache import get_cached_score, save_cached_score
+from rss_analyzer.cache import (
+    build_vector_store_payload,
+    get_cached_score,
+    iter_cached_scores,
+    save_cached_score,
+)
 from rss_analyzer.llm_analyzer import (
     analyze_article_with_llm,
     analyze_articles_with_llm_batch,
@@ -334,6 +339,65 @@ def _handle_clear_vector_store(_: dict) -> dict:
         return {"error": "clear_failed", "message": str(exc)}
 
 
+def rebuild_vector_store() -> dict:
+    vector_store = get_vector_store()
+    if not vector_store or not vector_store.collection:
+        return {
+            "error": "vector_store_unavailable",
+            "message": "Vector store is not available in the current runtime.",
+        }
+
+    cached_items = iter_cached_scores()
+    cleared = vector_store.clear_collection()
+    if not cleared:
+        return {
+            "error": "clear_failed",
+            "message": "Failed to clear vector store before rebuild.",
+        }
+
+    vector_store.refresh_embedding_fingerprint()
+
+    rebuilt_count = 0
+    skipped_count = 0
+    failed_ids: list[str] = []
+
+    for item in cached_items:
+        payload = build_vector_store_payload(
+            item["article_id"],
+            item["score"],
+            item["data"],
+            item.get("updated_at"),
+        )
+        if not payload:
+            skipped_count += 1
+            continue
+
+        success = vector_store.add_article(
+            payload["article_id"],
+            payload["document_text"],
+            payload["metadata"],
+        )
+        if success:
+            rebuilt_count += 1
+        else:
+            failed_ids.append(item["article_id"])
+
+    remaining_count = vector_store.get_article_count()
+    return {
+        "success": len(failed_ids) == 0,
+        "cached_count": len(cached_items),
+        "rebuilt_count": rebuilt_count,
+        "skipped_count": skipped_count,
+        "failed_count": len(failed_ids),
+        "failed_ids": failed_ids[:10],
+        "remaining_count": remaining_count,
+        "message": (
+            f"Rebuilt vector store from {len(cached_items)} cached articles. "
+            f"Rebuilt={rebuilt_count}, skipped={skipped_count}, failed={len(failed_ids)}."
+        ),
+    }
+
+
 def _handle_get_vector_store_stats(_: dict) -> dict:
     logger.info("Handling get_vector_store_stats")
     try:
@@ -348,6 +412,15 @@ def _handle_get_vector_store_stats(_: dict) -> dict:
     except Exception as exc:
         logger.error("Get vector store stats error: %s", exc)
         return {"error": "stats_failed", "message": str(exc)}
+
+
+def _handle_rebuild_vector_store(_: dict) -> dict:
+    logger.info("Handling rebuild_vector_store")
+    try:
+        return rebuild_vector_store()
+    except Exception as exc:
+        logger.error("Rebuild vector store error: %s", exc)
+        return {"error": "rebuild_failed", "message": str(exc)}
 
 
 def _handle_cleanup_invalid_entries(_: dict) -> dict:
@@ -397,6 +470,8 @@ def handle_message(msg: dict) -> dict:
         return _handle_clear_vector_store(msg)
     if msg_type == "get_vector_store_stats":
         return _handle_get_vector_store_stats(msg)
+    if msg_type == "rebuild_vector_store":
+        return _handle_rebuild_vector_store(msg)
     if msg_type == "cleanup_invalid_entries":
         return _handle_cleanup_invalid_entries(msg)
     if msg_type == "health":

@@ -81,6 +81,11 @@
     python rss_backend_service.py --host 127.0.0.1 --port 8765
     ```
 
+*   **Rebuild Local Vector Store:**
+    ```bash
+    python rebuild_vector_store.py
+    ```
+
 ## Development Conventions
 
 *   **Configuration:** 
@@ -99,6 +104,7 @@
     *   Recommended: shared `OPENAI_*` provider config plus `ANALYSIS_OPENAI_MODEL` / `SUMMARY_OPENAI_MODEL`.
 *   **Embedding Config:** Keep semantic-search embeddings on their own provider/model path using `EMBEDDING_*`.
     *   The vector DB stores an embedding fingerprint and will warn if the configured embedding base URL/model no longer matches the stored vectors.
+    *   Use `rebuild_vector_store.py` to rebuild the local Chroma collection from cached SQLite article data after an embedding change.
 *   **Scoring Persona:** A text prompt in `config.py` that defines the "personality" and criteria the LLM uses to evaluate articles.
 
 

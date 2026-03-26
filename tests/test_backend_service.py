@@ -1,5 +1,5 @@
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from rss_analyzer.backend_service import get_runtime_paths, handle_message
 
@@ -92,6 +92,53 @@ class TestBackendService(unittest.TestCase):
     def test_unknown_message_type(self):
         response = handle_message({"type": "does_not_exist"})
         self.assertEqual(response, {"error": "unknown_type"})
+
+    @patch("rss_analyzer.backend_service.iter_cached_scores")
+    @patch("rss_analyzer.backend_service.build_vector_store_payload")
+    @patch("rss_analyzer.backend_service.get_vector_store")
+    def test_rebuild_vector_store_rebuilds_from_cached_articles(
+        self, mock_get_vector_store, mock_build_payload, mock_iter_cached_scores
+    ):
+        vector_store = Mock()
+        vector_store.collection = object()
+        vector_store.clear_collection.return_value = True
+        vector_store.get_article_count.return_value = 1
+        vector_store.add_article.return_value = True
+        mock_get_vector_store.return_value = vector_store
+
+        mock_iter_cached_scores.return_value = [
+            {
+                "article_id": "article-1",
+                "score": 4.3,
+                "data": {"title": "Title", "summary": "Summary"},
+                "updated_at": "2026-03-26T12:00:00",
+            }
+        ]
+        mock_build_payload.return_value = {
+            "article_id": "article-1",
+            "document_text": "Title: Title\nContent: Summary",
+            "metadata": {"score": 4.3, "title": "Title"},
+        }
+
+        response = handle_message({"type": "rebuild_vector_store"})
+
+        self.assertTrue(response["success"])
+        self.assertEqual(response["rebuilt_count"], 1)
+        vector_store.clear_collection.assert_called_once()
+        vector_store.refresh_embedding_fingerprint.assert_called_once()
+        vector_store.add_article.assert_called_once()
+
+    @patch("rss_analyzer.backend_service.get_vector_store")
+    def test_rebuild_vector_store_returns_error_when_vector_store_unavailable(
+        self, mock_get_vector_store
+    ):
+        vector_store = Mock()
+        vector_store.collection = None
+        mock_get_vector_store.return_value = vector_store
+
+        response = handle_message({"type": "rebuild_vector_store"})
+
+        self.assertEqual(response["error"], "vector_store_unavailable")
 
 
 if __name__ == "__main__":
