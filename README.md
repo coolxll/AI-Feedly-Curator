@@ -78,6 +78,10 @@ uv run python rss_backend_service.py --host 127.0.0.1 --port 8765
 python rss_backend_service.py --host 127.0.0.1 --port 8765
 ```
 
+注意：
+- 如果你本机全局 Python 安装过不一致版本的 `opentelemetry-*` / `chromadb`，直接用 `python` 可能触发导入失败
+- 这类问题优先用 `uv run python ...` 或项目 `.venv` 解释器规避，不要依赖全局 Python 环境
+
 服务默认共享仓库根目录下的：
 - `rss_scores.db`
 - `chroma_db/`

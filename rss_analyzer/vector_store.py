@@ -2,6 +2,7 @@ import os
 import logging
 import json
 import hashlib
+import sys
 from typing import List, Dict, Any
 from openai import OpenAI
 from rss_analyzer.config import get_embedding_config
@@ -21,6 +22,22 @@ except Exception as chroma_import_error:
         pass
 
     CHROMADB_IMPORT_ERROR = chroma_import_error
+
+
+def _build_chromadb_import_guidance() -> str:
+    if CHROMADB_IMPORT_ERROR is None:
+        return ""
+
+    executable = sys.executable
+    if "\\.venv\\" in executable.lower():
+        return ""
+
+    return (
+        " Current interpreter is outside the project virtualenv "
+        f"({executable}). Prefer running this project with "
+        "`uv run python ...` or the project `.venv` interpreter to avoid "
+        "global package version drift."
+    )
 
 
 class DashScopeEmbeddingFunction(EmbeddingFunction):
@@ -93,7 +110,8 @@ class ChromaVectorStore:
         try:
             if chromadb is None:
                 raise RuntimeError(
-                    f"chromadb import failed: {CHROMADB_IMPORT_ERROR}"
+                    f"chromadb import failed: {CHROMADB_IMPORT_ERROR}."
+                    f"{_build_chromadb_import_guidance()}"
                 )
             self.client = chromadb.PersistentClient(path=self.persist_dir)
             embedding_fn = DashScopeEmbeddingFunction()
