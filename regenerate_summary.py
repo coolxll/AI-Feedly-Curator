@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
 重新生成总体摘要
-从 analyzed_articles.json 读取已分析的文章，重新生成总体摘要
+从 output/analyzed_articles_latest.json 读取已分析的文章，重新生成总体摘要
 """
 
 import os
 from datetime import datetime
 
-from rss_analyzer.config import setup_logging
+from rss_analyzer.config import LATEST_ANALYZED_FILE, LATEST_SUMMARY_FILE, setup_logging
 from rss_analyzer.llm_analyzer import generate_overall_summary
 from rss_analyzer.utils import load_articles
 
@@ -31,7 +31,7 @@ def generate_summary_from_articles(articles):
     summary_file = os.path.join(output_dir, f"summary_{timestamp}.md")
 
     # 同时保存到最新版本（在根 output 目录）
-    latest_file = os.path.join("output", "summary_latest.md")
+    latest_file = LATEST_SUMMARY_FILE
 
     print("\n正在保存摘要...")
     with open(summary_file, "w", encoding="utf-8") as f:
@@ -52,7 +52,7 @@ def main():
     setup_logging()
 
     print("正在加载已分析的文章...")
-    articles = load_articles("analyzed_articles.json")
+    articles = load_articles(LATEST_ANALYZED_FILE)
     print(f"已加载 {len(articles)} 篇文章")
 
     generate_summary_from_articles(articles)

@@ -4,6 +4,7 @@
 """
 
 import json
+from pathlib import Path
 import re
 import html
 
@@ -68,5 +69,7 @@ def save_articles(articles: list, json_file: str) -> None:
         articles: 文章列表
         json_file: 输出文件路径
     """
-    with open(json_file, "w", encoding="utf-8") as f:
+    output_path = Path(json_file)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with output_path.open("w", encoding="utf-8") as f:
         json.dump(articles, f, ensure_ascii=False, indent=2)

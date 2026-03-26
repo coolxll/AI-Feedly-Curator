@@ -62,7 +62,7 @@
 
 *   **Analyze Local File:**
     ```bash
-    python article_analyzer.py --input unread_news.json
+    python article_analyzer.py --input output/unread_news.json
     ```
 
 *   **Refresh Only (Dry Run/Limit):**

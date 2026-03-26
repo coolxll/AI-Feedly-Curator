@@ -7,7 +7,7 @@ Interactive menu for running Feedly filters.
 import sys
 import logging
 import os
-from rss_analyzer.config import PROJ_CONFIG
+from rss_analyzer.config import LATEST_ANALYZED_FILE, PROJ_CONFIG
 from rss_analyzer.feedly_client import (
     feedly_get_categories,
     feedly_get_subscriptions,
@@ -160,7 +160,7 @@ def simple_export_flow():
 
     from datetime import datetime
 
-    default_filename = f"export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+    default_filename = f"output/export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
     filename = get_input("Output Filename", default=default_filename)
 
     execute_export(limit, stream_id, filename)
@@ -182,13 +182,23 @@ def run_export_flow():
         limit = 100
 
     # 3. Output Filename
-    default_filename = f"export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+    default_filename = f"output/export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
     filename = questionary.text("Output Filename:", default=default_filename).ask()
 
     execute_export(limit, stream_id, filename, stream_label)
 
 
+def resolve_export_path(filename: str) -> str:
+    from pathlib import Path
+
+    path = Path(filename)
+    if not path.parent or str(path.parent) == ".":
+        path = Path("output") / path.name
+    return str(path)
+
+
 def execute_export(limit, stream_id, filename, stream_label=None):
+    filename = resolve_export_path(filename)
     display_stream = stream_label if stream_label else (stream_id or "Global (All)")
     console.print(
         Panel(
@@ -606,8 +616,8 @@ def run_summary_flow():
     if mode == "local":
         console.print(Panel("Summarizing Local Articles...", style="bold blue"))
         try:
-            console.print("[dim]Loading analyzed_articles.json...[/dim]")
-            articles = load_articles("analyzed_articles.json")
+            console.print(f"[dim]Loading {LATEST_ANALYZED_FILE}...[/dim]")
+            articles = load_articles(LATEST_ANALYZED_FILE)
 
             if stream_id:
                 console.print("[dim]Resolving selected stream...[/dim]")

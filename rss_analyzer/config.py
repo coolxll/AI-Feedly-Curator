@@ -17,6 +17,10 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 OPENAI_DEFAULT_BASE_URL = "https://api.openai.com/v1"
+OUTPUT_DIR = "output"
+LATEST_UNREAD_FILE = os.path.join(OUTPUT_DIR, "unread_news.json")
+LATEST_ANALYZED_FILE = os.path.join(OUTPUT_DIR, "analyzed_articles_latest.json")
+LATEST_SUMMARY_FILE = os.path.join(OUTPUT_DIR, "summary_latest.md")
 
 
 @dataclass(frozen=True)
@@ -26,7 +30,7 @@ class OpenAIConfig:
     model: str
 
 PROJ_CONFIG = {
-    "input_file": "unread_news.json",
+    "input_file": LATEST_UNREAD_FILE,
     "limit": 100,
     "mark_read": False,
     "debug": False,

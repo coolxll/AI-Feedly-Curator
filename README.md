@@ -56,7 +56,7 @@ python feedly_tui.py
 python article_analyzer.py --refresh
 
 # 分析已有的文章
-python article_analyzer.py --input unread_news.json
+python article_analyzer.py --input output/unread_news.json
 
 # 限制处理数量并标记已读（默认不标记，需显式开启）
 python article_analyzer.py --refresh --limit 50 --mark-read
@@ -112,7 +112,7 @@ python rss_backend_service.py --host 127.0.0.1 --port 8765
 
 | 参数 | 说明 | 默认值 |
 |------|------|--------|
-| `--input` | 输入 JSON 文件 | `unread_news.json` |
+| `--input` | 输入 JSON 文件 | `output/unread_news.json` |
 | `--limit` | 处理文章数量 | `100` |
 | `--refresh` | 从 Feedly 刷新文章 | `False` |
 | `--mark-read` | 标记已读 | `False` |
@@ -161,7 +161,9 @@ AI-Feedly-Curator/
 │   ├── 2026-01/          # 按月份归档
 │   │   ├── analyzed_articles_20260103_120000.json
 │   │   └── summary_20260103_120000.md
-│   └── summary_latest.md # 最新生成的摘要报告
+│   ├── unread_news.json
+│   ├── analyzed_articles_latest.json
+│   └── summary_latest.md
 └── tests/                # 单元测试
 ```
 

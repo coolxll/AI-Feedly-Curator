@@ -17,7 +17,13 @@ import logging
 import concurrent.futures
 
 # 导入模块
-from rss_analyzer.config import PROJ_CONFIG, setup_logging
+from rss_analyzer.config import (
+    LATEST_ANALYZED_FILE,
+    LATEST_SUMMARY_FILE,
+    LATEST_UNREAD_FILE,
+    PROJ_CONFIG,
+    setup_logging,
+)
 from rss_analyzer.feedly_client import feedly_fetch_unread, feedly_mark_read
 from rss_analyzer.article_fetcher import fetch_article_content
 from rss_analyzer.llm_analyzer import (
@@ -105,7 +111,7 @@ def main():
         logger.info(f"✓ 成功导出 {len(articles)} 篇文章到 {args.export}")
         return
 
-    # 刷新unread_news.json
+    # 刷新最新未读文章缓存
     if args.refresh:
         logger.info("=" * 60)
         logger.info("📥 从 Feedly 刷新文章")
@@ -118,7 +124,7 @@ def main():
             logger.error("❌ 无法从 Feedly 获取文章，退出")
             return
 
-        output_file = "unread_news.json"
+        output_file = LATEST_UNREAD_FILE
         save_articles(articles, output_file)
         logger.info(f"✓ 已保存 {len(articles)} 篇未读文章到 {output_file}")
         logger.info("")
@@ -339,12 +345,11 @@ def main():
     analyzed_file = os.path.join(output_dir, f"analyzed_articles_{timestamp}.json")
     save_articles(analyzed_articles, analyzed_file)
 
-    # 同时保存到根目录（为了兼容性和方便访问）
-    save_articles(analyzed_articles, "analyzed_articles.json")
+    save_articles(analyzed_articles, LATEST_ANALYZED_FILE)
 
     logger.info("\n分析结果已保存到:")
     logger.info(f"  - {analyzed_file}")
-    logger.info("  - analyzed_articles.json (最新版本)")
+    logger.info(f"  - {LATEST_ANALYZED_FILE} (最新版本)")
 
     # 标记已读（所有抓取的文章，包括被过滤/跳过的）
     if args.mark_read and all_article_ids:
@@ -367,7 +372,7 @@ def main():
     summary_file = os.path.join(output_dir, f"summary_{timestamp}.md")
 
     # 同时保存到最新版本（在根 output 目录）
-    latest_file = os.path.join("output", "summary_latest.md")
+    latest_file = LATEST_SUMMARY_FILE
 
     # 保存摘要（与 analyzed_articles 在同一目录）
     with open(summary_file, "w", encoding="utf-8") as f:
