@@ -7,7 +7,7 @@
 **Key Features:**
 *   **Feedly Integration:** Automatically fetches unread articles.
 *   **AI Analysis:** Scores articles based on relevance, informativeness, depth, etc., using customizable personas.
-*   **Task-Scoped Model Config:** Configure separate models/providers for analysis and overall summary.
+*   **Task-Scoped Model Config:** Share one provider config and switch models per task for analysis and overall summary.
 *   **Reporting:** Generates daily/monthly Markdown summaries and archives analyzed data.
 *   **Pre-filtering:** Filters out low-quality or irrelevant content (ads, short posts) before LLM processing.
 *   **Local Service + Extension:** A local HTTP backend powers the Chrome Feedly overlay and can be shared by other local clients.
@@ -48,7 +48,7 @@
 2.  **Configuration:**
     *   Copy `.env.example` to `.env`.
     *   Fill in the required API keys (Feedly, OpenAI/LLM providers).
-    *   Define task-scoped keys in `.env` (e.g., `ANALYSIS_OPENAI_MODEL`, `SUMMARY_OPENAI_BASE_URL`).
+    *   Define shared provider keys plus task-scoped models in `.env` (e.g., `OPENAI_BASE_URL`, `ANALYSIS_OPENAI_MODEL`, `SUMMARY_OPENAI_MODEL`).
 
 ### Usage Commands
 
@@ -84,8 +84,8 @@
 
 *   **Configuration:** 
     *   Use `PROJ_CONFIG` in `rss_analyzer/config.py` for defaults and scoring logic.
-    *   Use environment variables (via `.env`) or `ai_config.json` for task-scoped model settings.
-    *   Task naming convention: uppercase prefixes such as `ANALYSIS_OPENAI_MODEL` and `SUMMARY_OPENAI_MODEL`.
+    *   Use environment variables (via `.env`) or `ai_config.json` for shared provider settings plus task-scoped model settings.
+    *   Recommended pattern: global `OPENAI_API_KEY` / `OPENAI_BASE_URL`, task model overrides via `ANALYSIS_OPENAI_MODEL` and `SUMMARY_OPENAI_MODEL`.
 *   **Logging:** Uses standard Python `logging`. Debug mode can be enabled via `--debug` flag or `DEBUG` env var.
 *   **Testing:** `unittest` framework. Tests are located in `tests/`.
     *   Run all tests: `python -m unittest discover tests`
@@ -94,8 +94,8 @@
 
 ## Key Configuration Concepts
 
-*   **Task Config:** Use task prefixes to route different LLM backends for different jobs (e.g., a cheaper analysis model and a stronger summary model).
-    *   Configured via `ANALYSIS_*` / `SUMMARY_*` environment variables or `ai_config.json`.
+*   **Task Config:** Use task prefixes mainly to route different models for different jobs (e.g., a cheaper analysis model and a stronger summary model).
+    *   Recommended: shared `OPENAI_*` provider config plus `ANALYSIS_OPENAI_MODEL` / `SUMMARY_OPENAI_MODEL`.
 *   **Scoring Persona:** A text prompt in `config.py` that defines the "personality" and criteria the LLM uses to evaluate articles.
 
 

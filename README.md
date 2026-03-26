@@ -8,7 +8,7 @@ AI 驱动的 RSS 文章分析器，自动从 Feedly 获取未读文章，使用 
 - 🤖 **AI 多维度评分** - 基于相关性、信息量、深度等维度进行 1-5 分量化评分
 - 🚩 **负面特征检测** - 自动识别软文、标题党、AI 生成及过时信息
 - 📊 **总体报告** - 生成包含趋势分析和高质量推荐的 Markdown 报告
-- 🔄 **按任务配置模型** - 支持为分析和总结分别指定不同的 API 地址与模型
+- 🔄 **按任务切模型** - 共用一套 API Key / Base URL，按分析和总结切换不同模型
 - ✅ **可选标记已读** - 默认不自动标记，需显式开启
 
 ## 快速开始
@@ -120,17 +120,16 @@ python rss_backend_service.py --host 127.0.0.1 --port 8765
 
 ## 按任务配置模型
 
-当前配置只保留 task-based 路径：`analysis` 和 `summary`。
+当前配置推荐只保留两个 task：`analysis` 和 `summary`。
 
 ### 在 `.env` 中按任务定义
 
 ```env
-ANALYSIS_OPENAI_API_KEY=sk-xxx
-ANALYSIS_OPENAI_BASE_URL=http://127.0.0.1:8045/v1
+OPENAI_API_KEY=sk-xxx
+OPENAI_BASE_URL=http://127.0.0.1:8045/v1
+
 ANALYSIS_OPENAI_MODEL=qwen-flash
 
-SUMMARY_OPENAI_API_KEY=sk-xxx
-SUMMARY_OPENAI_BASE_URL=https://api.deepseek.com/v1
 SUMMARY_OPENAI_MODEL=deepseek-v3.2
 ```
 
@@ -147,10 +146,11 @@ SUMMARY_OPENAI_MODEL=deepseek-v3.2
 
 ### 配置优先级
 
-1. `ai_config.json` 中的 task 键，例如 `ANALYSIS_OPENAI_MODEL`
+1. `ai_config.json` 中的 task model，例如 `ANALYSIS_OPENAI_MODEL`
 2. `ai_config.json` 中的普通键，例如 `OPENAI_MODEL`
-3. 环境变量中的 task 键，例如 `SUMMARY_OPENAI_API_KEY`
-4. 普通环境变量，例如 `OPENAI_API_KEY`
+3. 环境变量中的 task model，例如 `SUMMARY_OPENAI_MODEL`
+4. 普通环境变量，例如 `OPENAI_MODEL`
+5. 通用 `OPENAI_API_KEY` / `OPENAI_BASE_URL`
 
 ## 评分系统
 

@@ -29,12 +29,6 @@ class TestConfig(unittest.TestCase):
                 result = get_config("OPENAI_MODEL", task="analysis")
                 self.assertEqual(result, "json-model")
 
-    def test_get_config_with_task_uses_task_env_name(self):
-        with patch.dict(os.environ, {"SUMMARY_OPENAI_API_KEY": "summary-key"}, clear=True):
-            with patch("rss_analyzer.config.USER_DYNAMIC_CONFIG", {}):
-                result = get_config("OPENAI_API_KEY", task="summary")
-                self.assertEqual(result, "summary-key")
-
     def test_get_config_with_task_falls_back_to_plain_env(self):
         with patch.dict(os.environ, {"OPENAI_MODEL": "default-model"}, clear=True):
             with patch("rss_analyzer.config.USER_DYNAMIC_CONFIG", {}):
@@ -47,20 +41,20 @@ class TestConfig(unittest.TestCase):
                 result = get_config("NONEXISTENT_KEY", default="fallback")
                 self.assertEqual(result, "fallback")
 
-    def test_get_openai_task_config_builds_task_scoped_settings(self):
+    def test_get_openai_task_config_uses_global_key_base_url_and_task_model(self):
         with patch.dict(
             os.environ,
             {
-                "ANALYSIS_OPENAI_API_KEY": "analysis-key",
-                "ANALYSIS_OPENAI_BASE_URL": "https://analysis.example/v1",
+                "OPENAI_API_KEY": "shared-key",
+                "OPENAI_BASE_URL": "https://shared.example/v1",
                 "ANALYSIS_OPENAI_MODEL": "analysis-model",
             },
             clear=True,
         ):
             with patch("rss_analyzer.config.USER_DYNAMIC_CONFIG", {}):
                 config = get_openai_task_config("analysis", default_model="fallback-model")
-                self.assertEqual(config.api_key, "analysis-key")
-                self.assertEqual(config.base_url, "https://analysis.example/v1")
+                self.assertEqual(config.api_key, "shared-key")
+                self.assertEqual(config.base_url, "https://shared.example/v1")
                 self.assertEqual(config.model, "analysis-model")
 
     def test_get_openai_task_config_uses_defaults_when_values_missing(self):
@@ -70,6 +64,24 @@ class TestConfig(unittest.TestCase):
                 self.assertIsNone(config.api_key)
                 self.assertEqual(config.base_url, OPENAI_DEFAULT_BASE_URL)
                 self.assertEqual(config.model, "fallback-model")
+
+    def test_get_openai_task_config_ignores_task_specific_key_and_base_url(self):
+        with patch.dict(
+            os.environ,
+            {
+                "OPENAI_API_KEY": "shared-key",
+                "OPENAI_BASE_URL": "https://shared.example/v1",
+                "SUMMARY_OPENAI_API_KEY": "summary-key",
+                "SUMMARY_OPENAI_BASE_URL": "https://summary.example/v1",
+                "SUMMARY_OPENAI_MODEL": "summary-model",
+            },
+            clear=True,
+        ):
+            with patch("rss_analyzer.config.USER_DYNAMIC_CONFIG", {}):
+                config = get_openai_task_config("summary", default_model="fallback-model")
+                self.assertEqual(config.api_key, "shared-key")
+                self.assertEqual(config.base_url, "https://shared.example/v1")
+                self.assertEqual(config.model, "summary-model")
 
 
 if __name__ == "__main__":

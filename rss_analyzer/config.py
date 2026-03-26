@@ -1,6 +1,9 @@
 """
-配置管理模块
-支持按任务读取配置。
+配置管理模块。
+
+推荐用法：
+- OPENAI_API_KEY / OPENAI_BASE_URL 全局共享
+- ANALYSIS_OPENAI_MODEL / SUMMARY_OPENAI_MODEL 按任务切模型
 """
 
 import json
@@ -146,10 +149,16 @@ def get_config(key: str, default=None, task: str | None = None):
 
 
 def get_openai_task_config(task: str, default_model: str) -> OpenAIConfig:
-    """解析某个任务使用的 OpenAI 兼容配置。"""
+    """
+    解析某个任务使用的 OpenAI 配置。
+
+    约定：
+    - API key 和 base URL 统一使用全局 OPENAI_* 配置
+    - 只有 model 允许按任务覆盖，例如 ANALYSIS_OPENAI_MODEL
+    """
     return OpenAIConfig(
-        api_key=get_config("OPENAI_API_KEY", task=task),
-        base_url=get_config("OPENAI_BASE_URL", OPENAI_DEFAULT_BASE_URL, task=task),
+        api_key=get_config("OPENAI_API_KEY"),
+        base_url=get_config("OPENAI_BASE_URL", OPENAI_DEFAULT_BASE_URL),
         model=get_config("OPENAI_MODEL", default_model, task=task),
     )
 

@@ -10,6 +10,40 @@ const STATE = {
 const SELECTORS = {
   entry: '[data-entry-id], [data-entryid], article.entry, .Entry, .entry--titleOnly, .entry--magazine, .entry--cards, .Article, .entry--overlay, article.Article',
 };
+const SCORE_BATCH_SIZE = 6;
+
+function isVisibleEntry(el) {
+  if (!el || !(el instanceof Element)) return false;
+
+  const style = window.getComputedStyle(el);
+  if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') {
+    return false;
+  }
+
+  const rect = el.getBoundingClientRect();
+  return rect.width > 20 && rect.height > 20;
+}
+
+function getEntryPriority(el) {
+  if (!el || !(el instanceof Element)) return -1;
+
+  let score = 0;
+  const rect = el.getBoundingClientRect();
+  score += Math.min(rect.width * rect.height, 500000) / 1000;
+
+  if (isVisibleEntry(el)) score += 1000;
+  if (el.querySelector('.EntryTitleLink, .entry-title-link, .entry__title, .ArticleTitle')) score += 300;
+  if (el.querySelector('.EntrySummary, .entry__summary, .EntryBody, .entryBody, .ArticleBody, .entry__content')) score += 150;
+  if (el.classList.contains('entry--selected') || el.classList.contains('entry--expanded')) score += 200;
+
+  return score;
+}
+
+function preferBetterEntry(current, candidate) {
+  if (!current) return candidate;
+  if (!candidate) return current;
+  return getEntryPriority(candidate) > getEntryPriority(current) ? candidate : current;
+}
 
 // 注入样式
 const STYLE_ID = 'feedly-ai-overlay-style';
@@ -826,16 +860,77 @@ function scheduleScan() {
   requestAnimationFrame(scanEntries);
 }
 
+function chunkItems(items, chunkSize) {
+  const chunks = [];
+  for (let i = 0; i < items.length; i += chunkSize) {
+    chunks.push(items.slice(i, i + chunkSize));
+  }
+  return chunks;
+}
+
+function handleScoreResponse(itemsToFetch, entryMap, resp) {
+  const items = resp?.items || {};
+  for (const item of itemsToFetch) {
+    const id = item.id;
+    const entry = entryMap.get(id) || STATE.pending.get(id);
+    if (items[id]) {
+      STATE.itemCache.set(id, items[id]);
+    }
+    if (entry) {
+      renderItem(entry, items[id]);
+    }
+    STATE.pending.delete(id);
+    STATE.processed.add(id);
+  }
+}
+
+function requestScoreChunk(itemsToFetch, entryMap) {
+  chrome.runtime.sendMessage({ type: 'get_scores', items: itemsToFetch }, (resp) => {
+    if (chrome.runtime.lastError) {
+      console.error("[Feedly AI Overlay] Error:", chrome.runtime.lastError);
+      for (const item of itemsToFetch) STATE.pending.delete(item.id);
+      return;
+    }
+
+    handleScoreResponse(itemsToFetch, entryMap, resp);
+  });
+}
+
+function requestScoresProgressively(itemsToFetch, map) {
+  const chunks = chunkItems(itemsToFetch, SCORE_BATCH_SIZE);
+  console.log(
+    "[Feedly AI Overlay] Fetching scores for",
+    itemsToFetch.length,
+    "new articles in",
+    chunks.length,
+    "chunks"
+  );
+
+  for (const chunk of chunks) {
+    const chunkMap = new Map();
+    for (const item of chunk) {
+      const entry = map.get(item.id) || STATE.pending.get(item.id);
+      if (entry) {
+        chunkMap.set(item.id, entry);
+      }
+    }
+    requestScoreChunk(chunk, chunkMap);
+  }
+}
+
 function scanEntries() {
   STATE.scheduled = false;
   const entries = Array.from(document.querySelectorAll(SELECTORS.entry));
 
   const itemsToFetch = [];
   const map = new Map();
+  const itemMap = new Map();
 
   for (const entry of entries) {
     const id = getEntryId(entry);
     if (!id) continue;
+
+    if (!isVisibleEntry(entry)) continue;
 
     // Check if we're already fetching this ID
     if (STATE.pending.has(id)) continue;
@@ -867,44 +962,33 @@ function scanEntries() {
     // 优先使用全文，其次摘要
     const fullText = contentEl ? contentEl.innerText.trim() : (summaryEl ? summaryEl.textContent.trim() : '');
 
-    itemsToFetch.push({
+    const item = {
       id: id,
       title: titleEl ? titleEl.textContent.trim() : 'Unknown Title',
       url: url,
       summary: summaryEl ? summaryEl.textContent.trim() : '',
       content: fullText // 同时发送 content 字段
-    });
+    };
 
-    map.set(id, entry);
+    const preferredEntry = preferBetterEntry(map.get(id), entry);
+    map.set(id, preferredEntry);
+
+    const existingItem = itemMap.get(id);
+    if (!existingItem || preferredEntry === entry) {
+      itemMap.set(id, item);
+    }
+  }
+
+  for (const [id, entry] of map.entries()) {
+    const item = itemMap.get(id);
+    if (!item || !entry) continue;
+    itemsToFetch.push(item);
     STATE.pending.set(id, entry);
   }
 
   if (itemsToFetch.length === 0) return;
 
-  console.log("[Feedly AI Overlay] Fetching scores for", itemsToFetch.length, "new articles");
-
-  // Send items object containing metadata
-  chrome.runtime.sendMessage({ type: 'get_scores', items: itemsToFetch }, (resp) => {
-    if (chrome.runtime.lastError) {
-      console.error("[Feedly AI Overlay] Error:", chrome.runtime.lastError);
-      for (const item of itemsToFetch) STATE.pending.delete(item.id);
-      return;
-    }
-
-    const items = resp?.items || {};
-    for (const item of itemsToFetch) {
-      const id = item.id;
-      const entry = map.get(id) || STATE.pending.get(id);
-      if (items[id]) {
-        STATE.itemCache.set(id, items[id]); // Cache the item data
-      }
-      if (entry) {
-        renderItem(entry, items[id]);
-      }
-      STATE.pending.delete(id);
-      STATE.processed.add(id);
-    }
-  });
+  requestScoresProgressively(itemsToFetch, map);
 }
 
 let debounceTimer = null;
@@ -931,6 +1015,7 @@ function getObserverRoot() {
 
 function fastProcessEntry(entry, mapToFetch, itemsToFetch) {
   if (!entry || !(entry instanceof Element)) return;
+  if (!isVisibleEntry(entry)) return;
 
   // Already rendered
   if (entry.querySelector('.ai-score-badge') || entry.querySelector('.ai-analyze-btn')) {
@@ -967,9 +1052,19 @@ function fastProcessEntry(entry, mapToFetch, itemsToFetch) {
     content: fullText
   };
 
-  STATE.pending.set(id, entry);
-  mapToFetch.set(id, entry);
-  itemsToFetch.push(item);
+  const preferredEntry = preferBetterEntry(mapToFetch.get(id), entry);
+  mapToFetch.set(id, preferredEntry);
+
+  const existingIndex = itemsToFetch.findIndex((candidate) => candidate.id === id);
+  if (existingIndex >= 0) {
+    if (preferredEntry === entry) {
+      itemsToFetch[existingIndex] = item;
+    }
+  } else {
+    itemsToFetch.push(item);
+  }
+
+  STATE.pending.set(id, preferredEntry);
 }
 
 function fastProcessMutations(mutations) {
@@ -1005,27 +1100,7 @@ function fastProcessMutations(mutations) {
 
   if (itemsToFetch.length === 0) return false;
 
-  chrome.runtime.sendMessage({ type: 'get_scores', items: itemsToFetch }, (resp) => {
-    if (chrome.runtime.lastError) {
-      console.error("[Feedly AI Overlay] Error:", chrome.runtime.lastError);
-      for (const item of itemsToFetch) STATE.pending.delete(item.id);
-      return;
-    }
-
-    const items = resp?.items || {};
-    for (const item of itemsToFetch) {
-      const id = item.id;
-      const entry = mapToFetch.get(id) || STATE.pending.get(id);
-      if (items[id]) {
-        STATE.itemCache.set(id, items[id]);
-      }
-      if (entry) {
-        renderItem(entry, items[id]);
-      }
-      STATE.pending.delete(id);
-      STATE.processed.add(id);
-    }
-  });
+  requestScoresProgressively(itemsToFetch, mapToFetch);
 
   return true;
 }
