@@ -7,7 +7,7 @@
 **Key Features:**
 *   **Feedly Integration:** Automatically fetches unread articles.
 *   **AI Analysis:** Scores articles based on relevance, informativeness, depth, etc., using customizable personas.
-*   **Task-Scoped Model Config:** Share one provider config and switch models per task for analysis and overall summary.
+*   **Task-Scoped Model Config:** Share one provider config and switch models per task for analysis and overall summary, while keeping embedding config independent.
 *   **Reporting:** Generates daily/monthly Markdown summaries and archives analyzed data.
 *   **Pre-filtering:** Filters out low-quality or irrelevant content (ads, short posts) before LLM processing.
 *   **Local Service + Extension:** A local HTTP backend powers the Chrome Feedly overlay and can be shared by other local clients.
@@ -17,7 +17,7 @@
 *   **`article_analyzer.py`**: The main CLI entry point. Orchestrates fetching, filtering, analyzing, and reporting.
 *   **`rss_backend_service.py`**: Local HTTP service entry point for the Chrome extension and other local clients.
 *   **`rss_analyzer/`**: Core package directory.
-    *   `config.py`: Configuration management. Handles task-scoped model settings, environment variables, and scoring weights.
+    *   `config.py`: Configuration management. Handles task-scoped chat model settings, independent embedding settings, environment variables, and scoring weights.
     *   `llm_analyzer.py`: Interface for LLM interactions (scoring and summarizing).
     *   `feedly_client.py`: Client for the Feedly API.
     *   `article_fetcher.py`: Fetches article content from URLs (using `trafilatura`).
@@ -48,7 +48,8 @@
 2.  **Configuration:**
     *   Copy `.env.example` to `.env`.
     *   Fill in the required API keys (Feedly, OpenAI/LLM providers).
-    *   Define shared provider keys plus task-scoped models in `.env` (e.g., `OPENAI_BASE_URL`, `ANALYSIS_OPENAI_MODEL`, `SUMMARY_OPENAI_MODEL`).
+    *   Define shared chat provider keys plus task-scoped models in `.env` (e.g., `OPENAI_BASE_URL`, `ANALYSIS_OPENAI_MODEL`, `SUMMARY_OPENAI_MODEL`).
+    *   If semantic search is enabled, configure embedding separately via `EMBEDDING_API_KEY`, `EMBEDDING_BASE_URL`, `EMBEDDING_MODEL`.
 
 ### Usage Commands
 
@@ -84,8 +85,8 @@
 
 *   **Configuration:** 
     *   Use `PROJ_CONFIG` in `rss_analyzer/config.py` for defaults and scoring logic.
-    *   Use environment variables (via `.env`) for shared provider settings plus task-scoped model settings.
-    *   Recommended pattern: global `OPENAI_API_KEY` / `OPENAI_BASE_URL`, task model overrides via `ANALYSIS_OPENAI_MODEL` and `SUMMARY_OPENAI_MODEL`.
+    *   Use environment variables (via `.env`) for shared chat provider settings, task-scoped model settings, and independent embedding settings.
+    *   Recommended pattern: global `OPENAI_API_KEY` / `OPENAI_BASE_URL`, task model overrides via `ANALYSIS_OPENAI_MODEL` and `SUMMARY_OPENAI_MODEL`, plus independent `EMBEDDING_*`.
 *   **Logging:** Uses standard Python `logging`. Debug mode can be enabled via `--debug` flag or `DEBUG` env var.
 *   **Testing:** `unittest` framework. Tests are located in `tests/`.
     *   Run all tests: `python -m unittest discover tests`
@@ -94,8 +95,10 @@
 
 ## Key Configuration Concepts
 
-*   **Task Config:** Use task prefixes mainly to route different models for different jobs (e.g., a cheaper analysis model and a stronger summary model).
+*   **Task Config:** Use task prefixes mainly to route different chat models for different jobs (e.g., a cheaper analysis model and a stronger summary model).
     *   Recommended: shared `OPENAI_*` provider config plus `ANALYSIS_OPENAI_MODEL` / `SUMMARY_OPENAI_MODEL`.
+*   **Embedding Config:** Keep semantic-search embeddings on their own provider/model path using `EMBEDDING_*`.
+    *   The vector DB stores an embedding fingerprint and will warn if the configured embedding base URL/model no longer matches the stored vectors.
 *   **Scoring Persona:** A text prompt in `config.py` that defines the "personality" and criteria the LLM uses to evaluate articles.
 
 

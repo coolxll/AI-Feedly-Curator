@@ -9,6 +9,7 @@ AI 驱动的 RSS 文章分析器，自动从 Feedly 获取未读文章，使用 
 - 🚩 **负面特征检测** - 自动识别软文、标题党、AI 生成及过时信息
 - 📊 **总体报告** - 生成包含趋势分析和高质量推荐的 Markdown 报告
 - 🔄 **按任务切模型** - 共用一套 API Key / Base URL，按分析和总结切换不同模型
+- 🧠 **Embedding 独立配置** - 向量检索可单独指定 provider / model，并对变更给出重建提示
 - ✅ **可选标记已读** - 默认不自动标记，需显式开启
 
 ## 快速开始
@@ -131,6 +132,10 @@ OPENAI_BASE_URL=http://127.0.0.1:8045/v1
 ANALYSIS_OPENAI_MODEL=qwen-flash
 
 SUMMARY_OPENAI_MODEL=deepseek-v3.2
+
+EMBEDDING_API_KEY=sk-embedding-xxx
+EMBEDDING_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+EMBEDDING_MODEL=text-embedding-v3
 ```
 
 ### 配置优先级
@@ -138,6 +143,13 @@ SUMMARY_OPENAI_MODEL=deepseek-v3.2
 1. 环境变量中的 task model，例如 `SUMMARY_OPENAI_MODEL`
 2. 普通环境变量，例如 `OPENAI_MODEL`
 3. 通用 `OPENAI_API_KEY` / `OPENAI_BASE_URL`
+
+### Embedding 配置
+
+- 向量检索不再回退到 `OPENAI_BASE_URL`，避免聊天 provider 变更误伤 embedding
+- 推荐显式配置 `EMBEDDING_API_KEY` / `EMBEDDING_BASE_URL` / `EMBEDDING_MODEL`
+- 若未显式配置，embedding 仍会兼容已有 DashScope / Aliyun 环境变量，并默认使用 `text-embedding-v3`
+- `chroma_db/` 下会记录 embedding 指纹；若你改了 embedding base URL 或 model，服务会警告需要重建向量库
 
 ## 评分系统
 

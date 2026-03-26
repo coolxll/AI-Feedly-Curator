@@ -1,39 +1,44 @@
 import os
 import logging
+import json
+import hashlib
 from typing import List, Dict, Any
-import chromadb
-from chromadb import Documents, EmbeddingFunction, Embeddings
 from openai import OpenAI
+from rss_analyzer.config import get_embedding_config
 
 logger = logging.getLogger(__name__)
+
+try:
+    import chromadb
+    from chromadb import Documents, EmbeddingFunction, Embeddings
+    CHROMADB_IMPORT_ERROR = None
+except Exception as chroma_import_error:
+    chromadb = None
+    Documents = list[str]
+    Embeddings = list[list[float]]
+
+    class EmbeddingFunction:
+        pass
+
+    CHROMADB_IMPORT_ERROR = chroma_import_error
 
 
 class DashScopeEmbeddingFunction(EmbeddingFunction):
     """
-    Custom EmbeddingFunction for ChromaDB using Aliyun DashScope via OpenAI SDK.
+    Custom EmbeddingFunction for ChromaDB using an OpenAI-compatible embedding API.
     """
 
-    def __init__(self, model_name: str = "text-embedding-v3"):
-        # Try various possible environment variable names for DashScope API key
-        # in order of preference
-        self.api_key = (
-            os.getenv("DASHSCOPE_API_KEY")
-            or os.getenv("ALIYUN_OPENAI_API_KEY")
-            or os.getenv("OPENAI_API_KEY")
-        )
+    def __init__(self, model_name: str | None = None):
+        embedding_config = get_embedding_config()
+        self.api_key = embedding_config.api_key
         if not self.api_key:
             logger.warning(
-                "No API key found in environment variables (checked DASHSCOPE_API_KEY, ALIYUN_OPENAI_API_KEY, OPENAI_API_KEY)."
+                "No embedding API key found in environment variables "
+                "(checked EMBEDDING_API_KEY, DASHSCOPE_API_KEY, ALIYUN_OPENAI_API_KEY, OPENAI_API_KEY)."
             )
 
-        # Use various possible base URL environment variables in order of preference
-        self.base_url = (
-            os.getenv("DASHSCOPE_BASE_URL")
-            or os.getenv("ALIYUN_OPENAI_BASE_URL")
-            or os.getenv("OPENAI_BASE_URL")
-            or "https://dashscope.aliyuncs.com/compatible-mode/v1"
-        )
-        self.model_name = model_name
+        self.base_url = embedding_config.base_url
+        self.model_name = model_name or embedding_config.model
         self.client = None
 
         if self.api_key:
@@ -75,6 +80,9 @@ class ChromaVectorStore:
             "RSS_VECTOR_DB_DIR", os.path.join(os.getcwd(), "chroma_db")
         )
         self.collection_name = collection_name
+        self.fingerprint_path = os.path.join(
+            self.persist_dir, f"{self.collection_name}_embedding_fingerprint.json"
+        )
         self.client = None
         self.collection = None
         self._trending_cache = None
@@ -83,16 +91,90 @@ class ChromaVectorStore:
 
     def _initialize(self):
         try:
+            if chromadb is None:
+                raise RuntimeError(
+                    f"chromadb import failed: {CHROMADB_IMPORT_ERROR}"
+                )
             self.client = chromadb.PersistentClient(path=self.persist_dir)
             embedding_fn = DashScopeEmbeddingFunction()
             self.collection = self.client.get_or_create_collection(
                 name=self.collection_name, embedding_function=embedding_fn
             )
+            self._ensure_embedding_fingerprint(embedding_fn)
             logger.info(
                 f"ChromaDB initialized at {self.persist_dir}, collection: {self.collection_name}"
             )
         except Exception as e:
             logger.error(f"Failed to initialize ChromaDB: {e}")
+
+    def _build_embedding_fingerprint(self, embedding_fn: DashScopeEmbeddingFunction) -> dict:
+        identity = {
+            "schema_version": 1,
+            "collection_name": self.collection_name,
+            "base_url": embedding_fn.base_url.rstrip("/"),
+            "model": embedding_fn.model_name,
+        }
+        payload = json.dumps(identity, sort_keys=True, ensure_ascii=True)
+        return {
+            **identity,
+            "fingerprint": hashlib.sha256(payload.encode("utf-8")).hexdigest(),
+        }
+
+    def _load_embedding_fingerprint(self) -> dict | None:
+        if not os.path.exists(self.fingerprint_path):
+            return None
+
+        try:
+            with open(self.fingerprint_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception as e:
+            logger.warning(
+                f"Failed to read embedding fingerprint file {self.fingerprint_path}: {e}"
+            )
+            return None
+
+    def _write_embedding_fingerprint(self, fingerprint: dict) -> None:
+        os.makedirs(self.persist_dir, exist_ok=True)
+        with open(self.fingerprint_path, "w", encoding="utf-8") as f:
+            json.dump(fingerprint, f, ensure_ascii=False, indent=2)
+
+    def _ensure_embedding_fingerprint(
+        self, embedding_fn: DashScopeEmbeddingFunction
+    ) -> None:
+        current = self._build_embedding_fingerprint(embedding_fn)
+        existing = self._load_embedding_fingerprint()
+
+        if not existing:
+            self._write_embedding_fingerprint(current)
+            return
+
+        if existing.get("fingerprint") == current["fingerprint"]:
+            return
+
+        article_count = 0
+        try:
+            article_count = self.collection.count() if self.collection else 0
+        except Exception as e:
+            logger.warning(f"Failed to count vector store entries for fingerprint check: {e}")
+
+        if article_count > 0:
+            logger.warning(
+                "Embedding fingerprint mismatch for collection '%s'. Existing vectors were "
+                "built with model='%s' base_url='%s', but current config is model='%s' "
+                "base_url='%s'. Rebuild the vector store before relying on semantic search.",
+                self.collection_name,
+                existing.get("model"),
+                existing.get("base_url"),
+                current.get("model"),
+                current.get("base_url"),
+            )
+            return
+
+        logger.info(
+            "Embedding fingerprint changed for empty collection '%s'; updating metadata.",
+            self.collection_name,
+        )
+        self._write_embedding_fingerprint(current)
 
     def add_article(self, article_id: str, text: str, metadata: dict = None) -> bool:
         """

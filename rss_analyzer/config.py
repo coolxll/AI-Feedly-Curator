@@ -4,6 +4,7 @@
 推荐用法：
 - OPENAI_API_KEY / OPENAI_BASE_URL 全局共享
 - ANALYSIS_OPENAI_MODEL / SUMMARY_OPENAI_MODEL 按任务切模型
+- EMBEDDING_API_KEY / EMBEDDING_BASE_URL / EMBEDDING_MODEL 独立配置向量模型
 """
 
 import logging
@@ -17,6 +18,8 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 OPENAI_DEFAULT_BASE_URL = "https://api.openai.com/v1"
+EMBEDDING_DEFAULT_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+EMBEDDING_DEFAULT_MODEL = "text-embedding-v3"
 OUTPUT_DIR = "output"
 LATEST_UNREAD_FILE = os.path.join(OUTPUT_DIR, "unread_news.json")
 LATEST_ANALYZED_FILE = os.path.join(OUTPUT_DIR, "analyzed_articles_latest.json")
@@ -25,6 +28,13 @@ LATEST_SUMMARY_FILE = os.path.join(OUTPUT_DIR, "summary_latest.md")
 
 @dataclass(frozen=True)
 class OpenAIConfig:
+    api_key: str | None
+    base_url: str
+    model: str
+
+
+@dataclass(frozen=True)
+class EmbeddingConfig:
     api_key: str | None
     base_url: str
     model: str
@@ -130,6 +140,36 @@ def get_openai_task_config(task: str, default_model: str) -> OpenAIConfig:
         api_key=get_config("OPENAI_API_KEY"),
         base_url=get_config("OPENAI_BASE_URL", OPENAI_DEFAULT_BASE_URL),
         model=get_config("OPENAI_MODEL", default_model, task=task),
+    )
+
+
+def get_embedding_config() -> EmbeddingConfig:
+    """
+    解析 embedding 使用的独立配置。
+
+    优先级：
+    1. EMBEDDING_* 显式配置
+    2. 兼容已有 DashScope / Aliyun embedding 环境变量
+    3. API key 最后兜底复用 OPENAI_API_KEY
+
+    注意：
+    - 不再回退到 OPENAI_BASE_URL，避免聊天 provider 变更误伤 embedding。
+    - model 默认维持 text-embedding-v3。
+    """
+    return EmbeddingConfig(
+        api_key=(
+            os.getenv("EMBEDDING_API_KEY")
+            or os.getenv("DASHSCOPE_API_KEY")
+            or os.getenv("ALIYUN_OPENAI_API_KEY")
+            or os.getenv("OPENAI_API_KEY")
+        ),
+        base_url=(
+            os.getenv("EMBEDDING_BASE_URL")
+            or os.getenv("DASHSCOPE_BASE_URL")
+            or os.getenv("ALIYUN_OPENAI_BASE_URL")
+            or EMBEDDING_DEFAULT_BASE_URL
+        ),
+        model=os.getenv("EMBEDDING_MODEL", EMBEDDING_DEFAULT_MODEL),
     )
 
 
