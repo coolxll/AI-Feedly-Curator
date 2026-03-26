@@ -29,3 +29,10 @@
 
 - [ ] **多模态分析**: 支持从文章中的图片提取信息（针对 info-graphic 类文章）。
 - [ ] **自动标签系统**: 基于聚类算法自动生成 Topic Tags，而非依赖预设分类。
+
+
+
+
+- [ ] **排查 apply_patch 在当前 Windows 环境下的 sandbox 初始化失败**
+    - 现象: 即使目标文件在工作目录内，apply_patch 也报 `windows sandbox: setup refresh failed with status exit code: 1`
+    - 目标: 最小化复现失败条件，确认是否是环境稳定性问题或工具链问题。

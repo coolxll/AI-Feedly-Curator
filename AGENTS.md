@@ -16,10 +16,13 @@
 *   **`article_analyzer.py`**: The main CLI entry point. Orchestrates fetching, filtering, analyzing, and reporting.
 *   **`rss_analyzer/`**: Core package directory.
     *   `config.py`: Configuration management. Handles environment variables, profiles, and scoring weights.
-    *   `llm_analyzer.py`: Interface for LLM interactions (scoring and summarizing).
+    *   `llm_analyzer.py`: Interface for LLM interactions.
     *   `feedly_client.py`: Client for the Feedly API.
     *   `article_fetcher.py`: Fetches article content from URLs (using `trafilatura`).
-    *   `scoring.py`:  (Inferred) Logic for calculating scores.
+    *   `scoring.py`: Logic for calculating scores.
+*   **`skills/article-reading-report/`**: Project-scoped reading report workflow.
+    *   `SKILL.md`: Project-level skill definition for reading reports.
+    *   `scripts/build_reading_report.py`: Prepares reading packets and sources index from exported RSS JSON.
 *   **`requirements.txt`**: Python dependencies (`requests`, `openai`, `trafilatura`, `beautifulsoup4`, etc.).
 *   **`.env`**: (User-created) Stores API keys and secrets.
 *   **`output/`**: Directory where analyzed JSON data and Markdown summaries are saved, organized by month.
@@ -50,24 +53,31 @@
     ```bash
     python article_analyzer.py --refresh
     ```
-    *   Fetches latest unread articles from Feedly.
-    *   Analyzes them using the configured LLM profile.
-    *   Generates a report.
 
 *   **Analyze Local File:**
     ```bash
     python article_analyzer.py --input unread_news.json
     ```
 
-*   **Refresh Only (Dry Run/Limit):**
-    ```bash
-    python article_analyzer.py --refresh --limit 50
-    ```
-
 *   **Regenerate Summary Only:**
     ```bash
     python regenerate_summary.py
     ```
+
+*   **Prepare Project Reading Packet:**
+    ```bash
+    python skills/article-reading-report/scripts/build_reading_report.py --input <exported-json-file>
+    ```
+
+## Project-Level Skill Rule
+
+When the user asks for a reading report, reading priority, batch summary, or worth-reading judgment for an exported RSS/Feedly JSON file:
+
+1. Use the project skill at `skills/article-reading-report`.
+2. Run `python skills/article-reading-report/scripts/build_reading_report.py --input <exported-json-file>` to prepare the packet.
+3. Read the generated `output/reading-reports/<timestamp>/reading-packet.json` with the current agent.
+4. Produce one final human-facing Markdown report that combines conclusions and original links in the same document.
+5. Do not rely on the script itself to call an external LLM.
 
 ## Development Conventions
 
@@ -85,3 +95,4 @@
 *   **Profiles:** Allow switching between different LLM backends for different tasks (e.g., a cheaper/faster model for individual article scoring, and a stronger model for the overall summary).
     *   Configured in `PROJ_CONFIG["analysis_profile"]` and `PROJ_CONFIG["summary_profile"]`.
 *   **Scoring Persona:** A text prompt in `config.py` that defines the "personality" and criteria the LLM uses to evaluate articles.
+

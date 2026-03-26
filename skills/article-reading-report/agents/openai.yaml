@@ -1,0 +1,7 @@
+interface:
+  display_name: "Article Reading Report"
+  short_description: "Prepare article bodies, then summarize with the agent"
+  default_prompt: "Use $article-reading-report to prepare a reading packet from my exported RSS JSON, then read it yourself and write a reading-priority report with an overall summary."
+
+policy:
+  allow_implicit_invocation: true
