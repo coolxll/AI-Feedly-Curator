@@ -1,0 +1,16 @@
+services:
+  chromadb:
+    image: chromadb/chroma:latest
+    container_name: rss-opml-chromadb
+    ports:
+      - "8001:8000"
+    environment:
+      IS_PERSISTENT: "TRUE"
+      ALLOW_RESET: "TRUE"
+    volumes:
+      - chroma_data:/chroma/chroma
+    restart: unless-stopped
+
+volumes:
+  chroma_data:
+    name: rss-opml_chroma_data
