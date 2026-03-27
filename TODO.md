@@ -34,6 +34,10 @@
 - Recommended command pattern:
   - `uv run python rss_backend_service.py --host 127.0.0.1 --port 8765`
   - `uv run python rebuild_vector_store.py`
+- Current vector-store deployment:
+  - Active backend is Dockerized Chroma HTTP service
+  - Current endpoint in local use: `http://127.0.0.1:8001`
+  - Local embedded `chroma_db/` is no longer the primary runtime path
 
 ## Next
 
@@ -50,4 +54,9 @@
 
 ## Operational Notes
 
-- [ ] If embedding model/provider changes, rebuild `chroma_db/`
+- [ ] If embedding model/provider changes, rebuild the active vector-store collection
+  - For Docker HTTP mode, rerun `uv run python rebuild_vector_store.py` against the configured `RSS_VECTOR_HTTP_URL`
+  - For embedded mode, rebuild the local `chroma_db/`
+- [ ] Decide when to delete legacy local vector-store leftovers
+  - `chroma_db/`
+  - `chroma_db_quarantine_20260327_090524/`
