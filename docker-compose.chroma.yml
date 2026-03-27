@@ -1,0 +1,12 @@
+services:
+  chroma:
+    image: chromadb/chroma:latest
+    container_name: rss-opml-chroma
+    ports:
+      - "8000:8000"
+    environment:
+      IS_PERSISTENT: "TRUE"
+      PERSIST_DIRECTORY: /data
+    volumes:
+      - ./docker/chroma:/data
+    restart: unless-stopped

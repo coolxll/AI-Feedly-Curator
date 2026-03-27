@@ -92,6 +92,9 @@ python rss_backend_service.py --host 127.0.0.1 --port 8765
 如需覆盖路径，可设置环境变量：
 - `RSS_SCORES_DB`
 - `RSS_VECTOR_DB_DIR`
+- `RSS_VECTOR_BACKEND`
+- `RSS_VECTOR_HTTP_URL`
+- `RSS_VECTOR_STATE_DIR`
 
 #### 4.2 加载扩展
 
@@ -158,6 +161,35 @@ EMBEDDING_MODEL=text-embedding-v3
 - 若未显式配置，embedding 仍会兼容已有 DashScope / Aliyun 环境变量，并默认使用 `text-embedding-v3`
 - `chroma_db/` 下会记录 embedding 指纹；若你改了 embedding base URL 或 model，服务会警告需要重建向量库
 
+### Vector Store 后端
+
+支持两种 Chroma 模式：
+
+- `RSS_VECTOR_BACKEND=embedded`
+  - 默认模式
+  - 使用本地 `chroma_db/`
+  - Windows 上若本地索引损坏，启动时会自动隔离到 `chroma_db_quarantine_*`
+- `RSS_VECTOR_BACKEND=http`
+  - 使用 Docker / 自托管 Chroma HTTP 服务
+  - 本地仅保留 `vector_store_state/` 下的 embedding 指纹文件
+  - 连接地址由 `RSS_VECTOR_HTTP_URL` 控制，例如 `http://127.0.0.1:8000`
+
+### Dockerized Chroma
+
+仓库已提供 [docker-compose.chroma.yml](docker-compose.chroma.yml)：
+
+```bash
+docker compose -f docker-compose.chroma.yml up -d
+```
+
+切换到 Docker Chroma：
+
+```env
+RSS_VECTOR_BACKEND=http
+RSS_VECTOR_HTTP_URL=http://127.0.0.1:8000
+RSS_VECTOR_STATE_DIR=vector_store_state
+```
+
 ### 重建向量库
 
 当以下情况出现时，建议重建本地向量库：
@@ -175,6 +207,21 @@ uv run python rebuild_vector_store.py
 - 清空当前 Chroma collection
 - 用当前 embedding 配置刷新指纹
 - 从 `rss_scores.db` 中的缓存文章重新写入向量
+
+如果你刚从 embedded 迁到 Docker HTTP 模式，先启动容器并设置：
+
+```env
+RSS_VECTOR_BACKEND=http
+RSS_VECTOR_HTTP_URL=http://127.0.0.1:8000
+```
+
+然后执行同一个命令：
+
+```bash
+uv run python rebuild_vector_store.py
+```
+
+这会把 SQLite 缓存中的文章重新写入 Docker 上的 Chroma collection。
 
 ## 评分系统
 

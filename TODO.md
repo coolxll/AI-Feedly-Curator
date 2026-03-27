@@ -42,9 +42,10 @@
   - Reuse `rss_analyzer/backend_service.py` capabilities as the common execution layer
   - Target architecture: one backend, multiple clients (TUI / Chrome extension / future GUI / Skills)
 
-- [ ] Evaluate migrating local embedded `chroma_db/` to a Dockerized ChromaDB service
-  - Decide whether this should replace embedded mode or coexist as an optional backend
-  - Define service startup, persistence path, and client connection config
+- [x] Added optional Dockerized ChromaDB service mode
+  - `RSS_VECTOR_BACKEND=http` switches the app to Chroma HTTP client mode
+  - Added `docker-compose.chroma.yml` for local Docker startup
+  - Existing `rebuild_vector_store.py` now doubles as the migration command from SQLite cache to Docker Chroma
 
 - [ ] Revisit larger repo layout only if needed later (`apps/`, `clients/`, etc.)
 

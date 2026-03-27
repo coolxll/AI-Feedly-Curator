@@ -4,6 +4,7 @@ Shared backend message handlers for browser/native/local clients.
 
 from __future__ import annotations
 
+import concurrent.futures
 import logging
 import os
 from pathlib import Path
@@ -24,15 +25,24 @@ from rss_analyzer.llm_analyzer import (
     analyze_articles_with_llm_batch,
     summarize_single_article,
 )
+from rss_analyzer.config import get_vector_store_config
 logger = logging.getLogger(__name__)
 _VECTOR_STORE = None
 
 
+def _chunked(items: list[dict], size: int) -> list[list[dict]]:
+    return [items[i : i + size] for i in range(0, len(items), size)]
+
+
 def get_runtime_paths() -> dict[str, str]:
+    vector_config = get_vector_store_config()
     return {
         "project_root": str(PROJECT_ROOT),
         "db_path": os.environ["RSS_SCORES_DB"],
-        "vector_db_dir": os.environ["RSS_VECTOR_DB_DIR"],
+        "vector_backend": vector_config.backend,
+        "vector_db_dir": vector_config.persist_dir,
+        "vector_state_dir": vector_config.state_dir,
+        "vector_http_url": vector_config.http_url,
     }
 
 
@@ -348,16 +358,33 @@ def rebuild_vector_store() -> dict:
         }
 
     cached_items = iter_cached_scores()
-    cleared = vector_store.clear_collection()
-    if not cleared:
-        return {
-            "error": "clear_failed",
-            "message": "Failed to clear vector store before rebuild.",
-        }
+    resume_enabled = os.getenv("RSS_VECTOR_REBUILD_RESUME", "").lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+    existing_ids: set[str] = set()
+
+    if resume_enabled:
+        existing_ids = set(vector_store.get_all_article_ids())
+        logger.info("Resume mode enabled; found %s existing vectors", len(existing_ids))
+    else:
+        cleared = vector_store.clear_collection()
+        if not cleared:
+            return {
+                "error": "clear_failed",
+                "message": "Failed to clear vector store before rebuild.",
+            }
 
     vector_store.refresh_embedding_fingerprint()
 
-    rebuilt_count = 0
+    batch_size = max(1, int(os.getenv("RSS_VECTOR_REBUILD_BATCH_SIZE", "8")))
+    default_concurrency = "100" if getattr(vector_store, "backend", "embedded") == "http" else "4"
+    concurrency = max(
+        1, int(os.getenv("RSS_VECTOR_REBUILD_CONCURRENCY", default_concurrency))
+    )
+
+    rebuild_payloads: list[dict] = []
     skipped_count = 0
     failed_ids: list[str] = []
 
@@ -371,16 +398,26 @@ def rebuild_vector_store() -> dict:
         if not payload:
             skipped_count += 1
             continue
+        if resume_enabled and payload["article_id"] in existing_ids:
+            skipped_count += 1
+            continue
+        rebuild_payloads.append(payload)
 
-        success = vector_store.add_article(
-            payload["article_id"],
-            payload["document_text"],
-            payload["metadata"],
-        )
-        if success:
-            rebuilt_count += 1
-        else:
-            failed_ids.append(item["article_id"])
+    rebuilt_count = 0
+    batches = _chunked(rebuild_payloads, batch_size)
+    logger.info(
+        "Rebuilding vector store with batch_size=%s concurrency=%s payloads=%s",
+        batch_size,
+        concurrency,
+        len(rebuild_payloads),
+    )
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=concurrency) as executor:
+        futures = [executor.submit(vector_store.add_articles, batch) for batch in batches]
+        for future in concurrent.futures.as_completed(futures):
+            result = future.result()
+            rebuilt_count += result.get("success_count", 0)
+            failed_ids.extend(result.get("failed_ids", []))
 
     remaining_count = vector_store.get_article_count()
     return {
@@ -391,9 +428,12 @@ def rebuild_vector_store() -> dict:
         "failed_count": len(failed_ids),
         "failed_ids": failed_ids[:10],
         "remaining_count": remaining_count,
+        "batch_size": batch_size,
+        "concurrency": concurrency,
         "message": (
             f"Rebuilt vector store from {len(cached_items)} cached articles. "
-            f"Rebuilt={rebuilt_count}, skipped={skipped_count}, failed={len(failed_ids)}."
+            f"Rebuilt={rebuilt_count}, skipped={skipped_count}, failed={len(failed_ids)}. "
+            f"batch_size={batch_size}, concurrency={concurrency}, resume={resume_enabled}."
         ),
     }
 

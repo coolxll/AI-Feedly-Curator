@@ -10,6 +10,7 @@
 import logging
 import os
 from dataclasses import dataclass
+from urllib.parse import urlparse
 
 from dotenv import load_dotenv
 
@@ -38,6 +39,17 @@ class EmbeddingConfig:
     api_key: str | None
     base_url: str
     model: str
+
+
+@dataclass(frozen=True)
+class VectorStoreConfig:
+    backend: str
+    persist_dir: str
+    state_dir: str
+    http_host: str
+    http_port: int
+    http_ssl: bool
+    http_url: str
 
 PROJ_CONFIG = {
     "input_file": LATEST_UNREAD_FILE,
@@ -170,6 +182,57 @@ def get_embedding_config() -> EmbeddingConfig:
             or EMBEDDING_DEFAULT_BASE_URL
         ),
         model=os.getenv("EMBEDDING_MODEL", EMBEDDING_DEFAULT_MODEL),
+    )
+
+
+def get_vector_store_config() -> VectorStoreConfig:
+    """
+    Resolve vector store backend settings.
+
+    Supported backends:
+    - embedded: local PersistentClient(path=...)
+    - http: Docker/self-hosted Chroma HTTP server
+    """
+    backend = os.getenv("RSS_VECTOR_BACKEND", "embedded").strip().lower() or "embedded"
+    if backend not in {"embedded", "http"}:
+        logger.warning(
+            "Unsupported RSS_VECTOR_BACKEND=%r; falling back to embedded.",
+            backend,
+        )
+        backend = "embedded"
+
+    persist_dir = os.getenv("RSS_VECTOR_DB_DIR", os.path.join(os.getcwd(), "chroma_db"))
+    state_dir = os.getenv(
+        "RSS_VECTOR_STATE_DIR", os.path.join(os.getcwd(), "vector_store_state")
+    )
+
+    raw_url = os.getenv("RSS_VECTOR_HTTP_URL", "http://127.0.0.1:8000").strip()
+    parsed = urlparse(raw_url)
+
+    if parsed.scheme and parsed.hostname:
+        http_ssl = parsed.scheme == "https"
+        http_host = parsed.hostname
+        http_port = parsed.port or (443 if http_ssl else 80)
+        http_url = f"{parsed.scheme}://{http_host}:{http_port}"
+    else:
+        http_host = os.getenv("RSS_VECTOR_HTTP_HOST", "127.0.0.1")
+        http_port = int(os.getenv("RSS_VECTOR_HTTP_PORT", "8000"))
+        http_ssl = os.getenv("RSS_VECTOR_HTTP_SSL", "").lower() in (
+            "1",
+            "true",
+            "yes",
+        )
+        scheme = "https" if http_ssl else "http"
+        http_url = f"{scheme}://{http_host}:{http_port}"
+
+    return VectorStoreConfig(
+        backend=backend,
+        persist_dir=persist_dir,
+        state_dir=state_dir,
+        http_host=http_host,
+        http_port=http_port,
+        http_ssl=http_ssl,
+        http_url=http_url,
     )
 
 

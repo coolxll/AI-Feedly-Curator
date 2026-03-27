@@ -14,6 +14,7 @@ from rss_analyzer.config import (
     get_config,
     get_embedding_config,
     get_openai_task_config,
+    get_vector_store_config,
 )
 
 
@@ -123,6 +124,32 @@ class TestConfig(unittest.TestCase):
             self.assertEqual(config.api_key, "dashscope-key")
             self.assertEqual(config.base_url, "https://dashscope.example/v1")
             self.assertEqual(config.model, EMBEDDING_DEFAULT_MODEL)
+
+    def test_get_vector_store_config_defaults_to_embedded(self):
+        with patch.dict(os.environ, {}, clear=True):
+            config = get_vector_store_config()
+            self.assertEqual(config.backend, "embedded")
+            self.assertTrue(config.persist_dir.endswith("chroma_db"))
+            self.assertTrue(config.state_dir.endswith("vector_store_state"))
+            self.assertEqual(config.http_url, "http://127.0.0.1:8000")
+
+    def test_get_vector_store_config_supports_http_url(self):
+        with patch.dict(
+            os.environ,
+            {
+                "RSS_VECTOR_BACKEND": "http",
+                "RSS_VECTOR_HTTP_URL": "https://chroma.example:9443",
+                "RSS_VECTOR_STATE_DIR": "state-dir",
+            },
+            clear=True,
+        ):
+            config = get_vector_store_config()
+            self.assertEqual(config.backend, "http")
+            self.assertEqual(config.http_host, "chroma.example")
+            self.assertEqual(config.http_port, 9443)
+            self.assertTrue(config.http_ssl)
+            self.assertEqual(config.http_url, "https://chroma.example:9443")
+            self.assertEqual(config.state_dir, "state-dir")
 
 
 if __name__ == "__main__":

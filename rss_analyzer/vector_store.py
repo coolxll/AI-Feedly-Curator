@@ -2,12 +2,20 @@ import os
 import logging
 import json
 import hashlib
+import subprocess
 import sys
+import time
+from datetime import datetime
 from typing import List, Dict, Any
 from openai import OpenAI
-from rss_analyzer.config import get_embedding_config
+from rss_analyzer.config import get_embedding_config, get_vector_store_config
 
 logger = logging.getLogger(__name__)
+
+
+def _is_rate_limit_error(exc: Exception) -> bool:
+    text = str(exc).lower()
+    return "429" in text or "limit_requests" in text or "rate limit" in text
 
 try:
     import chromadb
@@ -93,15 +101,24 @@ class ChromaVectorStore:
     """
 
     def __init__(self, collection_name: str = "rss_articles"):
-        self.persist_dir = os.getenv(
-            "RSS_VECTOR_DB_DIR", os.path.join(os.getcwd(), "chroma_db")
-        )
+        vector_config = get_vector_store_config()
+        self.backend = vector_config.backend
+        self.persist_dir = vector_config.persist_dir
+        self.state_dir = vector_config.state_dir
+        self.http_host = vector_config.http_host
+        self.http_port = vector_config.http_port
+        self.http_ssl = vector_config.http_ssl
+        self.http_url = vector_config.http_url
         self.collection_name = collection_name
+        fingerprint_dir = (
+            self.persist_dir if self.backend == "embedded" else self.state_dir
+        )
         self.fingerprint_path = os.path.join(
-            self.persist_dir, f"{self.collection_name}_embedding_fingerprint.json"
+            fingerprint_dir, f"{self.collection_name}_embedding_fingerprint.json"
         )
         self.client = None
         self.collection = None
+        self.embedding_fn = None
         self._trending_cache = None
         self._trending_cache_time = None
         self._initialize()
@@ -113,17 +130,122 @@ class ChromaVectorStore:
                     f"chromadb import failed: {CHROMADB_IMPORT_ERROR}."
                     f"{_build_chromadb_import_guidance()}"
                 )
-            self.client = chromadb.PersistentClient(path=self.persist_dir)
-            embedding_fn = DashScopeEmbeddingFunction()
-            self.collection = self.client.get_or_create_collection(
-                name=self.collection_name, embedding_function=embedding_fn
-            )
-            self._ensure_embedding_fingerprint(embedding_fn)
+            if self.backend == "embedded":
+                if self._has_persisted_store() and not self._validate_existing_store():
+                    backup_dir = self._quarantine_persist_dir()
+                    logger.warning(
+                        "Detected an unhealthy ChromaDB store at %s and moved it to %s. "
+                        "The vector store will start empty; rebuild it from SQLite with "
+                        "`uv run python rebuild_vector_store.py` once your embedding "
+                        "provider is reachable.",
+                        self.persist_dir,
+                        backup_dir,
+                    )
+                self.client = chromadb.PersistentClient(path=self.persist_dir)
+            else:
+                self.client = chromadb.HttpClient(
+                    host=self.http_host,
+                    port=self.http_port,
+                    ssl=self.http_ssl,
+                )
+            self.embedding_fn = DashScopeEmbeddingFunction()
+            if self._uses_client_side_embeddings():
+                self.collection = self.client.get_or_create_collection(
+                    name=self.collection_name
+                )
+            else:
+                self.collection = self.client.get_or_create_collection(
+                    name=self.collection_name, embedding_function=self.embedding_fn
+                )
+            self._ensure_embedding_fingerprint(self.embedding_fn)
             logger.info(
-                f"ChromaDB initialized at {self.persist_dir}, collection: {self.collection_name}"
+                "ChromaDB initialized (%s) at %s, collection: %s",
+                self.backend,
+                self._describe_target(),
+                self.collection_name,
             )
         except Exception as e:
             logger.error(f"Failed to initialize ChromaDB: {e}")
+
+    def _describe_target(self) -> str:
+        if self.backend == "http":
+            return self.http_url
+        return self.persist_dir
+
+    def _uses_client_side_embeddings(self) -> bool:
+        return self.backend == "http"
+
+    def _embed_texts(self, texts: list[str]) -> list[list[float]]:
+        if not self.embedding_fn:
+            raise ValueError("Embedding function is not initialized")
+        return self.embedding_fn(texts)
+
+    def _has_persisted_store(self) -> bool:
+        if not os.path.isdir(self.persist_dir):
+            return False
+
+        entries = os.listdir(self.persist_dir)
+        return bool(entries)
+
+    def _validate_existing_store(self) -> bool:
+        """
+        Validate the persisted collection in a subprocess so a native crash in
+        Chroma's Rust bindings cannot take down the parent process.
+        """
+        validation_script = """
+import sys
+import chromadb
+
+path = sys.argv[1]
+name = sys.argv[2]
+client = chromadb.PersistentClient(path=path)
+collection = client.get_or_create_collection(name=name)
+print(collection.count())
+""".strip()
+
+        try:
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-X",
+                    "faulthandler",
+                    "-c",
+                    validation_script,
+                    self.persist_dir,
+                    self.collection_name,
+                ],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+        except Exception as e:
+            logger.warning(
+                "ChromaDB health check process failed for %s: %s",
+                self.persist_dir,
+                e,
+            )
+            return False
+
+        if result.returncode == 0:
+            return True
+
+        details = (result.stderr or result.stdout or "").strip()
+        if details:
+            details = f" Details: {details[-1000:]}"
+        logger.warning(
+            "ChromaDB health check failed for %s (exit=%s).%s",
+            self.persist_dir,
+            result.returncode,
+            details,
+        )
+        return False
+
+    def _quarantine_persist_dir(self) -> str:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        backup_dir = f"{self.persist_dir}_quarantine_{timestamp}"
+        os.replace(self.persist_dir, backup_dir)
+        os.makedirs(self.persist_dir, exist_ok=True)
+        return backup_dir
 
     def _build_embedding_fingerprint(self, embedding_fn: DashScopeEmbeddingFunction) -> dict:
         identity = {
@@ -152,7 +274,7 @@ class ChromaVectorStore:
             return None
 
     def _write_embedding_fingerprint(self, fingerprint: dict) -> None:
-        os.makedirs(self.persist_dir, exist_ok=True)
+        os.makedirs(os.path.dirname(self.fingerprint_path), exist_ok=True)
         with open(self.fingerprint_path, "w", encoding="utf-8") as f:
             json.dump(fingerprint, f, ensure_ascii=False, indent=2)
 
@@ -209,6 +331,16 @@ class ChromaVectorStore:
             logger.error(f"Failed to refresh embedding fingerprint: {e}")
             return False
 
+    def _normalize_metadata(self, metadata: dict | None) -> dict:
+        safe_metadata = {}
+        if metadata:
+            for k, v in metadata.items():
+                if isinstance(v, (str, int, float, bool)):
+                    safe_metadata[k] = v
+                else:
+                    safe_metadata[k] = str(v)
+        return safe_metadata
+
     def add_article(self, article_id: str, text: str, metadata: dict = None) -> bool:
         """
         Add or update an article in the vector store.
@@ -220,23 +352,81 @@ class ChromaVectorStore:
             return False
 
         try:
-            # Ensure metadata values are compatible (flat dict, primitives only usually)
-            safe_metadata = {}
-            if metadata:
-                for k, v in metadata.items():
-                    if isinstance(v, (str, int, float, bool)):
-                        safe_metadata[k] = v
-                    else:
-                        safe_metadata[k] = str(v)
-
             # Upsert
-            self.collection.upsert(
-                ids=[article_id], documents=[text], metadatas=[safe_metadata]
-            )
+            upsert_kwargs = {
+                "ids": [article_id],
+                "documents": [text],
+                "metadatas": [self._normalize_metadata(metadata)],
+            }
+            if self._uses_client_side_embeddings():
+                upsert_kwargs["embeddings"] = self._embed_texts([text])
+
+            self.collection.upsert(**upsert_kwargs)
             return True
         except Exception as e:
             logger.error(f"Failed to add article {article_id} to vector store: {e}")
             return False
+
+    def add_articles(self, items: list[dict]) -> dict[str, Any]:
+        """
+        Add or update multiple articles in one batch.
+        """
+        if not self.collection:
+            return {"success_count": 0, "failed_ids": [item["article_id"] for item in items]}
+
+        valid_items = [
+            item
+            for item in items
+            if item.get("article_id")
+            and item.get("document_text")
+            and item["document_text"].strip()
+        ]
+        if not valid_items:
+            return {"success_count": 0, "failed_ids": []}
+
+        upsert_kwargs = {
+            "ids": [item["article_id"] for item in valid_items],
+            "documents": [item["document_text"] for item in valid_items],
+            "metadatas": [
+                self._normalize_metadata(item.get("metadata")) for item in valid_items
+            ],
+        }
+        retry_limit = max(0, int(os.getenv("RSS_VECTOR_REBUILD_RETRIES", "6")))
+        base_delay = max(
+            0.1, float(os.getenv("RSS_VECTOR_REBUILD_RETRY_BASE_DELAY", "1.5"))
+        )
+
+        for attempt in range(retry_limit + 1):
+            try:
+                current_kwargs = dict(upsert_kwargs)
+                if self._uses_client_side_embeddings():
+                    current_kwargs["embeddings"] = self._embed_texts(
+                        upsert_kwargs["documents"]
+                    )
+
+                self.collection.upsert(**current_kwargs)
+                return {"success_count": len(valid_items), "failed_ids": []}
+            except Exception as e:
+                if attempt < retry_limit and _is_rate_limit_error(e):
+                    sleep_seconds = base_delay * (2**attempt)
+                    logger.warning(
+                        "Embedding batch hit rate limit; retrying in %.1fs "
+                        "(attempt %s/%s, batch=%s)",
+                        sleep_seconds,
+                        attempt + 1,
+                        retry_limit,
+                        len(valid_items),
+                    )
+                    time.sleep(sleep_seconds)
+                    continue
+
+                failed_ids = [item["article_id"] for item in valid_items]
+                logger.error(
+                    "Failed to add article batch to vector store (%s items): %s",
+                    len(valid_items),
+                    e,
+                )
+                return {"success_count": 0, "failed_ids": failed_ids}
 
     def search_similar(self, query: str, limit: int = 5, min_score: float = None) -> List[dict]:
         """
@@ -254,7 +444,15 @@ class ChromaVectorStore:
         try:
             # Increase the number of results we fetch to account for potential filtering
             fetch_limit = limit * 3 if min_score is not None else limit
-            results = self.collection.query(query_texts=[query], n_results=fetch_limit)
+            if self._uses_client_side_embeddings():
+                results = self.collection.query(
+                    query_embeddings=self._embed_texts([query]),
+                    n_results=fetch_limit,
+                )
+            else:
+                results = self.collection.query(
+                    query_texts=[query], n_results=fetch_limit
+                )
 
             # Format results
             # results structure: {'ids': [['id1', 'id2']], 'documents': [['doc1', 'doc2']], ...}

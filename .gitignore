@@ -60,6 +60,9 @@ htmlcov/
 gha-creds-*.json
 # Ignore chroma_db directory as it contains runtime data
 chroma_db/
+chroma_db_quarantine_*/
+vector_store_state/
+docker/chroma/
 # Ignore gemini-related files due to security concerns mentioned in code review
 .github/workflows/gemini-*.yml
 .github/commands/

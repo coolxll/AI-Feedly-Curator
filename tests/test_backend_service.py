@@ -13,6 +13,8 @@ class TestBackendService(unittest.TestCase):
         runtime = get_runtime_paths()
         self.assertEqual(response["db_path"], runtime["db_path"])
         self.assertEqual(response["vector_db_dir"], runtime["vector_db_dir"])
+        self.assertEqual(response["vector_backend"], runtime["vector_backend"])
+        self.assertEqual(response["vector_http_url"], runtime["vector_http_url"])
 
     @patch("rss_analyzer.backend_service.get_cached_score")
     @patch("rss_analyzer.backend_service.analyze_articles_with_llm_batch")
@@ -100,10 +102,12 @@ class TestBackendService(unittest.TestCase):
         self, mock_get_vector_store, mock_build_payload, mock_iter_cached_scores
     ):
         vector_store = Mock()
+        vector_store.backend = "http"
         vector_store.collection = object()
         vector_store.clear_collection.return_value = True
+        vector_store.get_all_article_ids.return_value = []
         vector_store.get_article_count.return_value = 1
-        vector_store.add_article.return_value = True
+        vector_store.add_articles.return_value = {"success_count": 1, "failed_ids": []}
         mock_get_vector_store.return_value = vector_store
 
         mock_iter_cached_scores.return_value = [
@@ -126,7 +130,57 @@ class TestBackendService(unittest.TestCase):
         self.assertEqual(response["rebuilt_count"], 1)
         vector_store.clear_collection.assert_called_once()
         vector_store.refresh_embedding_fingerprint.assert_called_once()
-        vector_store.add_article.assert_called_once()
+        vector_store.add_articles.assert_called_once()
+
+    @patch.dict("os.environ", {"RSS_VECTOR_REBUILD_RESUME": "true"}, clear=False)
+    @patch("rss_analyzer.backend_service.iter_cached_scores")
+    @patch("rss_analyzer.backend_service.build_vector_store_payload")
+    @patch("rss_analyzer.backend_service.get_vector_store")
+    def test_rebuild_vector_store_skips_existing_ids_in_resume_mode(
+        self, mock_get_vector_store, mock_build_payload, mock_iter_cached_scores
+    ):
+        vector_store = Mock()
+        vector_store.backend = "http"
+        vector_store.collection = object()
+        vector_store.get_all_article_ids.return_value = ["article-1"]
+        vector_store.get_article_count.return_value = 1
+        vector_store.add_articles.return_value = {"success_count": 1, "failed_ids": []}
+        mock_get_vector_store.return_value = vector_store
+
+        mock_iter_cached_scores.return_value = [
+            {
+                "article_id": "article-1",
+                "score": 4.3,
+                "data": {"title": "Title 1", "summary": "Summary 1"},
+                "updated_at": "2026-03-26T12:00:00",
+            },
+            {
+                "article_id": "article-2",
+                "score": 4.1,
+                "data": {"title": "Title 2", "summary": "Summary 2"},
+                "updated_at": "2026-03-26T12:00:01",
+            },
+        ]
+        mock_build_payload.side_effect = [
+            {
+                "article_id": "article-1",
+                "document_text": "Title: Title 1\nContent: Summary 1",
+                "metadata": {"score": 4.3, "title": "Title 1"},
+            },
+            {
+                "article_id": "article-2",
+                "document_text": "Title: Title 2\nContent: Summary 2",
+                "metadata": {"score": 4.1, "title": "Title 2"},
+            },
+        ]
+
+        response = handle_message({"type": "rebuild_vector_store"})
+
+        self.assertTrue(response["success"])
+        self.assertEqual(response["rebuilt_count"], 1)
+        self.assertEqual(response["skipped_count"], 1)
+        vector_store.clear_collection.assert_not_called()
+        vector_store.add_articles.assert_called_once()
 
     @patch("rss_analyzer.backend_service.get_vector_store")
     def test_rebuild_vector_store_returns_error_when_vector_store_unavailable(
