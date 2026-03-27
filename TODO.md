@@ -44,7 +44,6 @@
 
 - [x] Added optional Dockerized ChromaDB service mode
   - `RSS_VECTOR_BACKEND=http` switches the app to Chroma HTTP client mode
-  - Added `docker-compose.chroma.yml` for local Docker startup
   - Existing `rebuild_vector_store.py` now doubles as the migration command from SQLite cache to Docker Chroma
 
 - [ ] Revisit larger repo layout only if needed later (`apps/`, `clients/`, etc.)

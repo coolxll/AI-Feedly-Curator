@@ -174,14 +174,6 @@ EMBEDDING_MODEL=text-embedding-v3
   - 本地仅保留 `vector_store_state/` 下的 embedding 指纹文件
   - 连接地址由 `RSS_VECTOR_HTTP_URL` 控制，例如 `http://127.0.0.1:8000`
 
-### Dockerized Chroma
-
-仓库已提供 [docker-compose.chroma.yml](docker-compose.chroma.yml)：
-
-```bash
-docker compose -f docker-compose.chroma.yml up -d
-```
-
 切换到 Docker Chroma：
 
 ```env
