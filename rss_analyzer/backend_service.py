@@ -8,6 +8,7 @@ import concurrent.futures
 import logging
 import os
 from datetime import datetime
+from dataclasses import dataclass
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -38,6 +39,14 @@ from rss_analyzer.llm_analyzer import (
 from rss_analyzer.utils import is_newsflash, load_articles, save_articles
 logger = logging.getLogger(__name__)
 _VECTOR_STORE = None
+FEED_ID_36KR = "feed/http://www.36kr.com/feed"
+
+
+@dataclass
+class FilterResult:
+    matched: list
+    remaining: list
+    label: str
 
 
 def _chunked(items: list[dict], size: int) -> list[list[dict]]:
@@ -359,6 +368,294 @@ def analyze_articles(
         "latest_analyzed_file": LATEST_ANALYZED_FILE,
         "articles": analyzed_articles,
         **summary_result,
+    }
+
+
+def fetch_filter_articles(limit: int, stream_id: str | None = None) -> list:
+    source_label = "36kr feed" if stream_id == FEED_ID_36KR else "all unread"
+    logger.info("Fetching unread articles from %s (limit=%s)", source_label, limit)
+    articles = feedly_fetch_unread(stream_id=stream_id, limit=limit) or []
+    logger.info("Fetched %s unread articles", len(articles))
+    return articles
+
+
+def mark_filter_results_as_read(
+    articles: list, label: str, dry_run: bool, mark_read: bool
+) -> bool:
+    if not articles:
+        return True
+
+    if not mark_read:
+        logger.info(
+            "Skipping mark-as-read for %s %s articles because mark_read is disabled",
+            len(articles),
+            label,
+        )
+        return True
+
+    ids = [article["id"] for article in articles if article.get("id")]
+    if dry_run:
+        logger.info("[DRY RUN] Would mark %s %s articles as read", len(ids), label)
+        for article in articles[:5]:
+            score = article.get("_score")
+            prefix = f"[{score:.1f}] " if score is not None else ""
+            logger.info("  - %s%s", prefix, article.get("title", "")[:50])
+        if len(articles) > 5:
+            logger.info("  ... and %s more", len(articles) - 5)
+        return True
+
+    for idx in range(0, len(ids), 500):
+        if not feedly_mark_read(ids[idx : idx + 500]):
+            logger.error("Failed to mark %s articles as read", label)
+            return False
+
+    logger.info("Marked %s %s articles as read", len(ids), label)
+    return True
+
+
+def run_filter_pipeline(
+    articles: list, filters: list, dry_run: bool, mark_read: bool
+) -> dict:
+    remaining = articles
+    total_matched = 0
+    steps: list[dict] = []
+
+    for filter_func in filters:
+        if not remaining:
+            break
+
+        result = filter_func(remaining)
+        mark_filter_results_as_read(result.matched, result.label, dry_run, mark_read)
+        total_matched += len(result.matched)
+        steps.append(
+            {
+                "label": result.label,
+                "matched_count": len(result.matched),
+                "remaining_count": len(result.remaining),
+            }
+        )
+        remaining = result.remaining
+
+    logger.info("Filtered %s/%s articles", total_matched, len(articles))
+    return {
+        "success": True,
+        "article_count": len(articles),
+        "filtered_count": total_matched,
+        "remaining_count": len(remaining),
+        "steps": steps,
+    }
+
+
+def newsflash_filter(articles: list) -> FilterResult:
+    matched = [article for article in articles if is_newsflash(article)]
+    remaining = [article for article in articles if not is_newsflash(article)]
+    logger.info("Newsflash filter matched %s/%s", len(matched), len(articles))
+    return FilterResult(matched, remaining, "newsflash")
+
+
+def _fetch_content(article: dict) -> str:
+    link = article.get("canonicalUrl") or article.get("alternate", [{}])[0].get(
+        "href", ""
+    )
+    return fetch_article_content(link) if link else ""
+
+
+def _prepare_article_scoring(article: dict) -> dict:
+    title = article.get("title", "")
+    summary = article.get("summary", "")
+    content = article.get("content", "")
+
+    if not (content and len(content) > 200):
+        content = summary if len(summary) > 500 else _fetch_content(article) or summary
+
+    return {"title": title, "summary": summary, "content": content}
+
+
+def _score_article(article: dict) -> tuple[float, dict]:
+    payload = _prepare_article_scoring(article)
+    try:
+        result = analyze_article_with_llm(
+            payload.get("title", ""),
+            payload.get("summary", ""),
+            payload.get("content", ""),
+        )
+        return result.get("score", 0.0), result
+    except Exception as exc:
+        logger.debug("Scoring failed: %s", exc)
+        return -1.0, {}
+
+
+def _handle_scored_filter_article(
+    article: dict,
+    score: float,
+    prefix: str,
+    threshold: float,
+    dry_run: bool,
+    matched: list,
+    remaining: list,
+    mark_read: bool,
+) -> None:
+    title_str = article.get("title", "Unknown Title")
+    if score < 0:
+        logger.info("%s Result: skipped (scoring failed)", prefix)
+        remaining.append(article)
+    elif score <= threshold:
+        logger.info("%s Result: %s", prefix, title_str)
+        if mark_read:
+            action = "[DRY RUN] would mark as read" if dry_run else "will be marked as read"
+            logger.info("%s Score %.1f <= %.1f, %s", prefix, score, threshold, action)
+        else:
+            logger.info("%s Score %.1f <= %.1f, mark_read disabled", prefix, score, threshold)
+        matched.append({**article, "_score": score})
+    else:
+        logger.info("%s Result: kept %s (%.1f)", prefix, title_str, score)
+        remaining.append(article)
+
+
+def low_score_filter(
+    articles: list,
+    threshold: float = 3.0,
+    dry_run: bool = False,
+    mark_read: bool = True,
+) -> FilterResult:
+    matched = []
+    remaining = []
+    batch_scoring = PROJ_CONFIG.get("batch_scoring", False)
+    batch_size = max(1, int(PROJ_CONFIG.get("batch_size", 1)))
+    batch_queue = []
+
+    def flush_batch() -> None:
+        nonlocal batch_queue
+        if not batch_queue:
+            return
+
+        batch_payload = [item["payload"] for item in batch_queue]
+        batch_results = analyze_articles_with_llm_batch(batch_payload)
+        for item, analysis in zip(batch_queue, batch_results):
+            score = analysis.get("score", 0.0)
+            save_cached_score(item["article"].get("id"), score, analysis)
+            _handle_scored_filter_article(
+                item["article"],
+                score,
+                item["prefix"],
+                threshold,
+                dry_run,
+                matched,
+                remaining,
+                mark_read,
+            )
+        batch_queue = []
+
+    for idx, article in enumerate(articles, 1):
+        title = article.get("title", "")[:50]
+        prefix = f"[{idx}/{len(articles)}]"
+        article_id = article.get("id")
+
+        cached = get_cached_score(article_id)
+        if cached:
+            if batch_scoring and batch_queue:
+                flush_batch()
+
+            score = cached["score"]
+            logger.info("%s Using cached score for %s", prefix, title)
+            _handle_scored_filter_article(
+                article,
+                score,
+                prefix,
+                threshold,
+                dry_run,
+                matched,
+                remaining,
+                mark_read,
+            )
+            continue
+
+        logger.info("%s Scoring %s...", prefix, title)
+        if batch_scoring:
+            batch_queue.append(
+                {
+                    "article": article,
+                    "prefix": prefix,
+                    "payload": _prepare_article_scoring(article),
+                }
+            )
+            if len(batch_queue) >= batch_size:
+                flush_batch()
+        else:
+            score, analysis = _score_article(article)
+            if score >= 0:
+                save_cached_score(article_id, score, analysis)
+
+            _handle_scored_filter_article(
+                article,
+                score,
+                prefix,
+                threshold,
+                dry_run,
+                matched,
+                remaining,
+                mark_read,
+            )
+
+    if batch_scoring and batch_queue:
+        flush_batch()
+
+    logger.info(
+        "Low-score filter matched %s articles and kept %s",
+        len(matched),
+        len(remaining),
+    )
+    return FilterResult(matched, remaining, "low-score")
+
+
+def run_filter_workflow(
+    *,
+    mode: str,
+    limit: int,
+    threshold: float = 3.0,
+    dry_run: bool = False,
+    mark_read: bool = False,
+    stream_id: str | None = None,
+) -> dict:
+    target_stream = stream_id
+
+    if mode == "newsflash":
+        if not target_stream:
+            target_stream = FEED_ID_36KR
+        articles = fetch_filter_articles(limit, stream_id=target_stream)
+        filters = [newsflash_filter]
+    elif mode == "low-score":
+        articles = fetch_filter_articles(limit, stream_id=target_stream)
+        filters = [
+            lambda items: low_score_filter(items, threshold, dry_run, mark_read)
+        ]
+    else:
+        articles = fetch_filter_articles(limit, stream_id=target_stream)
+        filters = [
+            newsflash_filter,
+            lambda items: low_score_filter(items, threshold, dry_run, mark_read),
+        ]
+
+    if not articles:
+        return {
+            "success": True,
+            "mode": mode,
+            "stream_id": target_stream,
+            "article_count": 0,
+            "filtered_count": 0,
+            "remaining_count": 0,
+            "steps": [],
+            "message": "No unread articles found.",
+        }
+
+    result = run_filter_pipeline(articles, filters, dry_run, mark_read)
+    return {
+        **result,
+        "mode": mode,
+        "stream_id": target_stream,
+        "threshold": threshold,
+        "dry_run": dry_run,
+        "mark_read": mark_read,
     }
 
 
@@ -688,6 +985,17 @@ def _handle_generate_summary(msg: dict) -> dict:
     return regenerate_summary(input_file=input_file)
 
 
+def _handle_run_filters(msg: dict) -> dict:
+    return run_filter_workflow(
+        mode=msg.get("mode", "all"),
+        limit=int(msg.get("limit", 1000)),
+        threshold=float(msg.get("threshold", 3.0)),
+        dry_run=_coerce_bool(msg.get("dry_run"), False),
+        mark_read=_coerce_bool(msg.get("mark_read"), PROJ_CONFIG["mark_read"]),
+        stream_id=msg.get("stream_id"),
+    )
+
+
 def rebuild_vector_store() -> dict:
     vector_store = get_vector_store()
     if not vector_store or not vector_store.collection:
@@ -839,6 +1147,8 @@ def handle_message(msg: dict) -> dict:
         return _handle_run_analysis(msg)
     if msg_type == "generate_summary":
         return _handle_generate_summary(msg)
+    if msg_type == "run_filters":
+        return _handle_run_filters(msg)
     if msg_type == "analyze_article":
         return _handle_analyze_article(msg)
     if msg_type == "summarize_article":

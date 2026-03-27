@@ -473,10 +473,7 @@ def _verify_startup_dependencies_or_exit() -> None:
     """
     # Importing these modules is enough to trigger the common failure modes.
     # Keep the import list minimal and aligned with the plan.
-    required = [
-        "feedly_filter",
-        "rss_analyzer.backend_service",
-    ]
+    required = ["rss_analyzer.backend_service"]
 
     for mod in required:
         try:
@@ -773,47 +770,34 @@ def execute_filter(
     )
 
     try:
-        filters = []
-        articles = []
-
-        # Determine target stream (priority: explicitly passed stream_id > mode default)
-        target_stream = stream_id
-
-        try:
-            import feedly_filter
-        except Exception as e:
-            console.print(Panel(_import_error_hint("feedly_filter", e), style="red"))
+        backend_service = _load_backend_service()
+        if backend_service is None:
             return
 
-        if mode == "newsflash":
-            # For newsflash, usually we target 36kr, but if user provided a stream, use that
-            if not target_stream:
-                target_stream = feedly_filter.FEED_ID_36KR
+        result = backend_service.run_filter_workflow(
+            mode=mode,
+            limit=limit,
+            threshold=threshold,
+            dry_run=dry_run,
+            mark_read=mark_read,
+            stream_id=stream_id,
+        )
+        if result.get("error"):
+            console.print(Panel(result["message"], style="red"))
+            return
 
-            articles = feedly_filter.fetch_articles(limit, stream_id=target_stream)
-            filters = [feedly_filter.newsflash_filter]
-        elif mode == "low-score":
-            articles = feedly_filter.fetch_articles(limit, stream_id=target_stream)
-            filters = [
-                lambda a: feedly_filter.low_score_filter(
-                    a, threshold, dry_run, mark_read
-                )
-            ]
-        else:  # all
-            articles = feedly_filter.fetch_articles(limit, stream_id=target_stream)
-            filters = [
-                feedly_filter.newsflash_filter,
-                lambda a: feedly_filter.low_score_filter(
-                    a, threshold, dry_run, mark_read
-                ),
-            ]
-
-        if not articles:
+        if result["article_count"] == 0:
             console.print("[yellow]No unread articles found.[/yellow]")
             return
 
-        feedly_filter.run_filters(articles, filters, dry_run, mark_read)
-        console.print(Panel("Analysis Complete!", style="bold green"))
+        console.print(
+            Panel(
+                "Filter Run Complete!\n"
+                f"Filtered: {result['filtered_count']}\n"
+                f"Remaining: {result['remaining_count']}",
+                style="bold green",
+            )
+        )
 
     except KeyboardInterrupt:
         console.print("\n[red]Operation cancelled by user.[/red]")

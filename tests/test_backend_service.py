@@ -170,6 +170,73 @@ class TestBackendService(unittest.TestCase):
             threads=4,
         )
 
+    @patch("rss_analyzer.backend_service.run_filter_workflow")
+    def test_run_filters_handler_coerces_values(self, mock_run_filter_workflow):
+        mock_run_filter_workflow.return_value = {"success": True}
+
+        response = handle_message(
+            {
+                "type": "run_filters",
+                "mode": "low-score",
+                "limit": "25",
+                "threshold": "2.5",
+                "dry_run": "true",
+                "mark_read": "false",
+                "stream_id": "feed/abc",
+            }
+        )
+
+        self.assertTrue(response["success"])
+        mock_run_filter_workflow.assert_called_once_with(
+            mode="low-score",
+            limit=25,
+            threshold=2.5,
+            dry_run=True,
+            mark_read=False,
+            stream_id="feed/abc",
+        )
+
+    @patch("rss_analyzer.backend_service.feedly_mark_read")
+    @patch("rss_analyzer.backend_service.get_cached_score")
+    def test_low_score_filter_does_not_mark_read_inline(
+        self, mock_get_cached_score, mock_feedly_mark_read
+    ):
+        from rss_analyzer.backend_service import low_score_filter
+
+        mock_get_cached_score.return_value = {"score": 2.1}
+        result = low_score_filter(
+            [{"id": "article-1", "title": "Low score article"}],
+            threshold=3.0,
+            dry_run=False,
+            mark_read=True,
+        )
+
+        self.assertEqual(len(result.matched), 1)
+        self.assertEqual(result.label, "low-score")
+        mock_feedly_mark_read.assert_not_called()
+
+    @patch("rss_analyzer.backend_service.run_filter_pipeline")
+    @patch("rss_analyzer.backend_service.fetch_filter_articles")
+    def test_run_filter_workflow_defaults_newsflash_to_36kr(
+        self, mock_fetch_filter_articles, mock_run_filter_pipeline
+    ):
+        from rss_analyzer.backend_service import FEED_ID_36KR, run_filter_workflow
+
+        mock_fetch_filter_articles.return_value = [{"id": "article-1", "title": "News"}]
+        mock_run_filter_pipeline.return_value = {
+            "success": True,
+            "article_count": 1,
+            "filtered_count": 1,
+            "remaining_count": 0,
+            "steps": [],
+        }
+
+        response = run_filter_workflow(mode="newsflash", limit=10)
+
+        self.assertTrue(response["success"])
+        self.assertEqual(response["stream_id"], FEED_ID_36KR)
+        mock_fetch_filter_articles.assert_called_once_with(10, stream_id=FEED_ID_36KR)
+
     @patch("rss_analyzer.backend_service.iter_cached_scores")
     @patch("rss_analyzer.backend_service.build_vector_store_payload")
     @patch("rss_analyzer.backend_service.get_vector_store")

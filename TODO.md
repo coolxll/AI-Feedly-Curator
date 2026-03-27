@@ -46,7 +46,9 @@
   - `article_analyzer.py` and `regenerate_summary.py` now wrap shared `rss_analyzer/backend_service.py` workflows
   - Target architecture remains: one backend, multiple clients (TUI / Chrome extension / future GUI / Skills)
 
-- [ ] Revisit whether TUI filter flows should also move behind the shared backend/service layer
+- [x] Converged TUI filter flows onto the shared backend/service layer
+  - `feedly_tui.py` now runs filter workflows via `rss_analyzer/backend_service.py`
+  - `feedly_filter.py` is now a thin CLI wrapper over the same shared backend workflow
 
 - [x] Added optional Dockerized ChromaDB service mode
   - `RSS_VECTOR_BACKEND=http` switches the app to Chroma HTTP client mode
