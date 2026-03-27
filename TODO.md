@@ -41,10 +41,12 @@
 
 ## Next
 
-- [ ] Gradually converge TUI onto the shared backend/service layer
-  - Move TUI orchestration away from direct script/module calls where practical
-  - Reuse `rss_analyzer/backend_service.py` capabilities as the common execution layer
-  - Target architecture: one backend, multiple clients (TUI / Chrome extension / future GUI / Skills)
+- [x] Converged TUI analyze/export/summary flows onto the shared backend/service layer
+  - `feedly_tui.py` no longer orchestrates `article_analyzer.main()` or `regenerate_summary` directly
+  - `article_analyzer.py` and `regenerate_summary.py` now wrap shared `rss_analyzer/backend_service.py` workflows
+  - Target architecture remains: one backend, multiple clients (TUI / Chrome extension / future GUI / Skills)
+
+- [ ] Revisit whether TUI filter flows should also move behind the shared backend/service layer
 
 - [x] Added optional Dockerized ChromaDB service mode
   - `RSS_VECTOR_BACKEND=http` switches the app to Chroma HTTP client mode

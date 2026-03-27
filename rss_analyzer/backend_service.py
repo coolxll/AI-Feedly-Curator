@@ -7,6 +7,7 @@ from __future__ import annotations
 import concurrent.futures
 import logging
 import os
+from datetime import datetime
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -20,18 +21,37 @@ from rss_analyzer.cache import (
     iter_cached_scores,
     save_cached_score,
 )
+from rss_analyzer.config import (
+    LATEST_ANALYZED_FILE,
+    LATEST_SUMMARY_FILE,
+    LATEST_UNREAD_FILE,
+    PROJ_CONFIG,
+    get_vector_store_config,
+)
+from rss_analyzer.feedly_client import feedly_fetch_unread, feedly_mark_read
 from rss_analyzer.llm_analyzer import (
     analyze_article_with_llm,
     analyze_articles_with_llm_batch,
+    generate_overall_summary,
     summarize_single_article,
 )
-from rss_analyzer.config import get_vector_store_config
+from rss_analyzer.utils import is_newsflash, load_articles, save_articles
 logger = logging.getLogger(__name__)
 _VECTOR_STORE = None
 
 
 def _chunked(items: list[dict], size: int) -> list[list[dict]]:
     return [items[i : i + size] for i in range(0, len(items), size)]
+
+
+def _coerce_bool(value, default: bool) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return bool(value)
 
 
 def get_runtime_paths() -> dict[str, str]:
@@ -53,6 +73,293 @@ def get_vector_store():
 
         _VECTOR_STORE = shared_vector_store
     return _VECTOR_STORE
+
+
+def _build_monthly_output_path(prefix: str, suffix: str) -> str:
+    now = datetime.now()
+    output_dir = Path("output") / now.strftime("%Y-%m")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    return str(output_dir / f"{prefix}_{now.strftime('%Y%m%d_%H%M%S')}.{suffix}")
+
+
+def generate_summary_report(articles: list[dict]) -> dict:
+    logger.info("Generating overall summary for %s articles", len(articles))
+    overall_summary = generate_overall_summary(articles)
+    summary_file = _build_monthly_output_path("summary", "md")
+
+    with open(summary_file, "w", encoding="utf-8") as f:
+        f.write(overall_summary)
+    with open(LATEST_SUMMARY_FILE, "w", encoding="utf-8") as f:
+        f.write(overall_summary)
+
+    return {
+        "success": True,
+        "article_count": len(articles),
+        "summary": overall_summary,
+        "summary_file": summary_file,
+        "latest_summary_file": LATEST_SUMMARY_FILE,
+    }
+
+
+def regenerate_summary(input_file: str = LATEST_ANALYZED_FILE) -> dict:
+    if not os.path.exists(input_file):
+        return {
+            "error": "input_not_found",
+            "message": f"Could not find analyzed articles file: {input_file}",
+        }
+
+    articles = load_articles(input_file)
+    result = generate_summary_report(articles)
+    result["input_file"] = input_file
+    return result
+
+
+def export_articles(limit: int, output_file: str, stream_id: str | None = None) -> dict:
+    logger.info("Exporting up to %s unread articles to %s", limit, output_file)
+    articles = feedly_fetch_unread(limit=limit, stream_id=stream_id)
+    if articles is None:
+        return {
+            "error": "fetch_failed",
+            "message": "Failed to fetch unread articles from Feedly.",
+        }
+
+    save_articles(articles, output_file)
+    return {
+        "success": True,
+        "stream_id": stream_id,
+        "limit": limit,
+        "article_count": len(articles),
+        "output_file": output_file,
+    }
+
+
+def analyze_articles(
+    *,
+    input_file: str = LATEST_UNREAD_FILE,
+    limit: int | None = None,
+    mark_read: bool = False,
+    refresh: bool = True,
+    stream_id: str | None = None,
+    threads: int | None = None,
+) -> dict:
+    effective_limit = limit or int(PROJ_CONFIG["limit"])
+
+    if refresh:
+        logger.info("=" * 60)
+        logger.info("Refreshing articles from Feedly")
+        if stream_id:
+            logger.info("Target Stream: %s", stream_id)
+        logger.info("=" * 60)
+        logger.info("Fetching latest %s unread articles...", effective_limit)
+        articles = feedly_fetch_unread(limit=effective_limit, stream_id=stream_id)
+        if articles is None:
+            return {
+                "error": "fetch_failed",
+                "message": "Failed to fetch unread articles from Feedly.",
+            }
+
+        save_articles(articles, LATEST_UNREAD_FILE)
+        logger.info("Saved %s unread articles to %s", len(articles), LATEST_UNREAD_FILE)
+
+        if input_file == PROJ_CONFIG["input_file"]:
+            input_file = LATEST_UNREAD_FILE
+    else:
+        logger.info("=" * 60)
+        logger.info("Using local article data without refresh")
+        logger.info("=" * 60)
+
+    if not os.path.exists(input_file):
+        return {
+            "error": "input_not_found",
+            "message": f"Could not find input file: {input_file}",
+        }
+
+    articles = load_articles(input_file)
+    logger.info("Loaded %s articles from %s", len(articles), input_file)
+
+    analyzed_articles: list[dict] = []
+    seen_titles: set[str] = set()
+    batch_scoring = PROJ_CONFIG.get("batch_scoring", False)
+    batch_size = max(1, int(PROJ_CONFIG.get("batch_size", 1)))
+    batch_queue: list[dict] = []
+
+    max_workers = threads or int(PROJ_CONFIG.get("max_workers", 3))
+    executor = concurrent.futures.ThreadPoolExecutor(max_workers=max_workers)
+    pending_futures: list[tuple[concurrent.futures.Future, list[dict]]] = []
+
+    def record_analysis_result(article_item: dict, analysis_result: dict) -> None:
+        verdict = analysis_result.get("verdict", "Unknown")
+        score = analysis_result["score"]
+        if (
+            "red_flags" in analysis_result.get("detailed_scores", {})
+            and analysis_result["detailed_scores"]["red_flags"]
+        ):
+            red_flags = analysis_result["detailed_scores"]["red_flags"]
+            logger.info("  Red Flags: %s", red_flags)
+            verdict = f"Blocked: {verdict}"
+
+        title_str = article_item.get("title", "Unknown Title")
+        logger.info("  Title: %s", title_str)
+        logger.info("  Score: %.1f/5.0 - %s", score, verdict)
+        logger.info("  Reason: %s", analysis_result.get("reason", ""))
+        if "detailed_scores" in analysis_result:
+            scores = analysis_result["detailed_scores"]
+            logger.info(
+                "  Detail: relevance=%s informativeness=%s depth=%s readability=%s originality=%s",
+                scores["relevance"],
+                scores["informativeness"],
+                scores["depth"],
+                scores["readability"],
+                scores["originality"],
+            )
+
+        analyzed_articles.append({**article_item, "analysis": analysis_result})
+
+    def process_completed_futures() -> None:
+        nonlocal pending_futures
+        still_pending = []
+        for future, batch_items in pending_futures:
+            if future.done():
+                try:
+                    batch_results = future.result()
+                    for item, analysis in zip(batch_items, batch_results):
+                        record_analysis_result(item["article"], analysis)
+                except Exception as exc:
+                    logger.error("Batch processing failed: %s", exc)
+            else:
+                still_pending.append((future, batch_items))
+        pending_futures = still_pending
+
+    all_article_ids = [a["id"] for a in articles[:effective_limit] if a.get("id")]
+
+    try:
+        for idx, article in enumerate(articles[:effective_limit], 1):
+            logger.info(
+                "Processing article %s/%s: %s",
+                idx,
+                min(effective_limit, len(articles)),
+                article["title"],
+            )
+
+            filter_keywords = PROJ_CONFIG.get("filter_keywords", [])
+            if any(kw in article["title"] for kw in filter_keywords):
+                logger.info("  Skipped: title matched filter keyword")
+                continue
+
+            filter_url_patterns = PROJ_CONFIG.get("filter_url_patterns", [])
+            article_url = article.get("link", "") or article.get("originId", "")
+            if any(pattern in article_url for pattern in filter_url_patterns):
+                logger.info("  Skipped: URL matched filter pattern (%s)", article_url)
+                continue
+
+            norm_title = "".join(filter(str.isalnum, article["title"].lower()))
+            if len(norm_title) > 5:
+                if norm_title in seen_titles:
+                    logger.info("  Skipped: duplicate title")
+                    continue
+                seen_titles.add(norm_title)
+
+            if is_newsflash(article):
+                logger.info("  Skipped: detected as newsflash")
+                continue
+
+            content = article.get("content", "")
+            summary = article.get("summary", "")
+
+            if content and len(content) > 200:
+                logger.info("  Using existing content (%s chars)", len(content))
+            elif summary and len(summary) > 500:
+                logger.info("  Summary is long enough (%s chars); skipping fetch", len(summary))
+                content = summary
+            else:
+                logger.info("  Fetching article content...")
+                fetched_content = fetch_article_content(article["link"])
+                if fetched_content:
+                    content = fetched_content
+                logger.info("  Fetch complete: %s chars", len(content))
+
+            min_length = PROJ_CONFIG.get("filter_min_length", 100)
+            if len(content) < min_length:
+                logger.info("  Skipped: content too short (%s < %s)", len(content), min_length)
+                continue
+
+            if batch_scoring:
+                batch_queue.append(
+                    {
+                        "article": article,
+                        "title": article.get("title", ""),
+                        "summary": summary,
+                        "content": content,
+                    }
+                )
+                if len(batch_queue) >= batch_size:
+                    batch_payload = [
+                        {
+                            "title": item["title"],
+                            "summary": item["summary"],
+                            "content": item["content"],
+                        }
+                        for item in batch_queue
+                    ]
+                    logger.info("  Submitting batch scoring task (size=%s)", len(batch_payload))
+                    future = executor.submit(analyze_articles_with_llm_batch, batch_payload)
+                    pending_futures.append((future, list(batch_queue)))
+                    batch_queue = []
+
+                process_completed_futures()
+            else:
+                analysis = analyze_article_with_llm(article["title"], summary, content)
+                record_analysis_result(article, analysis)
+
+        if batch_scoring and batch_queue:
+            batch_payload = [
+                {
+                    "title": item["title"],
+                    "summary": item["summary"],
+                    "content": item["content"],
+                }
+                for item in batch_queue
+            ]
+            logger.info("  Submitting final batch scoring task (size=%s)", len(batch_payload))
+            future = executor.submit(analyze_articles_with_llm_batch, batch_payload)
+            pending_futures.append((future, list(batch_queue)))
+
+        if batch_scoring:
+            logger.info("Waiting for all scoring tasks to finish...")
+            for future, batch_items in pending_futures:
+                try:
+                    batch_results = future.result()
+                    for item, analysis in zip(batch_items, batch_results):
+                        record_analysis_result(item["article"], analysis)
+                except Exception as exc:
+                    logger.error("Batch processing failed: %s", exc)
+    finally:
+        executor.shutdown(wait=True)
+
+    analyzed_file = _build_monthly_output_path("analyzed_articles", "json")
+    save_articles(analyzed_articles, analyzed_file)
+    save_articles(analyzed_articles, LATEST_ANALYZED_FILE)
+
+    marked_read_count = 0
+    if mark_read and all_article_ids:
+        logger.info("Marking %s articles as read...", len(all_article_ids))
+        if feedly_mark_read(all_article_ids):
+            marked_read_count = len(all_article_ids)
+
+    summary_result = generate_summary_report(analyzed_articles)
+    return {
+        "success": True,
+        "input_file": input_file,
+        "stream_id": stream_id,
+        "refreshed": refresh,
+        "loaded_count": len(articles),
+        "processed_count": len(analyzed_articles),
+        "marked_read_count": marked_read_count,
+        "analyzed_file": analyzed_file,
+        "latest_analyzed_file": LATEST_ANALYZED_FILE,
+        "articles": analyzed_articles,
+        **summary_result,
+    }
 
 
 def _normalize_item(article_id: str, cached: dict | None) -> dict:
@@ -349,6 +656,38 @@ def _handle_clear_vector_store(_: dict) -> dict:
         return {"error": "clear_failed", "message": str(exc)}
 
 
+def _handle_export_articles(msg: dict) -> dict:
+    output_file = msg.get("output_file")
+    if not output_file:
+        return {"error": "no_output_file", "message": "Output file is required"}
+
+    return export_articles(
+        limit=int(msg.get("limit", PROJ_CONFIG["limit"])),
+        output_file=output_file,
+        stream_id=msg.get("stream_id"),
+    )
+
+
+def _handle_run_analysis(msg: dict) -> dict:
+    return analyze_articles(
+        input_file=msg.get("input_file", PROJ_CONFIG["input_file"]),
+        limit=int(msg.get("limit", PROJ_CONFIG["limit"])),
+        mark_read=_coerce_bool(msg.get("mark_read"), PROJ_CONFIG["mark_read"]),
+        refresh=_coerce_bool(msg.get("refresh"), PROJ_CONFIG["refresh"]),
+        stream_id=msg.get("stream_id"),
+        threads=msg.get("threads"),
+    )
+
+
+def _handle_generate_summary(msg: dict) -> dict:
+    articles = msg.get("articles")
+    if articles is not None:
+        return generate_summary_report(articles)
+
+    input_file = msg.get("input_file", LATEST_ANALYZED_FILE)
+    return regenerate_summary(input_file=input_file)
+
+
 def rebuild_vector_store() -> dict:
     vector_store = get_vector_store()
     if not vector_store or not vector_store.collection:
@@ -494,6 +833,12 @@ def handle_message(msg: dict) -> dict:
         return _handle_get_score(msg)
     if msg_type == "get_scores":
         return _handle_get_scores(msg)
+    if msg_type == "export_articles":
+        return _handle_export_articles(msg)
+    if msg_type == "run_analysis":
+        return _handle_run_analysis(msg)
+    if msg_type == "generate_summary":
+        return _handle_generate_summary(msg)
     if msg_type == "analyze_article":
         return _handle_analyze_article(msg)
     if msg_type == "summarize_article":

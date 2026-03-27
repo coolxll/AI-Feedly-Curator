@@ -95,6 +95,81 @@ class TestBackendService(unittest.TestCase):
         response = handle_message({"type": "does_not_exist"})
         self.assertEqual(response, {"error": "unknown_type"})
 
+    @patch("rss_analyzer.backend_service.save_articles")
+    @patch("rss_analyzer.backend_service.feedly_fetch_unread")
+    def test_export_articles_handler_saves_fetched_articles(
+        self, mock_feedly_fetch_unread, mock_save_articles
+    ):
+        mock_feedly_fetch_unread.return_value = [
+            {"id": "article-1", "title": "Title 1"},
+            {"id": "article-2", "title": "Title 2"},
+        ]
+
+        output_file = "output/export.json"
+        response = handle_message(
+            {
+                "type": "export_articles",
+                "limit": 2,
+                "stream_id": "feed/123",
+                "output_file": output_file,
+            }
+        )
+
+        self.assertTrue(response["success"])
+        self.assertEqual(response["article_count"], 2)
+        mock_feedly_fetch_unread.assert_called_once_with(
+            limit=2, stream_id="feed/123"
+        )
+        mock_save_articles.assert_called_once()
+
+    @patch("rss_analyzer.backend_service.generate_summary_report")
+    @patch("rss_analyzer.backend_service.load_articles")
+    @patch("rss_analyzer.backend_service.os.path.exists")
+    def test_generate_summary_handler_uses_input_file_when_articles_omitted(
+        self, mock_exists, mock_load_articles, mock_generate_summary_report
+    ):
+        mock_exists.return_value = True
+        mock_load_articles.return_value = []
+        mock_generate_summary_report.return_value = {
+            "success": True,
+            "summary": "summary",
+            "summary_file": "output/2026-03/summary_1.md",
+            "latest_summary_file": "output/summary_latest.md",
+        }
+
+        input_file = "output/analyzed_articles_latest.json"
+        response = handle_message({"type": "generate_summary", "input_file": input_file})
+
+        self.assertTrue(response["success"])
+        self.assertEqual(response["input_file"], input_file)
+        mock_generate_summary_report.assert_called_once_with([])
+
+    @patch("rss_analyzer.backend_service.analyze_articles")
+    def test_run_analysis_handler_coerces_string_booleans(
+        self, mock_analyze_articles
+    ):
+        mock_analyze_articles.return_value = {"success": True}
+
+        response = handle_message(
+            {
+                "type": "run_analysis",
+                "limit": 10,
+                "refresh": "false",
+                "mark_read": "true",
+                "threads": 4,
+            }
+        )
+
+        self.assertTrue(response["success"])
+        mock_analyze_articles.assert_called_once_with(
+            input_file="output\\unread_news.json",
+            limit=10,
+            mark_read=True,
+            refresh=False,
+            stream_id=None,
+            threads=4,
+        )
+
     @patch("rss_analyzer.backend_service.iter_cached_scores")
     @patch("rss_analyzer.backend_service.build_vector_store_payload")
     @patch("rss_analyzer.backend_service.get_vector_store")

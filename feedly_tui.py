@@ -212,30 +212,22 @@ def execute_export(limit, stream_id, filename, stream_label=None):
     )
 
     try:
-        import sys
+        backend_service = _load_backend_service()
+        if backend_service is None:
+            return
 
-        old_argv = sys.argv
+        result = backend_service.export_articles(
+            limit=limit,
+            output_file=filename,
+            stream_id=stream_id,
+        )
+        if result.get("error"):
+            console.print(Panel(result["message"], style="red"))
+            return
 
-        sys.argv = ["article_analyzer.py", "--limit", str(limit), "--export", filename]
-        if stream_id:
-            sys.argv.append("--stream-id")
-            sys.argv.append(stream_id)
-
-        try:
-            try:
-                import article_analyzer
-            except Exception as e:
-                console.print(
-                    Panel(_import_error_hint("article_analyzer", e), style="red")
-                )
-                return
-
-            article_analyzer.main()
-            console.print(
-                Panel(f"Export Complete! File saved to {filename}", style="bold green")
-            )
-        finally:
-            sys.argv = old_argv
+        console.print(
+            Panel(f"Export Complete! File saved to {filename}", style="bold green")
+        )
     except Exception:
         logger.exception("Error exporting")
         console.print("[red]Export failed.[/red]")
@@ -462,6 +454,16 @@ def _import_error_hint(modname: str, err: Exception) -> str:
     )
 
 
+def _load_backend_service():
+    try:
+        from rss_analyzer import backend_service
+    except Exception as e:
+        console.print(Panel(_import_error_hint("rss_analyzer.backend_service", e), style="red"))
+        return None
+
+    return backend_service
+
+
 def _verify_startup_dependencies_or_exit() -> None:
     """Fail-fast dependency check.
 
@@ -473,8 +475,7 @@ def _verify_startup_dependencies_or_exit() -> None:
     # Keep the import list minimal and aligned with the plan.
     required = [
         "feedly_filter",
-        "article_analyzer",
-        "regenerate_summary",
+        "rss_analyzer.backend_service",
     ]
 
     for mod in required:
@@ -580,15 +581,15 @@ def run_summary_flow():
     except ImportError:
         console.print(Panel("Regenerating Summary...", style="bold blue"))
         try:
-            try:
-                import regenerate_summary
-            except Exception as e:
-                console.print(
-                    Panel(_import_error_hint("regenerate_summary", e), style="red")
-                )
+            backend_service = _load_backend_service()
+            if backend_service is None:
                 return
 
-            regenerate_summary.main()
+            result = backend_service.regenerate_summary()
+            if result.get("error"):
+                console.print(Panel(result["message"], style="red"))
+                return
+
             console.print(Panel("Summary Generation Complete!", style="bold green"))
         except Exception:
             logger.exception("Error generating summary")
@@ -632,20 +633,16 @@ def run_summary_flow():
                 console.print("[yellow]No articles matched the selection.[/yellow]")
                 return
 
-            try:
-                import regenerate_summary
-            except Exception as e:
-                console.print(
-                    Panel(_import_error_hint("regenerate_summary", e), style="red")
-                )
+            backend_service = _load_backend_service()
+            if backend_service is None:
                 return
 
-            summary_file, latest_file = (
-                regenerate_summary.generate_summary_from_articles(articles)
-            )
+            result = backend_service.generate_summary_report(articles)
             console.print(
                 Panel(
-                    f"Summary Generation Complete!\n- {summary_file}\n- {latest_file}",
+                    "Summary Generation Complete!\n"
+                    f"- {result['summary_file']}\n"
+                    f"- {result['latest_summary_file']}",
                     style="bold green",
                 )
             )
@@ -726,38 +723,29 @@ def execute_analyze(
     )
 
     try:
-        # Build command line arguments for article_analyzer
-        import sys
+        backend_service = _load_backend_service()
+        if backend_service is None:
+            return
 
-        old_argv = sys.argv
+        result = backend_service.analyze_articles(
+            limit=limit,
+            refresh=refresh,
+            mark_read=mark_read,
+            stream_id=stream_id,
+            threads=threads,
+        )
+        if result.get("error"):
+            console.print(Panel(result["message"], style="red"))
+            return
 
-        sys.argv = ["article_analyzer.py", "--limit", str(limit)]
-        if refresh:
-            sys.argv.append("--refresh")
-        if mark_read:
-            sys.argv.append("--mark-read")
-        if stream_id:
-            sys.argv.append("--stream-id")
-            sys.argv.append(stream_id)
-        if threads:
-            sys.argv.append("--threads")
-            sys.argv.append(str(threads))
-
-        try:
-            # Call article_analyzer.main() which will parse sys.argv
-            try:
-                import article_analyzer
-            except Exception as e:
-                console.print(
-                    Panel(_import_error_hint("article_analyzer", e), style="red")
-                )
-                return
-
-            article_analyzer.main()
-            console.print(Panel("Article Analysis Complete!", style="bold green"))
-        finally:
-            # Restore sys.argv
-            sys.argv = old_argv
+        console.print(
+            Panel(
+                "Article Analysis Complete!\n"
+                f"- {result['analyzed_file']}\n"
+                f"- {result['summary_file']}",
+                style="bold green",
+            )
+        )
 
     except KeyboardInterrupt:
         console.print("\n[red]Operation cancelled by user.[/red]")
