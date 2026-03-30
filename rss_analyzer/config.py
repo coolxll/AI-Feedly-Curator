@@ -32,6 +32,7 @@ class OpenAIConfig:
     api_key: str | None
     base_url: str
     model: str
+    default_headers: dict[str, str]
 
 
 @dataclass(frozen=True)
@@ -109,6 +110,9 @@ PROJ_CONFIG = {
     "relevance_threshold": 2.5,
 }
 
+TRUTHY_VALUES = {"1", "true", "yes", "on"}
+FALSY_VALUES = {"0", "false", "no", "off"}
+
 
 def setup_logging(debug_mode: bool = False) -> None:
     """配置日志系统"""
@@ -140,6 +144,35 @@ def get_config(key: str, default=None, task: str | None = None):
     return os.getenv(key, default)
 
 
+def _parse_bool(value, default: bool) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+
+    normalized = str(value).strip().lower()
+    if normalized in TRUTHY_VALUES:
+        return True
+    if normalized in FALSY_VALUES:
+        return False
+    return default
+
+
+def is_vector_store_enabled() -> bool:
+    """
+    Resolve the global vector-store/embedding switch.
+
+    Priority:
+    1. RSS_ENABLE_VECTOR_STORE
+    2. ENABLE_VECTOR_STORE (legacy-friendly alias)
+    3. PROJ_CONFIG default
+    """
+    env_value = os.getenv("RSS_ENABLE_VECTOR_STORE")
+    if env_value is None:
+        env_value = os.getenv("ENABLE_VECTOR_STORE")
+    return _parse_bool(env_value, bool(PROJ_CONFIG.get("enable_vector_store", True)))
+
+
 def get_openai_task_config(task: str, default_model: str) -> OpenAIConfig:
     """
     解析某个任务使用的 OpenAI 配置。
@@ -152,7 +185,25 @@ def get_openai_task_config(task: str, default_model: str) -> OpenAIConfig:
         api_key=get_config("OPENAI_API_KEY"),
         base_url=get_config("OPENAI_BASE_URL", OPENAI_DEFAULT_BASE_URL),
         model=get_config("OPENAI_MODEL", default_model, task=task),
+        default_headers={
+            key: value
+            for key, value in {
+                "HTTP-Referer": get_config("OPENAI_HTTP_REFERER"),
+                "X-Title": get_config("OPENAI_X_TITLE"),
+            }.items()
+            if value
+        },
     )
+
+
+def build_openai_client_kwargs(config: OpenAIConfig) -> dict:
+    kwargs = {
+        "api_key": config.api_key,
+        "base_url": config.base_url,
+    }
+    if config.default_headers:
+        kwargs["default_headers"] = config.default_headers
+    return kwargs
 
 
 def get_embedding_config() -> EmbeddingConfig:

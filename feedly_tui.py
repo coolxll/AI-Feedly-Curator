@@ -7,7 +7,12 @@ Interactive menu for running Feedly filters.
 import sys
 import logging
 import os
-from rss_analyzer.config import LATEST_ANALYZED_FILE, PROJ_CONFIG
+import webbrowser
+from rss_analyzer.config import (
+    LATEST_ANALYZED_FILE,
+    PROJ_CONFIG,
+    get_openai_task_config,
+)
 from rss_analyzer.feedly_client import (
     feedly_get_categories,
     feedly_get_subscriptions,
@@ -36,6 +41,26 @@ logging.basicConfig(
 
 console = Console()
 logger = logging.getLogger("tui")
+
+
+def render_main_header():
+    analysis_model = get_openai_task_config(
+        "analysis", default_model="gpt-4o-mini"
+    ).model
+    summary_model = get_openai_task_config(
+        "summary", default_model="gpt-4o-mini"
+    ).model
+    console.print(
+        Panel.fit(
+            (
+                "Feedly AI Filter TUI\n"
+                f"[dim]analysis:[/dim] {analysis_model}\n"
+                f"[dim]summary:[/dim] {summary_model}"
+            ),
+            style="bold cyan",
+            subtitle="Interactive Runner",
+        )
+    )
 
 
 def _maybe_reexec_in_project_venv() -> None:
@@ -89,23 +114,26 @@ def simple_menu():
     while True:
         console.print("\n[bold]Main Menu:[/bold]")
         console.print("1. Run Filter")
-        console.print("2. Analyze Articles")
-        console.print("3. Regenerate Summary")
-        console.print("4. Export Articles")
-        console.print("5. Exit")
+        console.print("2. Process Stream")
+        console.print("3. Analyze Articles")
+        console.print("4. Regenerate Summary")
+        console.print("5. Export Articles")
+        console.print("6. Exit")
 
         choice = get_input("Select an option")
 
-        if choice == "5":
+        if choice == "6":
             console.print("[cyan]Goodbye![/cyan]")
             sys.exit()
         elif choice == "1":
             simple_filter_flow()
         elif choice == "2":
-            simple_analyze_flow()
+            simple_process_stream_flow()
         elif choice == "3":
-            run_summary_flow()
+            simple_analyze_flow()
         elif choice == "4":
+            run_summary_flow()
+        elif choice == "5":
             simple_export_flow()
         else:
             console.print("[red]Invalid choice[/red]")
@@ -164,6 +192,26 @@ def simple_export_flow():
     filename = get_input("Output Filename", default=default_filename)
 
     execute_export(limit, stream_id, filename)
+
+
+def simple_process_stream_flow():
+    console.print("\n[bold]Process Stream:[/bold]")
+    sid = get_input("Stream ID (Optional, press Enter for Global)", default="")
+    stream_id = sid if sid else None
+
+    limit_str = get_input("Limit", default="500")
+    try:
+        limit = int(limit_str)
+    except ValueError:
+        limit = 500
+
+    days_str = get_input("Recent Days", default="3")
+    try:
+        days = int(days_str)
+    except ValueError:
+        days = 3
+
+    execute_process_stream(stream_id, limit=limit, days=days)
 
 
 def run_export_flow():
@@ -495,17 +543,14 @@ def main_menu():
         return
 
     console.clear()
-    console.print(
-        Panel.fit(
-            "Feedly AI Filter TUI", style="bold cyan", subtitle="Interactive Runner"
-        )
-    )
+    render_main_header()
 
     while True:
         action = questionary.select(
             "What would you like to do?",
             choices=[
                 questionary.Choice("Run Filter", value="run"),
+                questionary.Choice("Process Stream", value="process_stream"),
                 questionary.Choice("Analyze Articles", value="analyze"),
                 questionary.Choice("Regenerate Summary", value="summary"),
                 questionary.Choice("Export Articles", value="export"),
@@ -530,46 +575,27 @@ def main_menu():
             run_filter_flow()
             input("\nPress Enter to return to menu...")
             console.clear()
-            console.print(
-                Panel.fit(
-                    "Feedly AI Filter TUI",
-                    style="bold cyan",
-                    subtitle="Interactive Runner",
-                )
-            )
+            render_main_header()
+        elif action == "process_stream":
+            run_process_stream_flow()
+            input("\nPress Enter to return to menu...")
+            console.clear()
+            render_main_header()
         elif action == "analyze":
             run_analyze_flow()
             input("\nPress Enter to return to menu...")
             console.clear()
-            console.print(
-                Panel.fit(
-                    "Feedly AI Filter TUI",
-                    style="bold cyan",
-                    subtitle="Interactive Runner",
-                )
-            )
+            render_main_header()
         elif action == "summary":
             run_summary_flow()
             input("\nPress Enter to return to menu...")
             console.clear()
-            console.print(
-                Panel.fit(
-                    "Feedly AI Filter TUI",
-                    style="bold cyan",
-                    subtitle="Interactive Runner",
-                )
-            )
+            render_main_header()
         elif action == "export":
             run_export_flow()
             input("\nPress Enter to return to menu...")
             console.clear()
-            console.print(
-                Panel.fit(
-                    "Feedly AI Filter TUI",
-                    style="bold cyan",
-                    subtitle="Interactive Runner",
-                )
-            )
+            render_main_header()
 
 
 def run_summary_flow():
@@ -699,6 +725,216 @@ def run_analyze_flow():
         threads = 3
 
     execute_analyze(limit, refresh, mark_read, stream_id, threads, stream_label)
+
+
+def _render_stream_result(result):
+    digest = result.get("digest") or {}
+    stats = digest.get("stats", {})
+    console.print(
+        Panel(
+            f"策略: {result['strategy']}\n"
+            f"文章数（时间窗内）: {result['article_count']}\n"
+            f"抓取数: {result.get('fetched_count', result['article_count'])}\n"
+            f"Headline: {digest.get('headline', result['summary'])}\n"
+            f"摘要: {digest.get('executive_summary', result['summary'])}",
+            title="Stream Daily Digest",
+            border_style="blue",
+        )
+    )
+
+    theme_groups = digest.get("top_themes", result.get("theme_groups", []))
+    if theme_groups:
+        console.print("\n[bold]今日重点主题[/bold]")
+        for group in theme_groups[:8]:
+            console.print(
+                f"- [cyan]{group['bucket']}[/cyan] ({group['count']}) - {group['summary']}"
+            )
+
+    must_read = digest.get("deep_analyzed_reads") or digest.get(
+        "must_read_candidates", result.get("worth_expanding_items", [])
+    )
+    console.print("\n[bold]必须读[/bold]")
+    if must_read:
+        for item in must_read:
+            console.print(f"- {item['title']}")
+            if item.get("link"):
+                console.print(f"  [dim]链接:[/dim] {item['link']}")
+            if item.get("analysis_summary"):
+                console.print(f"  [dim]分析:[/dim] {item['analysis_summary']}")
+            elif item.get("interpretation"):
+                console.print(f"  [dim]解读:[/dim] {item['interpretation']}")
+            if item.get("score") is not None:
+                console.print(f"  [dim]评分:[/dim] {item['score']}/5.0")
+    else:
+        console.print("- None")
+
+    skim_items = digest.get("skim_items", [])
+    console.print("\n[bold]可略读[/bold]")
+    if skim_items:
+        for item in skim_items[:8]:
+            console.print(f"- {item['title']}")
+            if item.get("link"):
+                console.print(f"  [dim]链接:[/dim] {item['link']}")
+            if item.get("interpretation"):
+                console.print(f"  [dim]解读:[/dim] {item['interpretation']}")
+    else:
+        console.print("- None")
+
+    clear_items = digest.get("clear_items", result.get("low_priority_items", []))
+    console.print("\n[bold]可速清[/bold]")
+    if clear_items:
+        for item in clear_items[:10]:
+            console.print(f"- {item['title']}")
+        if len(clear_items) > 10:
+            console.print(f"[dim]... and {len(clear_items) - 10} more[/dim]")
+    else:
+        console.print("- None")
+
+    actions = digest.get("actions", [])
+    if actions:
+        console.print("\n[bold]建议动作[/bold]")
+        for action in actions:
+            console.print(f"- {action}")
+
+    if stats:
+        console.print(
+            f"\n[dim]候选 {stats.get('candidate_count', 0)} | "
+            f"must-read {stats.get('must_read_count', 0)} | "
+            f"skim {stats.get('skim_count', 0)} | "
+            f"clear {stats.get('clear_count', 0)}[/dim]"
+        )
+
+
+def _open_stream_article(article: dict) -> bool:
+    link = article.get("link")
+    if not link:
+        console.print("[red]Selected article does not have a link.[/red]")
+        return False
+
+    try:
+        return bool(webbrowser.open(link))
+    except Exception:
+        logger.exception("Failed to open article link")
+        return False
+
+
+def _prompt_open_stream_article(digest):
+    try:
+        import questionary
+    except ImportError:
+        return
+
+    openable_items = []
+    for section, items in (
+        ("Must Read", digest.get("deep_analyzed_reads", [])),
+        ("Skim", digest.get("skim_items", [])),
+    ):
+        for item in items:
+            if item.get("link"):
+                openable_items.append((section, item))
+
+    if not openable_items:
+        return
+
+    if not questionary.confirm("Open a recommended article in browser?", default=False).ask():
+        return
+
+    choices = [
+        questionary.Choice(f"[{section}] {item['title']}", value=item)
+        for section, item in openable_items
+    ]
+    choices.append(questionary.Choice("Cancel", value=None))
+    selected = questionary.select("Choose an article to open:", choices=choices).ask()
+    if not selected:
+        return
+
+    if _open_stream_article(selected):
+        console.print(f"[green]Opened:[/green] {selected['title']}")
+    else:
+        console.print("[red]Failed to open the article link.[/red]")
+
+
+def run_process_stream_flow():
+    import questionary
+
+    stream_id, stream_label = select_stream_interactive()
+    if stream_id is None and stream_label is None:
+        return
+
+    limit_str = questionary.text("Fetch Limit:", default="500").ask()
+    try:
+        limit = int(limit_str)
+    except ValueError:
+        limit = 500
+
+    days_str = questionary.text("Recent Days:", default="3").ask()
+    try:
+        days = int(days_str)
+    except ValueError:
+        days = 3
+
+    execute_process_stream(stream_id, limit=limit, days=days, stream_label=stream_label)
+
+
+def execute_process_stream(stream_id, *, limit=500, days=3, stream_label=None):
+    display_stream = stream_label if stream_label else (stream_id or "Global (All)")
+    console.print(
+        Panel(
+            f"Processing Stream\n"
+            f"Stream: {display_stream}\n"
+            f"Limit: {limit}\n"
+            f"Recent Days: {days}",
+            title="Configuration",
+            border_style="blue",
+        )
+    )
+
+    try:
+        backend_service = _load_backend_service()
+        if backend_service is None:
+            return
+
+        result = backend_service.process_stream(
+            stream_id=stream_id,
+            stream_label=stream_label,
+            days=days,
+            limit=limit,
+        )
+        _render_stream_result(result)
+
+        try:
+            import questionary
+        except ImportError:
+            return
+
+        digest = result.get("digest") or {}
+        _prompt_open_stream_article(digest)
+
+        low_priority_ids = result.get("mark_read_candidates", [])
+        if low_priority_ids and questionary.confirm(
+            f"Mark {len(low_priority_ids)} low-priority items as read?", default=False
+        ).ask():
+            mark_result = backend_service.mark_stream_low_priority_read(low_priority_ids)
+            if mark_result.get("success"):
+                console.print(
+                    f"[green]Marked {mark_result['marked_count']} low-priority items as read.[/green]"
+                )
+            else:
+                console.print("[red]Failed to mark low-priority items as read.[/red]")
+
+        if questionary.confirm("Export overview markdown?", default=False).ask():
+            overview_file = backend_service.save_stream_overview_markdown(
+                result["markdown"],
+                stream_label=stream_label or stream_id,
+                strategy=result["strategy"],
+            )
+            console.print(f"[green]Saved overview to {overview_file}[/green]")
+
+    except KeyboardInterrupt:
+        console.print("\n[red]Operation cancelled by user.[/red]")
+    except Exception:
+        logger.exception("An error occurred during stream processing")
+        console.print("[red]An error occurred. Check logs above.[/red]")
 
 
 def execute_analyze(

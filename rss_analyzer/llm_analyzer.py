@@ -11,6 +11,7 @@ import traceback
 from openai import OpenAI
 
 from .config import get_openai_task_config
+from .config import build_openai_client_kwargs
 
 logger = logging.getLogger(__name__)
 
@@ -134,10 +135,7 @@ def summarize_single_article(text: str, task: str = "summary") -> str:
     """
     try:
         openai_config = get_openai_task_config(task, default_model="gpt-3.5-turbo")
-        client = OpenAI(
-            api_key=openai_config.api_key,
-            base_url=openai_config.base_url,
-        )
+        client = OpenAI(**build_openai_client_kwargs(openai_config))
 
         prompt = """
 You are an expert analyst. Provide a comprehensive summary of the following article.
@@ -190,10 +188,7 @@ def generate_overall_summary(analyzed_articles: list) -> str:
     """
     try:
         openai_config = get_openai_task_config("summary", default_model="gpt-4o-mini")
-        client = OpenAI(
-            api_key=openai_config.api_key,
-            base_url=openai_config.base_url,
-        )
+        client = OpenAI(**build_openai_client_kwargs(openai_config))
 
         articles_info = []
         skipped_count = 0

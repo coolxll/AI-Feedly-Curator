@@ -11,10 +11,12 @@ from rss_analyzer.config import (
     EMBEDDING_DEFAULT_MODEL,
     OPENAI_DEFAULT_BASE_URL,
     PROJ_CONFIG,
+    build_openai_client_kwargs,
     get_config,
     get_embedding_config,
     get_openai_task_config,
     get_vector_store_config,
+    is_vector_store_enabled,
 )
 
 
@@ -48,6 +50,8 @@ class TestConfig(unittest.TestCase):
                 "OPENAI_API_KEY": "shared-key",
                 "OPENAI_BASE_URL": "https://shared.example/v1",
                 "ANALYSIS_OPENAI_MODEL": "analysis-model",
+                "OPENAI_HTTP_REFERER": "https://github.com/example/project",
+                "OPENAI_X_TITLE": "rss-opml",
             },
             clear=True,
         ):
@@ -55,6 +59,13 @@ class TestConfig(unittest.TestCase):
             self.assertEqual(config.api_key, "shared-key")
             self.assertEqual(config.base_url, "https://shared.example/v1")
             self.assertEqual(config.model, "analysis-model")
+            self.assertEqual(
+                config.default_headers,
+                {
+                    "HTTP-Referer": "https://github.com/example/project",
+                    "X-Title": "rss-opml",
+                },
+            )
 
     def test_get_openai_task_config_uses_defaults_when_values_missing(self):
         with patch.dict(os.environ, {}, clear=True):
@@ -62,6 +73,7 @@ class TestConfig(unittest.TestCase):
             self.assertIsNone(config.api_key)
             self.assertEqual(config.base_url, OPENAI_DEFAULT_BASE_URL)
             self.assertEqual(config.model, "fallback-model")
+            self.assertEqual(config.default_headers, {})
 
     def test_get_openai_task_config_ignores_task_specific_key_and_base_url(self):
         with patch.dict(
@@ -79,6 +91,18 @@ class TestConfig(unittest.TestCase):
             self.assertEqual(config.api_key, "shared-key")
             self.assertEqual(config.base_url, "https://shared.example/v1")
             self.assertEqual(config.model, "summary-model")
+
+    def test_build_openai_client_kwargs_omits_headers_when_empty(self):
+        with patch.dict(os.environ, {}, clear=True):
+            config = get_openai_task_config("summary", default_model="fallback-model")
+            kwargs = build_openai_client_kwargs(config)
+            self.assertEqual(
+                kwargs,
+                {
+                    "api_key": None,
+                    "base_url": OPENAI_DEFAULT_BASE_URL,
+                },
+            )
 
     def test_get_embedding_config_prefers_embedding_specific_settings(self):
         with patch.dict(
@@ -150,6 +174,18 @@ class TestConfig(unittest.TestCase):
             self.assertTrue(config.http_ssl)
             self.assertEqual(config.http_url, "https://chroma.example:9443")
             self.assertEqual(config.state_dir, "state-dir")
+
+    def test_is_vector_store_enabled_uses_config_default(self):
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertTrue(is_vector_store_enabled())
+
+    def test_is_vector_store_enabled_supports_disable_env(self):
+        with patch.dict(os.environ, {"RSS_ENABLE_VECTOR_STORE": "false"}, clear=True):
+            self.assertFalse(is_vector_store_enabled())
+
+    def test_is_vector_store_enabled_supports_legacy_alias(self):
+        with patch.dict(os.environ, {"ENABLE_VECTOR_STORE": "0"}, clear=True):
+            self.assertFalse(is_vector_store_enabled())
 
 
 if __name__ == "__main__":

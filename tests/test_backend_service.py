@@ -1,10 +1,21 @@
 import unittest
 from unittest.mock import Mock, patch
 
-from rss_analyzer.backend_service import get_runtime_paths, handle_message
+from rss_analyzer.backend_service import (
+    _deep_analyze_digest_candidates,
+    _deep_analysis_log_step,
+    get_runtime_paths,
+    handle_message,
+    process_stream,
+)
 
 
 class TestBackendService(unittest.TestCase):
+    def test_deep_analysis_log_step_scales_with_batch_size(self):
+        self.assertEqual(_deep_analysis_log_step(3), 1)
+        self.assertEqual(_deep_analysis_log_step(10), 2)
+        self.assertEqual(_deep_analysis_log_step(20), 5)
+
     def test_health_message_exposes_runtime_paths(self):
         response = handle_message({"type": "health"})
 
@@ -12,9 +23,30 @@ class TestBackendService(unittest.TestCase):
         self.assertEqual(response["service"], "rss-backend")
         runtime = get_runtime_paths()
         self.assertEqual(response["db_path"], runtime["db_path"])
+        self.assertEqual(response["vector_enabled"], runtime["vector_enabled"])
         self.assertEqual(response["vector_db_dir"], runtime["vector_db_dir"])
         self.assertEqual(response["vector_backend"], runtime["vector_backend"])
         self.assertEqual(response["vector_http_url"], runtime["vector_http_url"])
+
+    @patch("rss_analyzer.backend_service.is_vector_store_enabled", return_value=False)
+    def test_semantic_search_returns_disabled_state_when_vector_store_is_off(
+        self, mock_vector_enabled
+    ):
+        response = handle_message({"type": "semantic_search", "query": "AI", "limit": 3})
+
+        self.assertEqual(response["query"], "AI")
+        self.assertEqual(response["results"], [])
+        self.assertTrue(response["disabled"])
+        mock_vector_enabled.assert_called()
+
+    @patch("rss_analyzer.backend_service.is_vector_store_enabled", return_value=False)
+    def test_rebuild_vector_store_returns_disabled_error_when_vector_store_is_off(
+        self, mock_vector_enabled
+    ):
+        response = handle_message({"type": "rebuild_vector_store"})
+
+        self.assertEqual(response["error"], "vector_store_disabled")
+        mock_vector_enabled.assert_called()
 
     @patch("rss_analyzer.backend_service.get_cached_score")
     @patch("rss_analyzer.backend_service.analyze_articles_with_llm_batch")
@@ -196,6 +228,164 @@ class TestBackendService(unittest.TestCase):
             stream_id="feed/abc",
         )
 
+    @patch("rss_analyzer.backend_service.process_stream")
+    def test_process_stream_handler_coerces_values(self, mock_process_stream):
+        mock_process_stream.return_value = {"success": True, "strategy": "radar"}
+
+        response = handle_message(
+            {
+                "type": "process_stream",
+                "stream_id": "feed/v2ex",
+                "stream_label": "Feed: V2EX",
+                "days": "3",
+                "limit": "200",
+                "export_markdown": "true",
+            }
+        )
+
+        self.assertTrue(response["success"])
+        mock_process_stream.assert_called_once_with(
+            stream_id="feed/v2ex",
+            stream_label="Feed: V2EX",
+            days=3,
+            limit=200,
+            strategy=None,
+            export_markdown=True,
+        )
+
+    @patch("rss_analyzer.backend_service.mark_stream_low_priority_read")
+    def test_mark_stream_low_priority_read_handler_coerces_values(self, mock_mark_low):
+        mock_mark_low.return_value = {"success": True, "marked_count": 2}
+
+        response = handle_message(
+            {
+                "type": "mark_stream_low_priority_read",
+                "article_ids": ["a", "b"],
+                "dry_run": "false",
+            }
+        )
+
+        self.assertTrue(response["success"])
+        mock_mark_low.assert_called_once_with(["a", "b"], dry_run=False)
+
+    @patch("rss_analyzer.backend_service.render_stream_overview_markdown")
+    @patch("rss_analyzer.backend_service.analyze_article_with_llm")
+    @patch("rss_analyzer.backend_service.fetch_filter_articles")
+    @patch("rss_analyzer.backend_service.generate_stream_overview")
+    def test_process_stream_demotes_low_score_must_read_after_analysis(
+        self,
+        mock_generate_stream_overview,
+        mock_fetch_filter_articles,
+        mock_analyze_article_with_llm,
+        mock_render_markdown,
+    ):
+        mock_fetch_filter_articles.return_value = [
+            {"id": "1", "title": "[问与答] 家庭求助", "link": "https://www.v2ex.com/t/1"}
+        ]
+        mock_generate_stream_overview.return_value = {
+            "strategy": "radar",
+            "article_count": 1,
+            "summary": "old summary",
+            "theme_groups": [],
+            "worth_expanding_items": [],
+            "worth_expanding_overflow_count": 0,
+            "low_priority_items": [],
+            "mark_read_candidates": [],
+            "markdown": "old markdown",
+            "digest": {
+                "headline": "headline",
+                "executive_summary": "summary",
+                "must_read_candidates": [
+                    {
+                        "id": "1",
+                        "title": "[问与答] 家庭求助",
+                        "link": "https://www.v2ex.com/t/1",
+                        "summary": "求助帖",
+                    }
+                ],
+                "deep_analyzed_reads": [],
+                "skim_items": [],
+                "clear_items": [],
+                "actions": [],
+                "stats": {"fetched_count": 1, "candidate_count": 1},
+            },
+        }
+        mock_analyze_article_with_llm.return_value = {
+            "score": 1.0,
+            "verdict": "不太值得阅读",
+            "summary": "与关注主题无关",
+            "reason": "irrelevant",
+            "detailed_scores": {"relevance": 1},
+        }
+        mock_render_markdown.return_value = "digest markdown"
+
+        result = process_stream(stream_id="feed/v2ex", stream_label="Feed: V2EX")
+
+        self.assertEqual(result["digest"]["deep_analyzed_reads"], [])
+        self.assertEqual(len(result["digest"]["clear_items"]), 1)
+        self.assertEqual(result["mark_read_candidates"], ["1"])
+
+    @patch("rss_analyzer.backend_service.logger")
+    @patch("rss_analyzer.backend_service.analyze_article_with_llm")
+    @patch("rss_analyzer.backend_service._prepare_article_analysis_inputs")
+    def test_deep_analyze_digest_candidates_logs_progress_and_preserves_order(
+        self,
+        mock_prepare_inputs,
+        mock_analyze_article_with_llm,
+        mock_logger,
+    ):
+        items = [
+            {"id": "1", "title": "First article", "link": "https://example.com/1"},
+            {"id": "2", "title": "Second article", "link": "https://example.com/2"},
+        ]
+        mock_prepare_inputs.return_value = ("summary", "Long enough content" * 20)
+        mock_analyze_article_with_llm.side_effect = [
+            {"score": 4.2, "verdict": "值得阅读", "summary": "first", "reason": "r1"},
+            {"score": 3.9, "verdict": "可选", "summary": "second", "reason": "r2"},
+        ]
+
+        result = _deep_analyze_digest_candidates(items)
+
+        self.assertEqual([item["id"] for item in result], ["1", "2"])
+        self.assertEqual(result[0]["score"], 4.2)
+        self.assertEqual(result[1]["score"], 3.9)
+        info_messages = [call.args[0] for call in mock_logger.info.call_args_list]
+        self.assertIn(
+            "Process Stream: deep analyzing %s must-read candidates with %s workers...",
+            info_messages,
+        )
+        self.assertIn(
+            "Process Stream: [%s/%s] deep analyzed %s (score: %.1f)",
+            info_messages,
+        )
+        self.assertIn(
+            "Process Stream: finished deep analysis for %s candidates (%s analyzed, %s skipped, %s failed).",
+            info_messages,
+        )
+
+    @patch("rss_analyzer.backend_service.logger")
+    @patch(
+        "rss_analyzer.backend_service.analyze_article_with_llm",
+        side_effect=Exception("boom"),
+    )
+    @patch(
+        "rss_analyzer.backend_service._prepare_article_analysis_inputs",
+        return_value=("summary", "Long enough content" * 20),
+    )
+    def test_deep_analyze_digest_candidates_keeps_batch_running_on_single_failure(
+        self,
+        mock_prepare_inputs,
+        mock_analyze_article_with_llm,
+        mock_logger,
+    ):
+        items = [{"id": "1", "title": "Broken article", "link": "https://example.com/1"}]
+
+        result = _deep_analyze_digest_candidates(items)
+
+        self.assertEqual(result[0]["id"], "1")
+        self.assertNotIn("score", result[0])
+        mock_logger.warning.assert_called()
+
     @patch("rss_analyzer.backend_service.feedly_mark_read")
     @patch("rss_analyzer.backend_service.get_cached_score")
     def test_low_score_filter_does_not_mark_read_inline(
@@ -237,11 +427,16 @@ class TestBackendService(unittest.TestCase):
         self.assertEqual(response["stream_id"], FEED_ID_36KR)
         mock_fetch_filter_articles.assert_called_once_with(10, stream_id=FEED_ID_36KR)
 
+    @patch("rss_analyzer.backend_service.is_vector_store_enabled", return_value=True)
     @patch("rss_analyzer.backend_service.iter_cached_scores")
     @patch("rss_analyzer.backend_service.build_vector_store_payload")
     @patch("rss_analyzer.backend_service.get_vector_store")
     def test_rebuild_vector_store_rebuilds_from_cached_articles(
-        self, mock_get_vector_store, mock_build_payload, mock_iter_cached_scores
+        self,
+        mock_get_vector_store,
+        mock_build_payload,
+        mock_iter_cached_scores,
+        mock_vector_enabled,
     ):
         vector_store = Mock()
         vector_store.backend = "http"
@@ -274,12 +469,17 @@ class TestBackendService(unittest.TestCase):
         vector_store.refresh_embedding_fingerprint.assert_called_once()
         vector_store.add_articles.assert_called_once()
 
+    @patch("rss_analyzer.backend_service.is_vector_store_enabled", return_value=True)
     @patch.dict("os.environ", {"RSS_VECTOR_REBUILD_RESUME": "true"}, clear=False)
     @patch("rss_analyzer.backend_service.iter_cached_scores")
     @patch("rss_analyzer.backend_service.build_vector_store_payload")
     @patch("rss_analyzer.backend_service.get_vector_store")
     def test_rebuild_vector_store_skips_existing_ids_in_resume_mode(
-        self, mock_get_vector_store, mock_build_payload, mock_iter_cached_scores
+        self,
+        mock_get_vector_store,
+        mock_build_payload,
+        mock_iter_cached_scores,
+        mock_vector_enabled,
     ):
         vector_store = Mock()
         vector_store.backend = "http"
@@ -324,9 +524,10 @@ class TestBackendService(unittest.TestCase):
         vector_store.clear_collection.assert_not_called()
         vector_store.add_articles.assert_called_once()
 
+    @patch("rss_analyzer.backend_service.is_vector_store_enabled", return_value=True)
     @patch("rss_analyzer.backend_service.get_vector_store")
     def test_rebuild_vector_store_returns_error_when_vector_store_unavailable(
-        self, mock_get_vector_store
+        self, mock_get_vector_store, mock_vector_enabled
     ):
         vector_store = Mock()
         vector_store.collection = None

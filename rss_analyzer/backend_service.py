@@ -28,6 +28,7 @@ from rss_analyzer.config import (
     LATEST_UNREAD_FILE,
     PROJ_CONFIG,
     get_vector_store_config,
+    is_vector_store_enabled,
 )
 from rss_analyzer.feedly_client import feedly_fetch_unread, feedly_mark_read
 from rss_analyzer.llm_analyzer import (
@@ -35,6 +36,12 @@ from rss_analyzer.llm_analyzer import (
     analyze_articles_with_llm_batch,
     generate_overall_summary,
     summarize_single_article,
+)
+from rss_analyzer.stream_strategy import (
+    determine_stream_strategy,
+    generate_stream_overview,
+    render_stream_overview_markdown,
+    save_stream_overview_markdown,
 )
 from rss_analyzer.utils import is_newsflash, load_articles, save_articles
 logger = logging.getLogger(__name__)
@@ -63,11 +70,12 @@ def _coerce_bool(value, default: bool) -> bool:
     return bool(value)
 
 
-def get_runtime_paths() -> dict[str, str]:
+def get_runtime_paths() -> dict[str, str | bool]:
     vector_config = get_vector_store_config()
     return {
         "project_root": str(PROJECT_ROOT),
         "db_path": os.environ["RSS_SCORES_DB"],
+        "vector_enabled": is_vector_store_enabled(),
         "vector_backend": vector_config.backend,
         "vector_db_dir": vector_config.persist_dir,
         "vector_state_dir": vector_config.state_dir,
@@ -76,12 +84,30 @@ def get_runtime_paths() -> dict[str, str]:
 
 
 def get_vector_store():
+    if not is_vector_store_enabled():
+        return None
+
     global _VECTOR_STORE
     if _VECTOR_STORE is None:
         from rss_analyzer.vector_store import vector_store as shared_vector_store
 
         _VECTOR_STORE = shared_vector_store
     return _VECTOR_STORE
+
+
+def _vector_store_disabled_error(operation: str) -> dict:
+    return {
+        "error": "vector_store_disabled",
+        "message": f"Vector store is disabled; cannot {operation}.",
+    }
+
+
+def _vector_store_disabled_result(**payload) -> dict:
+    return {
+        **payload,
+        "disabled": True,
+        "message": "Vector store is disabled.",
+    }
 
 
 def _build_monthly_output_path(prefix: str, suffix: str) -> str:
@@ -371,6 +397,224 @@ def analyze_articles(
     }
 
 
+def _prepare_article_analysis_inputs(article: dict) -> tuple[str, str]:
+    content = article.get("content", "") or ""
+    summary = article.get("summary", "") or ""
+    link = article.get("link")
+
+    if content and len(content) > 200:
+        return summary, content
+
+    if summary and len(summary) > 500:
+        return summary, summary
+
+    if link:
+        fetched_content = fetch_article_content(link)
+        if fetched_content:
+            return summary, fetched_content
+
+    return summary, content or summary
+
+
+def _truncate_title(title: str | None, limit: int = 72) -> str:
+    text = (title or "").strip() or "Untitled"
+    if len(text) <= limit:
+        return text
+    return f"{text[: limit - 3]}..."
+
+
+def _deep_analysis_log_step(total: int) -> int:
+    if total <= 5:
+        return 1
+    if total <= 12:
+        return 2
+    return 5
+
+
+def _deep_analyze_digest_candidate(item: dict) -> tuple[str, dict]:
+    summary, content = _prepare_article_analysis_inputs(item)
+    enriched = dict(item)
+    enriched["openable"] = bool(item.get("link"))
+
+    if not content or len(content) < PROJ_CONFIG.get("filter_min_length", 100):
+        return "skipped", enriched
+
+    analysis = analyze_article_with_llm(item.get("title", ""), summary, content)
+    enriched["score"] = analysis.get("score")
+    enriched["verdict"] = analysis.get("verdict")
+    enriched["analysis_summary"] = analysis.get("summary")
+    enriched["reason"] = analysis.get("reason")
+    enriched["analysis"] = analysis
+    return "analyzed", enriched
+
+
+def _deep_analyze_digest_candidates(items: list[dict]) -> list[dict]:
+    if not items:
+        return []
+
+    total = len(items)
+    max_workers = max(1, int(PROJ_CONFIG.get("max_workers", 3)))
+    log_step = _deep_analysis_log_step(total)
+    logger.info(
+        "Process Stream: deep analyzing %s must-read candidates with %s workers...",
+        total,
+        max_workers,
+    )
+
+    analyzed_items: list[dict | None] = [None] * total
+    completed = 0
+    analyzed_count = 0
+    skipped_count = 0
+    failed_count = 0
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_index = {
+            executor.submit(_deep_analyze_digest_candidate, item): index
+            for index, item in enumerate(items)
+        }
+
+        for future in concurrent.futures.as_completed(future_to_index):
+            index = future_to_index[future]
+            original_item = items[index]
+            title = _truncate_title(original_item.get("title"))
+            completed += 1
+
+            try:
+                status, enriched = future.result()
+                analyzed_items[index] = enriched
+                if status == "analyzed":
+                    analyzed_count += 1
+                else:
+                    skipped_count += 1
+
+                should_log_progress = (
+                    log_step == 1
+                    or completed == 1
+                    or completed == total
+                    or completed % log_step == 0
+                )
+                if status == "analyzed" and should_log_progress:
+                    logger.info(
+                        "Process Stream: [%s/%s] deep analyzed %s (score: %.1f)",
+                        completed,
+                        total,
+                        title,
+                        enriched.get("score", 0.0),
+                    )
+                elif status != "analyzed" and should_log_progress:
+                    logger.info(
+                        "Process Stream: [%s/%s] progress checkpoint at %s (%s)",
+                        completed,
+                        total,
+                        title,
+                        "content too short",
+                    )
+            except Exception as exc:
+                logger.warning("Digest deep analysis failed for %s: %s", original_item.get("title"), exc)
+                fallback_item = dict(original_item)
+                fallback_item["openable"] = bool(original_item.get("link"))
+                analyzed_items[index] = fallback_item
+                failed_count += 1
+                should_log_progress = (
+                    log_step == 1
+                    or completed == 1
+                    or completed == total
+                    or completed % log_step == 0
+                )
+                if should_log_progress:
+                    logger.info(
+                        "Process Stream: [%s/%s] progress checkpoint at %s (%s)",
+                        completed,
+                        total,
+                        title,
+                        "analysis failed",
+                    )
+
+    logger.info(
+        "Process Stream: finished deep analysis for %s candidates (%s analyzed, %s skipped, %s failed).",
+        total,
+        analyzed_count,
+        skipped_count,
+        failed_count,
+    )
+    return [item for item in analyzed_items if item is not None]
+
+
+def _mark_digest_openable(items: list[dict]) -> list[dict]:
+    marked_items = []
+    for item in items:
+        enriched = dict(item)
+        enriched["openable"] = bool(item.get("link"))
+        marked_items.append(enriched)
+    return marked_items
+
+
+def _refresh_digest_metadata(digest: dict) -> dict:
+    must_read_items = digest.get("deep_analyzed_reads", [])
+    skim_items = digest.get("skim_items", [])
+    clear_items = digest.get("clear_items", [])
+    fetched_count = digest.get("stats", {}).get("fetched_count", 0)
+    candidate_count = digest.get("stats", {}).get("candidate_count", 0)
+    clear_ratio = (len(clear_items) / fetched_count) if fetched_count else 0.0
+
+    actions = []
+    if must_read_items:
+        actions.append(f"先看 must-read 的 {len(must_read_items)} 篇重点文章。")
+    if skim_items:
+        actions.append(f"若时间有限，只抽样 skim 区里的 {min(3, len(skim_items))} 篇代表项。")
+    if clear_items:
+        actions.append(f"可批量已读 {len(clear_items)} 条低优先级或重复噪音内容。")
+
+    digest["actions"] = actions
+    digest["stats"] = {
+        "fetched_count": fetched_count,
+        "candidate_count": candidate_count,
+        "must_read_count": len(must_read_items),
+        "skim_count": len(skim_items),
+        "clear_count": len(clear_items),
+        "clear_ratio": clear_ratio,
+    }
+    return digest
+
+
+def _rerank_digest_after_analysis(digest: dict) -> dict:
+    retained_must_read: list[dict] = []
+    demoted_to_skim: list[dict] = []
+    demoted_to_clear: list[dict] = []
+
+    for item in digest.get("deep_analyzed_reads", []):
+        score = item.get("score")
+        verdict = item.get("verdict", "")
+        relevance = (
+            item.get("analysis", {})
+            .get("detailed_scores", {})
+            .get("relevance", 0)
+        )
+
+        if score is None:
+            retained_must_read.append(item)
+            continue
+
+        if score < 2.5 or relevance <= 1 or "不太值得" in verdict:
+            demoted_to_clear.append(item)
+            continue
+
+        if score < 3.6:
+            demoted_to_skim.append(item)
+            continue
+
+        retained_must_read.append(item)
+
+    existing_skim = digest.get("skim_items", [])
+    existing_clear = digest.get("clear_items", [])
+
+    digest["deep_analyzed_reads"] = retained_must_read
+    digest["must_read_candidates"] = retained_must_read
+    digest["skim_items"] = _mark_digest_openable(demoted_to_skim + existing_skim)
+    digest["clear_items"] = _mark_digest_openable(demoted_to_clear + existing_clear)
+    return _refresh_digest_metadata(digest)
+
+
 def fetch_filter_articles(limit: int, stream_id: str | None = None) -> list:
     source_label = "36kr feed" if stream_id == FEED_ID_36KR else "all unread"
     logger.info("Fetching unread articles from %s (limit=%s)", source_label, limit)
@@ -411,6 +655,16 @@ def mark_filter_results_as_read(
 
     logger.info("Marked %s %s articles as read", len(ids), label)
     return True
+
+
+def mark_article_ids_as_read(
+    article_ids: list[str], label: str, dry_run: bool = False, mark_read: bool = True
+) -> bool:
+    if not article_ids:
+        return True
+
+    articles = [{"id": article_id} for article_id in article_ids if article_id]
+    return mark_filter_results_as_read(articles, label, dry_run, mark_read)
 
 
 def run_filter_pipeline(
@@ -659,6 +913,82 @@ def run_filter_workflow(
     }
 
 
+def process_stream(
+    *,
+    stream_id: str | None,
+    stream_label: str | None = None,
+    days: int = 3,
+    limit: int = 500,
+    strategy: str | None = None,
+    export_markdown: bool = False,
+) -> dict:
+    articles = fetch_filter_articles(limit, stream_id=stream_id)
+    resolved_strategy = strategy or determine_stream_strategy(stream_id, stream_label)
+    result = generate_stream_overview(
+        articles,
+        stream_id=stream_id,
+        stream_label=stream_label,
+        strategy=resolved_strategy,
+        days=days,
+    )
+    result["fetched_count"] = len(articles)
+
+    digest = dict(result.get("digest") or {})
+    digest["must_read_candidates"] = _mark_digest_openable(
+        digest.get("must_read_candidates", [])
+    )
+    digest["skim_items"] = _mark_digest_openable(digest.get("skim_items", []))
+    digest["clear_items"] = _mark_digest_openable(digest.get("clear_items", []))
+    digest["deep_analyzed_reads"] = _deep_analyze_digest_candidates(
+        digest.get("must_read_candidates", [])
+    )
+    digest = _rerank_digest_after_analysis(digest)
+    result["digest"] = digest
+    result["worth_expanding_items"] = digest.get("deep_analyzed_reads", [])
+    result["low_priority_items"] = digest.get("clear_items", result.get("low_priority_items", []))
+    result["mark_read_candidates"] = [
+        item["id"] for item in digest.get("clear_items", []) if item.get("id")
+    ]
+    result["summary"] = digest.get("headline", result.get("summary", ""))
+    result["markdown"] = render_stream_overview_markdown(
+        strategy=result["strategy"],
+        stream_label=stream_label or stream_id or "Selected stream",
+        days=days,
+        article_count=result["article_count"],
+        summary=result["summary"],
+        theme_groups=result.get("theme_groups", []),
+        worth_expanding_items=result.get("worth_expanding_items", []),
+        worth_expanding_overflow_count=result.get("worth_expanding_overflow_count", 0),
+        low_priority_items=result.get("low_priority_items", []),
+        digest=digest,
+    )
+
+    if export_markdown:
+        result["overview_file"] = save_stream_overview_markdown(
+            result["markdown"],
+            stream_label=stream_label or stream_id,
+            strategy=result["strategy"],
+        )
+
+    return result
+
+
+def mark_stream_low_priority_read(article_ids: list[str], *, dry_run: bool = False) -> dict:
+    cleaned_ids = [article_id for article_id in article_ids if article_id]
+    success = mark_article_ids_as_read(
+        cleaned_ids,
+        label="low-priority",
+        dry_run=dry_run,
+        mark_read=True,
+    )
+    return {
+        "success": success,
+        "marked_count": len(cleaned_ids) if success and not dry_run else 0,
+        "candidate_count": len(cleaned_ids),
+        "dry_run": dry_run,
+    }
+
+
 def _normalize_item(article_id: str, cached: dict | None) -> dict:
     if not cached:
         return {
@@ -877,8 +1207,13 @@ def _handle_semantic_search(msg: dict) -> dict:
         limit,
         min_score,
     )
+    if not is_vector_store_enabled():
+        return _vector_store_disabled_result(query=query, results=[])
     try:
-        results = get_vector_store().search_similar(query, limit, min_score)
+        vector_store = get_vector_store()
+        if not vector_store:
+            return {"error": "vector_store_unavailable", "message": "Vector store is not available."}
+        results = vector_store.search_similar(query, limit, min_score)
         return {"query": query, "results": results}
     except Exception as exc:
         logger.error("Semantic search error: %s", exc)
@@ -891,8 +1226,13 @@ def _handle_get_article_tags(msg: dict) -> dict:
         return {"error": "no_article_id", "message": "Article ID is required"}
 
     logger.info("Handling get_article_tags: article_id=%r", article_id)
+    if not is_vector_store_enabled():
+        return _vector_store_disabled_result(article_id=article_id, tags=[])
     try:
-        tags = get_vector_store().get_article_tags(article_id)
+        vector_store = get_vector_store()
+        if not vector_store:
+            return {"error": "vector_store_unavailable", "message": "Vector store is not available."}
+        tags = vector_store.get_article_tags(article_id)
         return {"article_id": article_id, "tags": tags}
     except Exception as exc:
         logger.error("Get article tags error: %s", exc)
@@ -910,8 +1250,18 @@ def _handle_discover_trending_topics(msg: dict) -> dict:
         sample_size,
         hours,
     )
+    if not is_vector_store_enabled():
+        return _vector_store_disabled_result(
+            topics=[],
+            limit=limit,
+            sample_size=sample_size,
+            hours=hours,
+        )
     try:
-        trending_topics = get_vector_store().discover_trending_topics(limit, sample_size, hours)
+        vector_store = get_vector_store()
+        if not vector_store:
+            return {"error": "vector_store_unavailable", "message": "Vector store is not available."}
+        trending_topics = vector_store.discover_trending_topics(limit, sample_size, hours)
         return {
             "topics": trending_topics,
             "limit": limit,
@@ -929,8 +1279,13 @@ def _handle_delete_article(msg: dict) -> dict:
         return {"error": "no_article_id", "message": "Article ID is required"}
 
     logger.info("Handling delete_article: article_id=%r", article_id)
+    if not is_vector_store_enabled():
+        return _vector_store_disabled_error("delete article embeddings")
     try:
-        success = get_vector_store().delete_article(article_id)
+        vector_store = get_vector_store()
+        if not vector_store:
+            return {"error": "vector_store_unavailable", "message": "Vector store is not available."}
+        success = vector_store.delete_article(article_id)
         return {"article_id": article_id, "success": success}
     except Exception as exc:
         logger.error("Delete article error: %s", exc)
@@ -939,8 +1294,12 @@ def _handle_delete_article(msg: dict) -> dict:
 
 def _handle_clear_vector_store(_: dict) -> dict:
     logger.info("Handling clear_vector_store")
+    if not is_vector_store_enabled():
+        return _vector_store_disabled_error("clear the vector store")
     try:
         vector_store = get_vector_store()
+        if not vector_store:
+            return {"error": "vector_store_unavailable", "message": "Vector store is not available."}
         success = vector_store.clear_collection()
         count = vector_store.get_article_count()
         return {
@@ -996,7 +1355,28 @@ def _handle_run_filters(msg: dict) -> dict:
     )
 
 
+def _handle_process_stream(msg: dict) -> dict:
+    return process_stream(
+        stream_id=msg.get("stream_id"),
+        stream_label=msg.get("stream_label"),
+        days=int(msg.get("days", 3)),
+        limit=int(msg.get("limit", 500)),
+        strategy=msg.get("strategy"),
+        export_markdown=_coerce_bool(msg.get("export_markdown"), False),
+    )
+
+
+def _handle_mark_stream_low_priority_read(msg: dict) -> dict:
+    return mark_stream_low_priority_read(
+        msg.get("article_ids") or [],
+        dry_run=_coerce_bool(msg.get("dry_run"), False),
+    )
+
+
 def rebuild_vector_store() -> dict:
+    if not is_vector_store_enabled():
+        return _vector_store_disabled_error("rebuild the vector store")
+
     vector_store = get_vector_store()
     if not vector_store or not vector_store.collection:
         return {
@@ -1087,14 +1467,23 @@ def rebuild_vector_store() -> dict:
 
 def _handle_get_vector_store_stats(_: dict) -> dict:
     logger.info("Handling get_vector_store_stats")
+    if not is_vector_store_enabled():
+        return _vector_store_disabled_result(
+            article_count=0,
+            sample_ids=[],
+            has_data=False,
+        )
     try:
         vector_store = get_vector_store()
+        if not vector_store:
+            return {"error": "vector_store_unavailable", "message": "Vector store is not available."}
         count = vector_store.get_article_count()
         all_ids = vector_store.get_all_article_ids()
         return {
             "article_count": count,
             "sample_ids": all_ids[:10],
             "has_data": count > 0,
+            "disabled": False,
         }
     except Exception as exc:
         logger.error("Get vector store stats error: %s", exc)
@@ -1112,8 +1501,12 @@ def _handle_rebuild_vector_store(_: dict) -> dict:
 
 def _handle_cleanup_invalid_entries(_: dict) -> dict:
     logger.info("Handling cleanup_invalid_entries")
+    if not is_vector_store_enabled():
+        return _vector_store_disabled_error("clean up invalid vector entries")
     try:
         vector_store = get_vector_store()
+        if not vector_store:
+            return {"error": "vector_store_unavailable", "message": "Vector store is not available."}
         removed_count = vector_store.cleanup_invalid_entries()
         count_after = vector_store.get_article_count()
         return {
@@ -1149,10 +1542,14 @@ def handle_message(msg: dict) -> dict:
         return _handle_generate_summary(msg)
     if msg_type == "run_filters":
         return _handle_run_filters(msg)
+    if msg_type == "process_stream":
+        return _handle_process_stream(msg)
     if msg_type == "analyze_article":
         return _handle_analyze_article(msg)
     if msg_type == "summarize_article":
         return _handle_summarize_article(msg)
+    if msg_type == "mark_stream_low_priority_read":
+        return _handle_mark_stream_low_priority_read(msg)
     if msg_type == "semantic_search":
         return _handle_semantic_search(msg)
     if msg_type == "get_article_tags":

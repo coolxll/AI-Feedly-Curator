@@ -13,7 +13,12 @@ from datetime import datetime
 
 from openai import OpenAI, RateLimitError
 
-from .config import PROJ_CONFIG, get_openai_task_config, log_debug
+from .config import (
+    PROJ_CONFIG,
+    build_openai_client_kwargs,
+    get_openai_task_config,
+    log_debug,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -491,10 +496,7 @@ def score_article(title: str, summary: str, content: str) -> Dict[str, Any]:
         openai_config = get_openai_task_config("analysis", default_model="gpt-4o-mini")
         logger.info(f"Single Scoring - Connecting to: {openai_config.base_url}")
 
-        client = OpenAI(
-            api_key=openai_config.api_key,
-            base_url=openai_config.base_url,
-        )
+        client = OpenAI(**build_openai_client_kwargs(openai_config))
 
         logger.info(f"Single Scoring - Using Model: {openai_config.model}")
 
@@ -660,10 +662,7 @@ def score_articles_batch(
         openai_config = get_openai_task_config("analysis", default_model="gpt-4o-mini")
         logger.info(f"Batch Scoring - Connecting to: {openai_config.base_url}")
 
-        client = OpenAI(
-            api_key=openai_config.api_key,
-            base_url=openai_config.base_url,
-        )
+        client = OpenAI(**build_openai_client_kwargs(openai_config))
     except Exception as e:
         logger.error(f"Client init failed: {e}")
         return None
