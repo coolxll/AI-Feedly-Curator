@@ -5,6 +5,8 @@ import logging
 from datetime import datetime
 from typing import Any
 
+from rss_analyzer.config import is_vector_store_enabled
+
 logger = logging.getLogger(__name__)
 
 DB_PATH = os.getenv("RSS_SCORES_DB", os.path.join(os.getcwd(), "rss_scores.db"))
@@ -239,6 +241,10 @@ def save_cached_score(article_id: str, score: float, data: dict):
         )
         conn.commit()
         conn.close()
+
+        if not is_vector_store_enabled():
+            logger.debug("Vector store disabled; skipped embedding persistence for %s", article_id)
+            return
 
         # 2. Save to Vector Store (ChromaDB)
         try:

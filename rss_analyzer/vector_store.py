@@ -8,7 +8,11 @@ import time
 from datetime import datetime
 from typing import List, Dict, Any
 from openai import OpenAI
-from rss_analyzer.config import get_embedding_config, get_vector_store_config
+from rss_analyzer.config import (
+    get_embedding_config,
+    get_vector_store_config,
+    is_vector_store_enabled,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -101,6 +105,7 @@ class ChromaVectorStore:
     """
 
     def __init__(self, collection_name: str = "rss_articles"):
+        self.enabled = is_vector_store_enabled()
         vector_config = get_vector_store_config()
         self.backend = vector_config.backend
         self.persist_dir = vector_config.persist_dir
@@ -121,7 +126,10 @@ class ChromaVectorStore:
         self.embedding_fn = None
         self._trending_cache = None
         self._trending_cache_time = None
-        self._initialize()
+        if self.enabled:
+            self._initialize()
+        else:
+            logger.info("Vector store is disabled by config; skipping Chroma initialization.")
 
     def _initialize(self):
         try:
@@ -320,7 +328,7 @@ print(collection.count())
         """
         Re-check fingerprint metadata against the current embedding config.
         """
-        if not self.collection:
+        if not getattr(self, "enabled", True) or not self.collection:
             logger.error("Cannot refresh embedding fingerprint: vector store unavailable")
             return False
 
@@ -345,7 +353,7 @@ print(collection.count())
         """
         Add or update an article in the vector store.
         """
-        if not self.collection:
+        if not getattr(self, "enabled", True) or not self.collection:
             return False
 
         if not text or len(text.strip()) == 0:
@@ -371,7 +379,7 @@ print(collection.count())
         """
         Add or update multiple articles in one batch.
         """
-        if not self.collection:
+        if not getattr(self, "enabled", True) or not self.collection:
             return {"success_count": 0, "failed_ids": [item["article_id"] for item in items]}
 
         valid_items = [
@@ -438,7 +446,7 @@ print(collection.count())
             limit: Maximum number of results to return
             min_score: Minimum score threshold (optional filtering)
         """
-        if not self.collection:
+        if not getattr(self, "enabled", True) or not self.collection:
             return []
 
         try:
@@ -496,6 +504,8 @@ print(collection.count())
         Returns:
             Boolean indicating success
         """
+        if not getattr(self, "enabled", True) or not self.collection:
+            return False
         try:
             self.collection.delete(ids=[article_id])
             logger.debug(f"Deleted article {article_id} from vector store")
@@ -516,6 +526,8 @@ print(collection.count())
         Returns:
             Boolean indicating success
         """
+        if not getattr(self, "enabled", True) or not self.collection:
+            return False
         try:
             self.collection.delete(ids=article_ids)
             logger.debug(f"Deleted {len(article_ids)} articles from vector store")
@@ -531,6 +543,8 @@ print(collection.count())
         Returns:
             Boolean indicating success
         """
+        if not getattr(self, "enabled", True) or not self.collection:
+            return False
         try:
             # Get all IDs in the collection first
             all_items = self.collection.get(include=[])
@@ -553,6 +567,8 @@ print(collection.count())
         Returns:
             Total count of articles
         """
+        if not getattr(self, "enabled", True) or not self.collection:
+            return 0
         try:
             count = self.collection.count()
             return count
@@ -567,6 +583,8 @@ print(collection.count())
         Returns:
             List of all article IDs
         """
+        if not getattr(self, "enabled", True) or not self.collection:
+            return []
         try:
             all_items = self.collection.get(include=[])  # Get only IDs
             return all_items["ids"]
@@ -581,6 +599,8 @@ print(collection.count())
         Returns:
             Dictionary containing ids, documents, and metadatas
         """
+        if not getattr(self, "enabled", True) or not self.collection:
+            return {"ids": [], "documents": [], "metadatas": []}
         try:
             all_items = self.collection.get(include=["documents", "metadatas"])
             return all_items
@@ -595,6 +615,8 @@ print(collection.count())
         Returns:
             Number of entries removed
         """
+        if not getattr(self, "enabled", True) or not self.collection:
+            return 0
         try:
             # Get all documents and their metadata
             all_items = self.collection.get(include=["documents", "metadatas", "ids"])
@@ -637,6 +659,8 @@ print(collection.count())
         Returns:
             List of tags for the article
         """
+        if not getattr(self, "enabled", True) or not self.collection:
+            return []
         try:
             if not text:
                 # Get the article text from the collection
@@ -791,6 +815,8 @@ print(collection.count())
         Returns:
             List of articles with their tags
         """
+        if not getattr(self, "enabled", True) or not self.collection:
+            return []
         try:
             results = self.search_similar(query, limit)
 
@@ -815,6 +841,8 @@ print(collection.count())
             sample_size: Number of recent articles to sample for trends
             hours: Number of hours to look back for trending topics (default 24h)
         """
+        if not getattr(self, "enabled", True) or not self.collection:
+            return []
         try:
             from datetime import datetime, timedelta
             from rss_analyzer.cache import get_app_cache, set_app_cache

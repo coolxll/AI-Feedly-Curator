@@ -11,21 +11,46 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from rss_analyzer.backend_service import handle_message
 
 logger = logging.getLogger(__name__)
+ALLOWED_EXTENSION_ORIGIN_PREFIXES = (
+    "chrome-extension://",
+    "moz-extension://",
+    "edge-extension://",
+)
 
 
 class BackendHTTPRequestHandler(BaseHTTPRequestHandler):
     server_version = "RSSBackendHTTP/0.1"
 
-    def _write_json(self, status_code: int, payload: dict) -> None:
+    def _get_request_origin(self) -> str:
+        return (self.headers.get("Origin") or "").strip()
+
+    def _is_allowed_origin(self, origin: str) -> bool:
+        if not origin:
+            return True
+
+        return origin.startswith(ALLOWED_EXTENSION_ORIGIN_PREFIXES)
+
+    def _write_json(self, status_code: int, payload: dict, include_cors: bool = True) -> None:
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         self.send_response(status_code)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        if include_cors:
+            origin = self._get_request_origin()
+            if origin:
+                self.send_header("Access-Control-Allow-Origin", origin)
+                self.send_header("Vary", "Origin")
+            self.send_header("Access-Control-Allow-Headers", "Content-Type")
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         self.end_headers()
         self.wfile.write(body)
+
+    def _reject_disallowed_origin(self) -> None:
+        self._write_json(
+            403,
+            {"error": "forbidden_origin", "message": "Origin is not allowed"},
+            include_cors=False,
+        )
 
     def _read_json(self) -> dict:
         content_length = int(self.headers.get("Content-Length", "0"))
@@ -42,9 +67,16 @@ class BackendHTTPRequestHandler(BaseHTTPRequestHandler):
             raise ValueError(f"invalid_json: {exc}") from exc
 
     def do_OPTIONS(self) -> None:  # noqa: N802
+        if not self._is_allowed_origin(self._get_request_origin()):
+            self._reject_disallowed_origin()
+            return
         self._write_json(200, {"ok": True})
 
     def do_GET(self) -> None:  # noqa: N802
+        if not self._is_allowed_origin(self._get_request_origin()):
+            self._reject_disallowed_origin()
+            return
+
         if self.path == "/health":
             self._write_json(200, handle_message({"type": "health"}))
             return
@@ -52,6 +84,10 @@ class BackendHTTPRequestHandler(BaseHTTPRequestHandler):
         self._write_json(404, {"error": "not_found"})
 
     def do_POST(self) -> None:  # noqa: N802
+        if not self._is_allowed_origin(self._get_request_origin()):
+            self._reject_disallowed_origin()
+            return
+
         if self.path != "/api/message":
             self._write_json(404, {"error": "not_found"})
             return

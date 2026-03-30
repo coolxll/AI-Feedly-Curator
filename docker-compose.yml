@@ -3,7 +3,7 @@ services:
     image: chromadb/chroma:latest
     container_name: rss-opml-chromadb
     ports:
-      - "8001:8000"
+      - "${RSS_VECTOR_HTTP_PORT:-8000}:8000"
     environment:
       IS_PERSISTENT: "TRUE"
       ALLOW_RESET: "TRUE"

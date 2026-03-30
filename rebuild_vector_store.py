@@ -17,6 +17,7 @@ def main() -> int:
     runtime = get_runtime_paths()
     print("Rebuilding vector store...")
     print(f"  db: {runtime['db_path']}")
+    print(f"  vector_enabled: {runtime['vector_enabled']}")
     print(f"  vector: {runtime['vector_db_dir']}")
 
     result = rebuild_vector_store()
