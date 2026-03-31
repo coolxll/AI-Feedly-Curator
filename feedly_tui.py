@@ -41,6 +41,7 @@ logging.basicConfig(
 
 console = Console()
 logger = logging.getLogger("tui")
+GLOBAL_STREAM_SENTINEL = "__GLOBAL_ALL__"
 
 
 def render_main_header():
@@ -366,8 +367,8 @@ def select_stream_interactive():
             break
 
     global_label = f"Global All ({global_count} unread)"
-    choices.append(questionary.Choice(global_label, value=None))
-    id_to_label[None] = "Global All"
+    choices.append(questionary.Choice(global_label, value=GLOBAL_STREAM_SENTINEL))
+    id_to_label[GLOBAL_STREAM_SENTINEL] = "Global All"
 
     # 2. Categories
     cat_choices = []
@@ -427,6 +428,9 @@ def select_stream_interactive():
     ).ask()
 
     stream_label = None
+    if stream_id == GLOBAL_STREAM_SENTINEL:
+        return None, "Global All"
+
     if stream_id == "MANUAL":
         stream_id = questionary.text("Enter Stream ID:").ask()
         if not stream_id:

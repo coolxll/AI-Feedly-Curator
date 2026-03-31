@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 import logging
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import parse_qs
 
 from rss_analyzer.backend_service import handle_message
 
@@ -61,10 +62,45 @@ class BackendHTTPRequestHandler(BaseHTTPRequestHandler):
         if not raw_body:
             return {}
 
+        decoded_body = raw_body.decode("utf-8").strip()
+        if not decoded_body:
+            return {}
+
+        content_type = (self.headers.get("Content-Type") or "").split(";", 1)[0].strip().lower()
+
+        if content_type == "application/x-www-form-urlencoded":
+            return self._decode_form_payload(decoded_body)
+
         try:
-            return json.loads(raw_body.decode("utf-8"))
+            payload = json.loads(decoded_body)
         except json.JSONDecodeError as exc:
+            if "=" in decoded_body and "&" in decoded_body:
+                return self._decode_form_payload(decoded_body)
             raise ValueError(f"invalid_json: {exc}") from exc
+
+        if isinstance(payload, str):
+            try:
+                payload = json.loads(payload)
+            except json.JSONDecodeError as exc:
+                raise ValueError(f"invalid_json: nested payload is not valid JSON ({exc})") from exc
+
+        if isinstance(payload, dict) and isinstance(payload.get("payload"), dict) and "type" not in payload:
+            payload = payload["payload"]
+
+        return payload
+
+    def _decode_form_payload(self, body: str) -> dict:
+        parsed = parse_qs(body, keep_blank_values=True)
+        payload = {key: values[-1] if values else "" for key, values in parsed.items()}
+        nested_payload = payload.get("payload")
+        if nested_payload and "type" not in payload:
+            try:
+                decoded_nested = json.loads(nested_payload)
+            except json.JSONDecodeError:
+                return payload
+            if isinstance(decoded_nested, dict):
+                return decoded_nested
+        return payload
 
     def do_OPTIONS(self) -> None:  # noqa: N802
         if not self._is_allowed_origin(self._get_request_origin()):

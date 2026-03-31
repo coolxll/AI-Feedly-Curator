@@ -1,0 +1,14 @@
+{
+  "datasets": [
+    {
+      "name": "rss_cnbeta_v1",
+      "path": "arena/scoring/datasets/rss_cnbeta_v1.json",
+      "description": "cnBeta benchmark sample for scoring strictness and stability"
+    },
+    {
+      "name": "mixed_feed_v1",
+      "path": "arena/scoring/datasets/mixed_feed_v1.json",
+      "description": "Mixed-source benchmark sample covering news, tutorials, and low-value noise"
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "input": "output/unread_news.json",
+  "limit": 20,
+  "offset": 0,
+  "origin_filter": "cnbeta",
+  "batch_size": 5,
+  "targets": [
+    "cheap|qwen-flash|http://127.0.0.1:8045/v1|CHEAP_API_KEY",
+    "sota|gpt-5-mini|https://api.openai.com/v1|OPENAI_API_KEY"
+  ]
+}

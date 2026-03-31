@@ -85,6 +85,42 @@ class TestHTTPService(unittest.TestCase):
 
         self.assertEqual(ctx.exception.code, 403)
 
+    @patch("rss_analyzer.http_service.handle_message")
+    def test_message_endpoint_accepts_double_encoded_json_payload(self, mock_handle_message):
+        mock_handle_message.return_value = {"ok": True}
+        request = Request(
+            f"http://127.0.0.1:{self.port}/api/message",
+            data=json.dumps(json.dumps({"type": "export_articles", "output_file": "output/export.json"})).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+
+        with urlopen(request) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+
+        self.assertEqual(payload, {"ok": True})
+        mock_handle_message.assert_called_once_with(
+            {"type": "export_articles", "output_file": "output/export.json"}
+        )
+
+    @patch("rss_analyzer.http_service.handle_message")
+    def test_message_endpoint_accepts_form_encoded_payload(self, mock_handle_message):
+        mock_handle_message.return_value = {"success": True}
+        request = Request(
+            f"http://127.0.0.1:{self.port}/api/message",
+            data="type=export_articles&limit=100&output_file=output%2Fexport.json".encode("utf-8"),
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            method="POST",
+        )
+
+        with urlopen(request) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+
+        self.assertEqual(payload, {"success": True})
+        mock_handle_message.assert_called_once_with(
+            {"type": "export_articles", "limit": "100", "output_file": "output/export.json"}
+        )
+
     def test_invalid_route_returns_404(self):
         request = Request(f"http://127.0.0.1:{self.port}/missing")
         with self.assertRaises(HTTPError) as ctx:

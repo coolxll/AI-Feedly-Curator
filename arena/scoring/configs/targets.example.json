@@ -1,0 +1,6 @@
+{
+  "targets": [
+    "cheap|qwen/qwen3.6-plus-preview:free|https://openrouter.ai/api/v1/|OPENROUTER_API_KEY",
+    "sota|gpt-5.4|https://api.openai.com/v1|OPENAI_API_KEY"
+  ]
+}

@@ -1,0 +1,233 @@
+{
+  "dataset": "rss_cnbeta_v1",
+  "version": "v1",
+  "created_at": "2026-03-31",
+  "description": "cnBeta-heavy benchmark focused on score inflation, headline seduction, and stability on fast-moving tech news.",
+  "source_files": [
+    "output/export_20260331_151011.json",
+    "output/unread_news.json",
+    "output/analyzed_articles_latest.json"
+  ],
+  "items": [
+    {
+      "id": "rss_cnbeta_v1-01",
+      "title": "微软确认将持续升级Windows 11经典界面 但控制面板等传统组件会继续共存",
+      "origin": "cnBeta全文版",
+      "link": "https://m.cnbeta.com.tw/view/1555888.htm",
+      "published": 1774935361000,
+      "summary_excerpt": "微软正在为 Windows 11 准备一轮新的界面更新，目标是在保留控制面板等传统组件的前提下，大幅现代化系统中的旧版弹窗、对话框和系统 UI，同时扩展深色模式覆盖范围。 负责 Windows 设计的 Marcus Ash 证实，团队已经…",
+      "category": "platform_update",
+      "expected_band": "mid",
+      "source_file": "output/export_20260331_151011.json"
+    },
+    {
+      "id": "rss_cnbeta_v1-02",
+      "title": "英特尔推出全新性能调优平台“Optimization Zone”",
+      "origin": "cnBeta全文版",
+      "link": "https://m.cnbeta.com.tw/view/1555880.htm",
+      "published": 1774935337000,
+      "summary_excerpt": "英特尔近日正式宣布推出全新“Optimization Zone”（优化专区）计划，这是该公司自去年 10 月启动的一项新举措，旨在围绕英特尔硬件建立一个集中化的软件性能优化知识库。该平台聚焦如何在英特尔平台上榨干性能潜力，从 BIOS 参…",
+      "category": "developer_tooling_news",
+      "expected_band": "mid",
+      "source_file": "output/export_20260331_151011.json"
+    },
+    {
+      "id": "rss_cnbeta_v1-03",
+      "title": "苹果下架“氛围编程”应用Anything并收紧App Store审核力度",
+      "origin": "cnBeta全文版",
+      "link": "https://m.cnbeta.com.tw/view/1555878.htm",
+      "published": 1774935324000,
+      "summary_excerpt": "苹果近日将一款主打“氛围编程”（vibe coding）的 AI 应用构建工具 Anything 从 App Store 下架，进一步收紧对此类应用的监管，Anything 联合创始人 Dhruv Amin 收到苹果通知称，该应用违反了 …",
+      "category": "platform_policy_news",
+      "expected_band": "mid",
+      "source_file": "output/export_20260331_151011.json"
+    },
+    {
+      "id": "rss_cnbeta_v1-04",
+      "title": "微信官宣新功能 压缩包能直接预览 不用下载、解压",
+      "origin": "cnBeta全文版",
+      "link": "https://m.cnbeta.com.tw/view/1555872.htm",
+      "published": 1774933589000,
+      "summary_excerpt": "今日，微信官方公众号“微信派”宣布，微信已支持压缩包直接预览功能，进一步提升文件处理效率。此前用户在微信中收到压缩包后，需将整个文件下载至本地，再用第三方App解压才能查看内容。现在，用户在聊天中点击压缩包后选择“预览”，无需下载、无需解…",
+      "category": "consumer_feature_brief",
+      "expected_band": "low",
+      "source_file": "output/export_20260331_151011.json"
+    },
+    {
+      "id": "rss_cnbeta_v1-05",
+      "title": "中国无人车开进迪拜 萝卜快跑启动全无人商业化运营",
+      "origin": "cnBeta全文版",
+      "link": "https://m.cnbeta.com.tw/view/1555870.htm",
+      "published": 1774933576000,
+      "summary_excerpt": "百度旗下萝卜快跑（Apollo Go）正式在迪拜启动全无人驾驶商业化运营。目前无人车队正分批次投入运营，计划逐步构建规模达数千台的出行网络，这也是迪拜首次引入全无人驾驶出租车服务。此次商业化运营采用“双线布局”策略，萝卜快跑已分别与迪拜国…",
+      "category": "autonomous_driving_news",
+      "expected_band": "mid",
+      "source_file": "output/export_20260331_151011.json"
+    },
+    {
+      "id": "rss_cnbeta_v1-06",
+      "title": "小米新推出的输入法工具直接暴露AI模型密钥",
+      "origin": "cnBeta全文版",
+      "link": "https://m.cnbeta.com.tw/view/1555864.htm",
+      "published": 1774933550000,
+      "summary_excerpt": "小米 MiClaw 团队日前推出新的系统输入法，不过负责开发输入法的工程师可能要面临低绩效考评了，因为输入法里直接暴露小米调用的 API 平台令牌。NS 网友经过测试发现只需要疯狂点击输入法的版本号即可打开调试页面，在调试页面里小米已经写…",
+      "category": "security_incident",
+      "expected_band": "high",
+      "source_file": "output/export_20260331_151011.json"
+    },
+    {
+      "id": "rss_cnbeta_v1-07",
+      "title": "内存条价格断崖式下跌 消费者需求被压制 商家囤货没人接盘",
+      "origin": "cnBeta全文版",
+      "link": "https://m.cnbeta.com.tw/view/1555854.htm",
+      "published": 1774933530000,
+      "summary_excerpt": "随着人工智能算力需求的爆发，全球内存产能一度供不应求，相关产品价格也一路走高，对整个消费电子产业产生了深远影响。从上周开始，一度坚挺的内存市场价格出现了非常明显的回落。根据深圳华强北市场的最新反馈，从上周三起，多款主流内存产品便开启了降价…",
+      "category": "market_news",
+      "expected_band": "low",
+      "source_file": "output/export_20260331_151011.json"
+    },
+    {
+      "id": "rss_cnbeta_v1-08",
+      "title": "长鹰-8大型运输无人机成功首飞 一口气能从北京飞到新疆",
+      "origin": "cnBeta全文版",
+      "link": "https://m.cnbeta.com.tw/view/1555852.htm",
+      "published": 1774933519000,
+      "summary_excerpt": "据央视新闻报道，今日，由中国兵器工业集团自主研发的长鹰-8大型运输无人机，在河南郑州成功首飞，成为全球迄今首飞成功的最大无人运输机。长鹰-8无人机沿跑道滑行平稳加速，仅用280米便离地爬升，顺利完成智能飞控、航电、机电、动力燃油、飞行品质…",
+      "category": "aviation_brief",
+      "expected_band": "mid",
+      "source_file": "output/export_20260331_151011.json"
+    },
+    {
+      "id": "rss_cnbeta_v1-09",
+      "title": "传RTX 60系列光追性能将翻倍 传统性能提升30%",
+      "origin": "cnBeta全文版",
+      "link": "https://m.cnbeta.com.tw/view/1555826.htm",
+      "published": 1774931759000,
+      "summary_excerpt": "英伟达RTX 60系列显卡（Rubin架构）首批消息流出。泄露消息称，RTX 60系列显卡传统光栅化性能提升不高，约为30-35%，但60系列专注于光追和路径追踪，性能较50系列翻了一倍。消息来自于油管频道RedGamingTech近期的…",
+      "category": "rumor_speculation",
+      "expected_band": "low",
+      "source_file": "output/export_20260331_151011.json"
+    },
+    {
+      "id": "rss_cnbeta_v1-10",
+      "title": "DeepMind之父坦言：我造的AI可能灭绝人类 但已无人能停下",
+      "origin": "cnBeta全文版",
+      "link": "https://m.cnbeta.com.tw/view/1555816.htm",
+      "published": 1774931727000,
+      "summary_excerpt": "近日，DeepMind创始人德米斯・哈萨比斯坦言，其研发的超级人工智能存在灭绝人类的风险，而当前AI发展竞赛已进入无法停止的状态，人类难以通过外部治理手段有效管控。他彻底放弃此前依赖制度、伦理委员会约束AI的构想，承认治理结构在关键决策中…",
+      "category": "quote_news",
+      "expected_band": "low",
+      "source_file": "output/export_20260331_151011.json"
+    },
+    {
+      "id": "rss_cnbeta_v1-11",
+      "title": "Rapidus提速1nm研发 力争与台积电差距6个月",
+      "origin": "cnBeta全文版",
+      "link": "https://m.cnbeta.com.tw/view/1555812.htm",
+      "published": 1774929997000,
+      "summary_excerpt": "Rapidus总裁兼首席执行官小池淳義表示，正在加速推进先进制程技术的研发，目标是在1nm工艺节点上将与台积电的技术差距缩小到大约6个月。据了解，台积电的1.4nm和1nm工艺可能会率先部署在台湾中部科学园区，名为Fab 25，预计投资约…",
+      "category": "semiconductor_race",
+      "expected_band": "mid",
+      "source_file": "output/export_20260331_151011.json"
+    },
+    {
+      "id": "rss_cnbeta_v1-12",
+      "title": "AMD双核卡皇HD 6990发布15周年 曾经让N卡追不上",
+      "origin": "cnBeta全文版",
+      "link": "https://m.cnbeta.com.tw/view/1555748.htm",
+      "published": 1774868723000,
+      "summary_excerpt": "2011年3月，AMD正式推出旗舰级双核心显卡Radeon HD 6990，这款代号Antilles的传奇产品，至今已走过15个年头。它虽比原定发布计划晚了数月，却精准抢在NVIDIA竞品登场前两周亮相，一经发布便登顶 全球最快显卡宝座，…",
+      "category": "nostalgia_recap",
+      "expected_band": "low",
+      "source_file": "output/unread_news.json"
+    },
+    {
+      "id": "rss_cnbeta_v1-13",
+      "title": "存储疯涨致笔记本电脑涨价 预计2026年全球出货量大降近15%",
+      "origin": "cnBeta全文版",
+      "link": "https://m.cnbeta.com.tw/view/1555746.htm",
+      "published": 1774868711000,
+      "summary_excerpt": "全球笔记本电脑市场迎来剧烈震荡，核心零部件价格暴涨推动整机大幅涨价，TrendForce集邦咨询预警，2026年全球笔记本出货量或将下滑14.8%。本轮涨价的核心推手是存储芯片。2025年低点仅3.2美元的8Gb DDR4颗粒，2026年…",
+      "category": "industry_forecast",
+      "expected_band": "mid",
+      "source_file": "output/unread_news.json"
+    },
+    {
+      "id": "rss_cnbeta_v1-14",
+      "title": "低价竞争拖累汽车用钢质量 车身开裂生锈成通病",
+      "origin": "cnBeta全文版",
+      "link": "https://m.cnbeta.com.tw/view/1555744.htm",
+      "published": 1774866990000,
+      "summary_excerpt": "受汽车行业价格战影响，成本压力不断向上游传导，汽车用钢陷入低价低质竞争，车身开裂、生锈、起泡等问题频发，相关质量投诉持续走高。车企为控制成本持续压低钢材采购价格，供应商为获取订单不得不降低材料标准，劣质钢材由此进入生产环节，成为车身质量问…",
+      "category": "industry_alarmism",
+      "expected_band": "low",
+      "source_file": "output/unread_news.json"
+    },
+    {
+      "id": "rss_cnbeta_v1-15",
+      "title": "我国首款“无人空中重卡” 长鹰-8将完成首飞",
+      "origin": "cnBeta全文版",
+      "link": "https://m.cnbeta.com.tw/view/1555742.htm",
+      "published": 1774866979000,
+      "summary_excerpt": "我国首款7吨级大型运输无人机——长鹰-8将于近日在郑州上街机场进行首飞，目前各项工作已准备就绪。长鹰-8是我国自主研发的大型运输无人机，机身长17米，翼展达25米，配备18立方米超大容积货舱，可兼容多型标准航空集装箱与专业冷链运储箱，15…",
+      "category": "aviation_hype",
+      "expected_band": "low",
+      "source_file": "output/unread_news.json"
+    },
+    {
+      "id": "rss_cnbeta_v1-16",
+      "title": "三星西安厂236层堆叠3D NAND量产 最新286层年内落地",
+      "origin": "cnBeta全文版",
+      "link": "https://m.cnbeta.com.tw/view/1555740.htm",
+      "published": 1774866968000,
+      "summary_excerpt": "据韩媒ETNEWS报道，位于西安的三星电子NAND晶圆厂已正式实现V8（236层堆叠）3D NAND闪存的量产。本次制程升级工作自2024年启动，在原有V6（128层）NAND生产线基础上完成技术改造，旨在提升产品性能与生产效率，满足AI…",
+      "category": "semiconductor_news",
+      "expected_band": "mid",
+      "source_file": "output/unread_news.json"
+    },
+    {
+      "id": "rss_cnbeta_v1-17",
+      "title": "日本计划高架桥下建数据中心 全面测试服务器机柜散热、防震性能",
+      "origin": "cnBeta全文版",
+      "link": "https://m.cnbeta.com.tw/view/1555732.htm",
+      "published": 1774866920000,
+      "summary_excerpt": "据媒体报道，日本东急电铁、东急株式会社、东急建设及Its Communications四家公司日前宣布，将于今年6月正式启动铁路高架桥下城市数据中心建设实验。该项目聚焦列车振动、温度变化等现实难题，旨在验证在铁路高架环境下部署服务器设施的…",
+      "category": "infrastructure_experiment",
+      "expected_band": "mid",
+      "source_file": "output/unread_news.json"
+    },
+    {
+      "id": "rss_cnbeta_v1-18",
+      "title": "Android 17越来越像桌面系统 Beta 3全面启用桌面多任务、支持交互式画中画",
+      "origin": "cnBeta全文版",
+      "link": "https://m.cnbeta.com.tw/view/1555730.htm",
+      "published": 1774866908000,
+      "summary_excerpt": "Google已经推送了Android 17第三个测试版本，该版本已达到平台稳定里程碑，开发者可开始最终兼容性测试并向Google Play提交针对Android 17的应用。与此同时，Beta 3在用户端带来了多项桌面多任务功能的全面启用…",
+      "category": "platform_update",
+      "expected_band": "mid",
+      "source_file": "output/unread_news.json"
+    },
+    {
+      "id": "rss_cnbeta_v1-19",
+      "title": "国产HBM3e封装亮相：带宽960GB/s、适配3nm以下AI芯片",
+      "origin": "cnBeta全文版",
+      "link": "https://m.cnbeta.com.tw/view/1555716.htm",
+      "published": 1774856114000,
+      "summary_excerpt": "HBM已经成为AI领域的关键芯片之一，重要性甚至不亚于GPU等计算芯片，HBM需求爆发也是导致本轮内存大涨价的主要推动力。目前国际上最新一代的HBM已经到了HBM4，AMD及NVIDIA今年上市的MI450、Vera Rubin系列会率先…",
+      "category": "semiconductor_packaging",
+      "expected_band": "mid",
+      "source_file": "output/unread_news.json"
+    },
+    {
+      "id": "rss_cnbeta_v1-20",
+      "title": "王兴兴：下个月机器人半马要跑进1小时内 速度碾压人类",
+      "origin": "cnBeta全文版",
+      "link": "https://m.cnbeta.com.tw/view/1555722.htm",
+      "published": 1774856140000,
+      "summary_excerpt": "近日，宇树科技创始人王兴兴在2026中国网络媒体论坛上公开表示，将于4月19日在北京亦庄举办的人形机器人半程马拉松赛事中，多款人形机器人半马成绩有望跑进1小时内，运动速度将超越人类选手。王兴兴介绍，宇树科技人形机器人此前已展现出较强运动能…",
+      "category": "ceo_claim_hype",
+      "expected_band": "low",
+      "source_file": "output/unread_news.json"
+    }
+  ]
+}

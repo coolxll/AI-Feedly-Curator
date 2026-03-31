@@ -1,0 +1,298 @@
+{
+  "dataset": "mixed_feed_v1",
+  "version": "v1",
+  "created_at": "2026-03-31",
+  "description": "Mixed-source benchmark covering practical technical posts, quick news, macro/finance items, and obvious low-signal noise.",
+  "source_files": [
+    "output/export_20260331_151011.json",
+    "output/export_20260328_205521.json"
+  ],
+  "items": [
+    {
+      "id": "mixed_feed_v1-01",
+      "title": "Qwen3.6 Plus 预览版大模型在 OpenRouter 限免",
+      "origin": "小众软件",
+      "link": "https://www.appinn.com/qwen3-6-plus-openrouter/",
+      "published": 1774937678000,
+      "summary_excerpt": "Qwen3.6 Plus 预览版已经上线 OpenRouter，并且可以免费试用。 注意：该模型收集可用于改进模型的提示和完成数据。 Qwen3.6 Plus 预览版 目前 OpenRouter 刚刚上线了拥有 100 万上下文的 qwe…",
+      "category": "tooling_update",
+      "expected_band": "mid",
+      "source_file": "output/export_20260331_151011.json"
+    },
+    {
+      "id": "mixed_feed_v1-02",
+      "title": "[程序员] 用 AI Agent 做自动化内容发布系统，踩了一个月坑后的总结",
+      "origin": "V2EX",
+      "link": "https://www.v2ex.com/t/1202522#reply0",
+      "published": 1774940574000,
+      "summary_excerpt": "最近用 AI Agent 搭了一套自动化内容发布系统，把这段时间踩过的坑总结一下，顺便聊聊架构上的一些思考。 背景：目标是让 AI 团队替代部分人工完成内容创作 + 多平台分发（微博、掘金、CSDN 等），每天定时自动执行。 最大的坑：A…",
+      "category": "hands_on_technical",
+      "expected_band": "high",
+      "source_file": "output/export_20260331_151011.json"
+    },
+    {
+      "id": "mixed_feed_v1-03",
+      "title": "[分享创造] [开源] Rename.Tools：浏览器端批量重命名工具，支持正则/规则链/撤销/脚本导出",
+      "origin": "V2EX",
+      "link": "https://www.v2ex.com/t/1202515#reply0",
+      "published": 1774940177000,
+      "summary_excerpt": "大家好,要发布自己的作品其实还有点小忐忑😋。不知不觉失业两年多了。这两年除了照顾孩子，自己搞得一些事情也不算成功。最近整理一下自己之前想做的一些东西和一些烂尾的坑，打算逐步发布出来。也算开始自己独立开发者的旅程。 今天先分享一个最近做的开…",
+      "category": "hands_on_technical",
+      "expected_band": "high",
+      "source_file": "output/export_20260331_151011.json"
+    },
+    {
+      "id": "mixed_feed_v1-04",
+      "title": "[程序员] macbook 32G 内存, M5 芯片本地跑大模型有推荐的吗?",
+      "origin": "V2EX",
+      "link": "https://www.v2ex.com/t/1202513#reply1",
+      "published": 1774939924000,
+      "summary_excerpt": "我用了 qwen3.5-27B 能跑但是比较慢, 换成 9B 的比较快但不太聪明.我本地用的推理框架是 omxl, 然后用小龙虾对接, 干活是能干活,就是有点慢, 当然和 codex 不能比, 可惜 codex/claude code 这…",
+      "category": "forum_discussion",
+      "expected_band": "mid",
+      "source_file": "output/export_20260331_151011.json"
+    },
+    {
+      "id": "mixed_feed_v1-05",
+      "title": "[Claude] pro 订阅秒封",
+      "origin": "V2EX",
+      "link": "https://www.v2ex.com/t/1202509#reply5",
+      "published": 1774939452000,
+      "summary_excerpt": "老 gmail,机场英国 ip+咸鱼英国手机验证码,注册没问题; 使用虚拟卡订阅 pro,秒封",
+      "category": "forum_incident",
+      "expected_band": "low",
+      "source_file": "output/export_20260331_151011.json"
+    },
+    {
+      "id": "mixed_feed_v1-06",
+      "title": "[问与答] 为什么国内软件几乎没有支持显示 opengraph 的",
+      "origin": "V2EX",
+      "link": "https://www.v2ex.com/t/1202523#reply0",
+      "published": 1774940578000,
+      "summary_excerpt": "",
+      "category": "forum_question",
+      "expected_band": "low",
+      "source_file": "output/export_20260331_151011.json"
+    },
+    {
+      "id": "mixed_feed_v1-07",
+      "title": "[Telegram] 做了一个 telegram 的导航网站",
+      "origin": "V2EX",
+      "link": "https://www.v2ex.com/t/1202524#reply0",
+      "published": 1774940586000,
+      "summary_excerpt": "做了一个 telegram 的导航网站，希望可以支持一下，把你们的 channel group bot 都发上来吧 https://telegramhub.app",
+      "category": "self_promo",
+      "expected_band": "low",
+      "source_file": "output/export_20260331_151011.json"
+    },
+    {
+      "id": "mixed_feed_v1-08",
+      "title": "[求职] 8 年 golang node PHP 经验，求一份兼职",
+      "origin": "V2EX",
+      "link": "https://www.v2ex.com/t/1202516#reply0",
+      "published": 1774940194000,
+      "summary_excerpt": "熟悉后端，vue ，web3 ，ai agent 等相关技术，平时空余时间多，求一份远程兼职。VX：RmF2b3JvaXNoaQ==",
+      "category": "classified_noise",
+      "expected_band": "low",
+      "source_file": "output/export_20260331_151011.json"
+    },
+    {
+      "id": "mixed_feed_v1-09",
+      "title": "[问与答] 如何能完全满足女友的那方面需求",
+      "origin": "V2EX",
+      "link": "https://www.v2ex.com/t/1202499#reply14",
+      "published": 1774937115000,
+      "summary_excerpt": "感觉还是聊这些有热度，如题。 女友感觉还不够，有什么方法或者实用的技巧？",
+      "category": "off_topic_noise",
+      "expected_band": "low",
+      "source_file": "output/export_20260331_151011.json"
+    },
+    {
+      "id": "mixed_feed_v1-10",
+      "title": "支付宝发布支付集成Skill",
+      "origin": "36氪",
+      "link": "https://36kr.com/newsflashes/3746436027990529?f=rss",
+      "published": 1774915200000,
+      "summary_excerpt": "36氪获悉，支付宝正式发布国内首个“支付集成Skill”，并同步上线魔搭社区Skills中心。该产品将基础支付能力深度封装为标准化组件。此外，支付宝还升级了“沙箱环境”，开发者可在无真实资金、未正式开通支付产品的前提下，完成全链路支付测试。",
+      "category": "product_brief",
+      "expected_band": "mid",
+      "source_file": "output/export_20260331_151011.json"
+    },
+    {
+      "id": "mixed_feed_v1-11",
+      "title": "工信部：前2个月我国软件业务收入同比增长11.7%",
+      "origin": "36氪",
+      "link": "https://36kr.com/newsflashes/3746476263571976?f=rss",
+      "published": 1774915200000,
+      "summary_excerpt": "36氪获悉，工信部发布数据，前2个月，我国软件业务收入21534亿元，同比增长11.7%。软件业利润总额2693亿元，同比增长7.3%。软件业务出口103.8亿美元，同比增长12.7%。",
+      "category": "macro_stat_brief",
+      "expected_band": "low",
+      "source_file": "output/export_20260331_151011.json"
+    },
+    {
+      "id": "mixed_feed_v1-12",
+      "title": "​国行版苹果AI突然上线后又被撤回，苹果回应：正在积极推进落地中国",
+      "origin": "36氪",
+      "link": "https://36kr.com/newsflashes/3746508453937667?f=rss",
+      "published": 1774915200000,
+      "summary_excerpt": "3月31日，国行iPhone设置页面短暂出现“Apple智能与Siri”选项，引发Apple Intelligence国行版落地热议，但该入口很快被移除，已下载模型的用户功能也被收回。苹果方面就此进行回应称，由于软件问题，中国的iPhon…",
+      "category": "breaking_tech_news",
+      "expected_band": "mid",
+      "source_file": "output/export_20260331_151011.json"
+    },
+    {
+      "id": "mixed_feed_v1-13",
+      "title": "A股三大指数集体收跌，CPO概念下挫",
+      "origin": "36氪",
+      "link": "https://36kr.com/newsflashes/3746504424587784?f=rss",
+      "published": 1774915200000,
+      "summary_excerpt": "36氪获悉，A股三大指数集体收跌，沪指跌0.8%，深成指跌1.81%，创业板指跌2.7%；CPO、锂矿、煤炭股领跌，德科立跌超10%，国城矿业跌超8%，潞安环能跌超6%；汽车、CRO、家电板块涨幅居前，美的集团涨超5…",
+      "category": "market_ticker",
+      "expected_band": "low",
+      "source_file": "output/export_20260331_151011.json"
+    },
+    {
+      "id": "mixed_feed_v1-14",
+      "title": "高盛：金价有望在年底前达到5400美元/盎司",
+      "origin": "36氪",
+      "link": "https://36kr.com/newsflashes/3746472039367174?f=rss",
+      "published": 1774915200000,
+      "summary_excerpt": "3月31日，据报道，尽管近期黄金出现抛售，但高盛仍维持其对金价的看涨观点。高盛分析师在报告中表示，黄金的中期前景依然稳固。由于各国央行持续购金以及美国今年预计还有两次降息，金价有望在2026年底前达到5400美元/盎司。（界面）",
+      "category": "market_call",
+      "expected_band": "low",
+      "source_file": "output/export_20260331_151011.json"
+    },
+    {
+      "id": "mixed_feed_v1-15",
+      "title": "智能编码扎根生产级场景，阿里云系统化解题",
+      "origin": "钛媒体：引领未来商业与生活新知",
+      "link": "https://www.tmtpost.com/7935669.html",
+      "published": 1774937880000,
+      "summary_excerpt": "随着智能编码在企业软件开发中的占比不断扩大，其产生的效果会越好，企业研发流程也会变成流水线制造。",
+      "category": "vendor_case_study",
+      "expected_band": "mid",
+      "source_file": "output/export_20260331_151011.json"
+    },
+    {
+      "id": "mixed_feed_v1-16",
+      "title": "“Token”时代，云厂商的生存法则变了",
+      "origin": "钛媒体：引领未来商业与生活新知",
+      "link": "https://www.tmtpost.com/7935688.html",
+      "published": 1774933356000,
+      "summary_excerpt": "“Token革命”照进现实。",
+      "category": "industry_analysis",
+      "expected_band": "mid",
+      "source_file": "output/export_20260331_151011.json"
+    },
+    {
+      "id": "mixed_feed_v1-17",
+      "title": "微软&quot;叛逃&quot;OpenAI：让GPT和Claude互审，AI幻觉的结构性解法?",
+      "origin": "钛媒体：引领未来商业与生活新知",
+      "link": "https://www.tmtpost.com/7936078.html",
+      "published": 1774935300000,
+      "summary_excerpt": "对于中国AI产业而言，微软的这一动作同样具有参考价值。",
+      "category": "ai_strategy_analysis",
+      "expected_band": "mid",
+      "source_file": "output/export_20260331_151011.json"
+    },
+    {
+      "id": "mixed_feed_v1-18",
+      "title": "Qwen3.5-Omni深度体验：这，才是「AI生产力」该有的样子！",
+      "origin": "华尔街见闻",
+      "link": "https://wallstreetcn.com/articles/3768836",
+      "published": 1774930202000,
+      "summary_excerpt": "你一定有过这种经历：开完一场两小时的会议，录像文件安安静静躺在网盘里，但没人愿意回看——因为回看的成本几乎等于再开一次会。 一条爆款带货视频刷到了，你隐约觉得它的转化逻辑值得学，但既没时间逐帧拆解，拆了也不知道怎么变成自己的脚本。 还有英…",
+      "category": "model_review",
+      "expected_band": "mid",
+      "source_file": "output/export_20260331_151011.json"
+    },
+    {
+      "id": "mixed_feed_v1-19",
+      "title": "高盛谈“DRAM市况”：基本面稳健，但市场情绪转弱",
+      "origin": "华尔街见闻",
+      "link": "https://wallstreetcn.com/articles/3768833",
+      "published": 1774928919000,
+      "summary_excerpt": "3月的DRAM市场出现了一个微妙的分叉：供需基本面没有恶化，但投资者的信心却比上个月明显退了一步。高盛认为DRAM基本面依然强劲。 据追风交易台，高盛3月30日发布的最新DRAM情绪指标报告显示，DRAM市场整体读数维持\"略微正面\"，但较…",
+      "category": "sector_analysis",
+      "expected_band": "mid",
+      "source_file": "output/export_20260331_151011.json"
+    },
+    {
+      "id": "mixed_feed_v1-20",
+      "title": "伊朗战争导致全球氦气供应短缺，威胁芯片行业",
+      "origin": "纽约时报中文网 国际纵览",
+      "link": "https://cn.nytimes.com/business/20260331/helium-chips-iran-war/?utm_source=RSS",
+      "published": 1774896722000,
+      "summary_excerpt": "伊朗上周袭击了卡塔尔最大的液化天然气设施，导致氦气生产线受损，切断了全球约三分之一的供应量。一旦失去氦气，全球头部芯片制造商将难以维持生产线运转。 Lam Yik Fei for The New York Times 液空公司向半导体行业…",
+      "category": "global_supply_chain",
+      "expected_band": "high",
+      "source_file": "output/export_20260331_151011.json"
+    },
+    {
+      "id": "mixed_feed_v1-21",
+      "title": "微软 Copilot 在修改 PR 中的拼写错误时添加了广告",
+      "origin": "奇客Solidot–传递最新科技情报",
+      "link": "https://www.solidot.org/story?sid=83918",
+      "published": 1774872946000,
+      "summary_excerpt": "开发者发现，使用微软 AI 助手 Copilot 修改 PR 中的拼写错误时它主动添加了一则广告。对 GitHub 平台的搜索发现，已经有数以万计的 PR 包含了相同的广告——“Quickly spin up Copilot coding…",
+      "category": "tech_news",
+      "expected_band": "mid",
+      "source_file": "output/export_20260331_151011.json"
+    },
+    {
+      "id": "mixed_feed_v1-22",
+      "title": "DNA 告诉了我们什么，它又有什么局限",
+      "origin": "奇客Solidot–传递最新科技情报",
+      "link": "https://www.solidot.org/story?sid=83913",
+      "published": 1774858122000,
+      "summary_excerpt": "在“金州杀手（Golden State Killer）”变成陈年悬案四十余年后的 2018 年，一位对家族史感兴趣的女性向一家家谱公司寄去唾沫进行测序。她的 DNA 成为破案的关键。凶手是其远房亲戚，调查人员最终抓住了前警官 Joseph…",
+      "category": "science_explainer",
+      "expected_band": "mid",
+      "source_file": "output/export_20260331_151011.json"
+    },
+    {
+      "id": "mixed_feed_v1-23",
+      "title": "国泰商品LOF：复杂结构下的套利机会",
+      "origin": "集思录",
+      "link": "https://www.jisilu.cn/question/519949",
+      "published": 1774923067000,
+      "summary_excerpt": "近期，国泰商品LOF（160216）凭借特殊的投资结构和场内溢价行情，重新走进投资者的视野。对于不少关注商品市场的朋友来说，它既藏着潜在的套利窗口，也是一场对专业认知和风险把控能力的双重考验。想要玩转这只基金，先得看透它复杂的“真面目”，…",
+      "category": "investing_analysis",
+      "expected_band": "mid",
+      "source_file": "output/export_20260331_151011.json"
+    },
+    {
+      "id": "mixed_feed_v1-24",
+      "title": "浅谈近期新学‘AI+量化’这门亏钱手艺的心得",
+      "origin": "集思录",
+      "link": "https://www.jisilu.cn/question/519956",
+      "published": 1774938598000,
+      "summary_excerpt": "最早接触AI的时候，是在一个小众的论坛里，那还是在口罩期间，大家讨论的还是用AI画动漫少女，但AI有一个大bug，就是手指无法正确绘制出来，但没想到后面大语言模型的爆发，和AI技术的快速迭代。 现阶段在各种制造焦虑的营销号影响下，我作为一…",
+      "category": "retail_investing_blog",
+      "expected_band": "low",
+      "source_file": "output/export_20260331_151011.json"
+    },
+    {
+      "id": "mixed_feed_v1-25",
+      "title": "不用可以先收藏 | 有备无患：我的逃生包和生存盒都装了啥？",
+      "origin": "少数派",
+      "link": "https://sspai.com/post/108027",
+      "published": 1774927862000,
+      "summary_excerpt": "如果只有 3 分钟紧急撤离，这两个逃生包能帮我活过 72 小时查看全文",
+      "category": "practical_lifestyle",
+      "expected_band": "low",
+      "source_file": "output/export_20260331_151011.json"
+    },
+    {
+      "id": "mixed_feed_v1-26",
+      "title": "猛犸工作室｜一名医学研究生的“最后一个夜班”",
+      "origin": "中国数字时代",
+      "link": "https://chinadigitaltimes.net/chinese/726191.html",
+      "published": 1774870971000,
+      "summary_excerpt": "“我的夜班上完啦！后续病人可能要拜托各位！”3月14日晚上11时许，中南大学湘雅医学院2023级研究生孙平发完这条信息后，完成了她最后一次夜班交接。次日，这位25岁的专硕生被确认坠江身亡。对于原本将在今年7月毕业的她而言，离开是“终结痛苦…",
+      "category": "social_commentary",
+      "expected_band": "low",
+      "source_file": "output/export_20260331_151011.json"
+    }
+  ]
+}

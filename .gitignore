@@ -66,3 +66,5 @@ docker/chroma/
 # Ignore gemini-related files due to security concerns mentioned in code review
 .github/workflows/gemini-*.yml
 .github/commands/
+
+scripts/backtest_scoring.local.json
