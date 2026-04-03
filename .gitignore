@@ -68,3 +68,8 @@ docker/chroma/
 .github/commands/
 
 scripts/backtest_scoring.local.json
+
+
+node_modules/
+arena-app/src-tauri/target/
+arena/scoring/configs/targets.json
