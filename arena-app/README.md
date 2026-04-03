@@ -6,11 +6,12 @@ A local desktop shell for the scoring arena.
 
 - Tauri v2
 - React + Vite + TypeScript
-- Python evaluator engine reused from the main repo
+- Native Rust scoring runner in the desktop shell
 
 ## Status
 
 The core UI and backend bridge are implemented. The application supports dataset browsing, model targeting configuration, and run execution.
+The app now stores datasets, runs, and target configs in its own app data directory instead of depending on an external `arena/scoring` repo layout.
 
 ## Development and Compilation
 
