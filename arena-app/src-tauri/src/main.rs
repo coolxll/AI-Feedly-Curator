@@ -179,6 +179,7 @@ fn start_run(
         repeat_safe
     );
 
+    eprintln!("[START_RUN] dataset={}, targets={}, repeat={}", dataset, targets.len(), repeat_safe);
     run_controller.set_active(true);
     run_controller.clear_cancel();
     run_controller.set_session_label(session_label.clone());
@@ -215,6 +216,7 @@ fn start_run(
     let dataset_detail_clone = dataset_detail.clone();
 
     thread::spawn(move || {
+        eprintln!("[RUNNER] Thread started for dataset={}", dataset_detail.dataset);
         let runtime = tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime");
 
         let result = runtime.block_on(async {
@@ -231,34 +233,43 @@ fn start_run(
                     error: event.error,
                 };
 
-                let _ = worker_window.emit("run-progress", &progress);
-                
+                if let Err(e) = worker_window.emit("run-progress", &progress) {
+                    eprintln!("[EMIT FAIL] run-progress: {}", e);
+                }
+
                 // 只发送关键阶段的日志，避免控制台过于冗长
                 let important_phases = [
                     "prepare", "target", "batch_done", "finalize", "done",
                     "rate_limit", "api_error", "fallback", "complete", "cancelled", "error"
                 ];
                 if important_phases.iter().any(|p| event.phase.contains(p)) || event.done || event.error {
-                    let _ = worker_window.emit("run-log", format!("[{}] {}", event.phase, event.message));
+                    let log_msg = format!("[{}] {}", event.phase, event.message);
+                    eprintln!("[RUNNER LOG] {}", log_msg);
+                    if let Err(e) = worker_window.emit("run-log", &log_msg) {
+                        eprintln!("[EMIT FAIL] run-log: {}", e);
+                    }
                 }
             };
 
-            run_benchmark(
+            eprintln!("[RUNNER] Calling run_benchmark...");
+            let bench_result = run_benchmark(
                 &dataset_detail_clone,
                 &target_configs_clone,
                 repeat_safe,
                 runner_state.clone(),
                 progress_callback,
             )
-            .await
+            .await;
+            eprintln!("[RUNNER] run_benchmark returned: {:?}", bench_result.as_ref().map(|ids| ids.len()));
+            bench_result
         });
 
+        eprintln!("[RUNNER] Processing result...");
         match result {
             Ok(run_ids) => {
-                let _ = worker_window.emit(
-                    "run-log",
-                    format!("[SUCCESS] Run completed. Created: {}", run_ids.join(", ")),
-                );
+                let msg = format!("[SUCCESS] Run completed. Created: {}", run_ids.join(", "));
+                eprintln!("[RUNNER] {}", msg);
+                let _ = worker_window.emit("run-log", &msg);
                 let _ = worker_window.emit("run-log", "[DONE] Task sequence completed.");
                 let _ = worker_window.emit(
                     "run-progress",
@@ -278,8 +289,10 @@ fn start_run(
             Err(e) => {
                 let is_cancelled = controller.is_cancelled();
                 if is_cancelled {
+                    eprintln!("[RUNNER] Run cancelled by user");
                     let _ = worker_window.emit("run-log", "[DONE] Run cancelled by user.");
                 } else {
+                    eprintln!("[RUNNER] ERROR: {}", e);
                     let _ = worker_window.emit("run-log", format!("[ERROR] {}", e));
                 }
                 let _ = worker_window.emit(
@@ -303,6 +316,7 @@ fn start_run(
             }
         }
 
+        eprintln!("[RUNNER] Cleaning up controller state");
         controller.set_active(false);
         controller.clear_cancel();
         controller.clear_runner_state();
