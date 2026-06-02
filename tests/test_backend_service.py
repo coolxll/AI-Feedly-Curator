@@ -2,15 +2,133 @@ import unittest
 from unittest.mock import Mock, patch
 
 from rss_analyzer.backend_service import (
+    BATCH_READ_FETCH_LIMIT,
+    _build_batch_triage_prompt,
     _deep_analyze_digest_candidates,
     _deep_analysis_log_step,
+    _parse_batch_triage_results,
     get_runtime_paths,
     handle_message,
+    process_batch,
     process_stream,
 )
 
 
 class TestBackendService(unittest.TestCase):
+    def test_batch_triage_prompt_uses_feedly_summary(self):
+        prompt = _build_batch_triage_prompt(
+            [
+                {
+                    "id": "p2-1",
+                    "title": "例行声明",
+                    "origin": "Reuters",
+                    "summary": "<p>美国与欧盟讨论对俄罗斯的新制裁方案。</p>",
+                }
+            ]
+        )
+
+        self.assertIn("例行声明", prompt)
+        self.assertIn("美国与欧盟讨论对俄罗斯的新制裁方案", prompt)
+        self.assertIn("不要只按标题吸引力评分", prompt)
+
+    def test_parse_batch_triage_results_normalizes_p2_fields(self):
+        articles = [{"id": "p2-1", "title": "例行声明", "summary": "摘要"}]
+        result = _parse_batch_triage_results(
+            articles,
+            [
+                {
+                    "n": 1,
+                    "domain": "国际政治",
+                    "domain_confidence": 0.9,
+                    "score": 4.1,
+                    "decision": "must_read",
+                    "event": "新制裁方案",
+                    "actors": "美国,欧盟,俄罗斯",
+                    "region": "欧洲",
+                    "core_fact": "双方讨论新制裁",
+                    "why_it_matters": "影响俄欧关系",
+                    "novelty": "new",
+                    "needs_deep_read": True,
+                    "rec": "看新增细节",
+                }
+            ],
+        )
+
+        self.assertEqual(result["p2-1"]["domain"], "P2")
+        self.assertEqual(result["p2-1"]["decision"], "must_read")
+        self.assertTrue(result["p2-1"]["needs_deep_read"])
+
+    @patch("rss_analyzer.backend_service._deep_analyze_digest_candidates")
+    @patch("rss_analyzer.backend_service._batch_triage_articles")
+    @patch("rss_analyzer.backend_service.fetch_filter_articles")
+    def test_process_batch_builds_p2_briefing_without_fetch_limit_from_chunk_size(
+        self,
+        mock_fetch_filter_articles,
+        mock_batch_triage,
+        mock_deep_analyze,
+    ):
+        mock_fetch_filter_articles.return_value = [
+            {
+                "id": "p2-1",
+                "title": "例行声明",
+                "link": "https://example.com/p2",
+                "origin": "Reuters",
+                "summary": "美国与欧盟讨论对俄罗斯的新制裁方案。" * 20,
+                "published": 4102444800000,
+            },
+            {
+                "id": "tech-1",
+                "title": "Python 工具更新",
+                "link": "https://example.com/tech",
+                "origin": "Blog",
+                "summary": "开发工具发布新版本，包含多项性能改进和新功能。" * 10,
+                "published": 4102444800000,
+            },
+        ]
+        mock_batch_triage.return_value = {
+            "p2-1": {
+                "domain": "P2",
+                "domain_confidence": 0.95,
+                "score": 4.2,
+                "decision": "must_read",
+                "event": "新制裁方案",
+                "actors": "美国,欧盟,俄罗斯",
+                "region": "欧洲",
+                "core_fact": "讨论新制裁方案",
+                "why_it_matters": "影响俄欧关系",
+                "novelty": "new",
+                "needs_deep_read": False,
+                "rec": "看新增细节",
+            },
+            "tech-1": {
+                "domain": "Tech",
+                "domain_confidence": 0.9,
+                "score": 2.3,
+                "decision": "clear",
+                "event": "工具更新",
+                "actors": "",
+                "region": "",
+                "core_fact": "常规版本更新",
+                "why_it_matters": "",
+                "novelty": "repeat",
+                "needs_deep_read": False,
+                "rec": "可清理",
+            },
+        }
+        mock_deep_analyze.return_value = []
+
+        result = process_batch(stream_id="feed/all", batch_size=1, days=3)
+
+        mock_fetch_filter_articles.assert_called_once_with(
+            BATCH_READ_FETCH_LIMIT,
+            stream_id="feed/all",
+        )
+        mock_batch_triage.assert_called_once()
+        self.assertEqual(mock_batch_triage.call_args.args[1], 1)
+        self.assertEqual(result["digest"]["stats"]["p2_count"], 1)
+        self.assertEqual(result["digest"]["p2_briefing"]["must_read"][0]["id"], "p2-1")
+        self.assertEqual(result["mark_read_candidates"], ["tech-1"])
+
     def test_deep_analysis_log_step_scales_with_batch_size(self):
         self.assertEqual(_deep_analysis_log_step(3), 1)
         self.assertEqual(_deep_analysis_log_step(10), 2)

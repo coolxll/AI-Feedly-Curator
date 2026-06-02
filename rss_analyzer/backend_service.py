@@ -5,6 +5,7 @@ Shared backend message handlers for browser/native/local clients.
 from __future__ import annotations
 
 import concurrent.futures
+import json
 import logging
 import os
 from datetime import datetime
@@ -18,8 +19,10 @@ os.environ.setdefault("RSS_VECTOR_DB_DIR", str(PROJECT_ROOT / "chroma_db"))
 from rss_analyzer.article_fetcher import fetch_article_content
 from rss_analyzer.cache import (
     build_vector_store_payload,
+    get_app_cache,
     get_cached_score,
     iter_cached_scores,
+    set_app_cache,
     save_cached_score,
 )
 from rss_analyzer.config import (
@@ -43,10 +46,12 @@ from rss_analyzer.stream_strategy import (
     render_stream_overview_markdown,
     save_stream_overview_markdown,
 )
-from rss_analyzer.utils import is_newsflash, load_articles, save_articles
+from rss_analyzer.utils import is_newsflash, load_articles, save_articles, strip_html_tags
 logger = logging.getLogger(__name__)
 _VECTOR_STORE = None
 FEED_ID_36KR = "feed/http://www.36kr.com/feed"
+BATCH_TRIAGE_CACHE_VERSION = 1
+BATCH_READ_FETCH_LIMIT = 9999
 
 
 @dataclass
@@ -133,6 +138,106 @@ def generate_summary_report(articles: list[dict]) -> dict:
         "summary": overall_summary,
         "summary_file": summary_file,
         "latest_summary_file": LATEST_SUMMARY_FILE,
+    }
+
+
+def generate_daily_digest(
+    *,
+    stream_id: str | None = None,
+    stream_label: str | None = None,
+    hours: int = 24,
+    top_n: int = 10,
+) -> dict:
+    """Generate a daily digest from recently scored articles.
+
+    Pulls articles from the score cache, filters by time window,
+    and produces a structured Markdown report with must_read / skim tiers.
+    """
+    from datetime import timedelta, timezone
+
+    cutoff = datetime.now() - timedelta(hours=hours)
+    cached = iter_cached_scores()
+
+    recent = []
+    for item in cached:
+        updated = item.get("updated_at")
+        if not updated:
+            continue
+        try:
+            ts = datetime.fromisoformat(updated) if isinstance(updated, str) else updated
+            if ts >= cutoff:
+                recent.append(item)
+        except (ValueError, TypeError):
+            continue
+
+    if not recent:
+        return {
+            "success": True,
+            "article_count": 0,
+            "summary": f"最近 {hours} 小时内没有已评分的文章。",
+            "markdown": "",
+        }
+
+    recent.sort(key=lambda x: x.get("score", 0), reverse=True)
+
+    must_read = [item for item in recent if item.get("score", 0) >= 3.8][:top_n]
+    skim = [item for item in recent if 2.5 <= item.get("score", 0) < 3.8][:top_n]
+    low = [item for item in recent if item.get("score", 0) < 2.5]
+
+    lines = [
+        "# RSS Daily Digest",
+        "",
+        f"- 时间窗口: 最近 {hours} 小时",
+        f"- 已评分文章: {len(recent)} 篇",
+        f"- Must Read: {len(must_read)} 篇",
+        f"- Skim: {len(skim)} 篇",
+        f"- Low Priority: {len(low)} 篇",
+        "",
+        "## Must Read",
+    ]
+
+    for item in must_read:
+        data = item.get("data") or {}
+        title = data.get("title", item.get("article_id", "Unknown"))
+        url = data.get("url", "")
+        score = item.get("score", 0)
+        summary = (data.get("summary") or data.get("comment", ""))[:200]
+        if url:
+            lines.append(f"- [{title}]({url}) (score: {score:.1f})")
+        else:
+            lines.append(f"- {title} (score: {score:.1f})")
+        if summary:
+            lines.append(f"  - {summary}")
+
+    lines.extend(["", "## Skim"])
+    for item in skim:
+        data = item.get("data") or {}
+        title = data.get("title", item.get("article_id", "Unknown"))
+        url = data.get("url", "")
+        score = item.get("score", 0)
+        if url:
+            lines.append(f"- [{title}]({url}) (score: {score:.1f})")
+        else:
+            lines.append(f"- {title} (score: {score:.1f})")
+
+    markdown = "\n".join(lines) + "\n"
+
+    output_file = save_stream_overview_markdown(
+        markdown,
+        stream_label=stream_label or "daily-digest",
+        strategy="daily_digest",
+    )
+
+    return {
+        "success": True,
+        "article_count": len(recent),
+        "must_read_count": len(must_read),
+        "skim_count": len(skim),
+        "low_count": len(low),
+        "hours": hours,
+        "summary": f"最近 {hours} 小时 {len(recent)} 篇文章，{len(must_read)} 篇必读",
+        "markdown": markdown,
+        "output_file": output_file,
     }
 
 
@@ -436,7 +541,7 @@ def _deep_analyze_digest_candidate(item: dict) -> tuple[str, dict]:
     enriched = dict(item)
     enriched["openable"] = bool(item.get("link"))
 
-    if not content or len(content) < PROJ_CONFIG.get("filter_min_length", 100):
+    if not content and not summary:
         return "skipped", enriched
 
     analysis = analyze_article_with_llm(item.get("title", ""), summary, content)
@@ -973,6 +1078,553 @@ def process_stream(
     return result
 
 
+def _article_summary_snippet(article: dict, limit: int = 800) -> str:
+    return strip_html_tags(article.get("summary", "") or article.get("content", ""))[:limit]
+
+
+def _extract_json_array(raw: str) -> list:
+    text = (raw or "").strip()
+    if text.startswith("```"):
+        text = text.split("\n", 1)[-1]
+    if text.endswith("```"):
+        text = text.rsplit("```", 1)[0]
+    text = text.strip()
+    start = text.find("[")
+    end = text.rfind("]")
+    if start == -1 or end == -1 or start >= end:
+        raise ValueError("no JSON array found")
+    json_str = text[start : end + 1]
+    try:
+        parsed = json.loads(json_str)
+    except json.JSONDecodeError as exc:
+        # Attempt to fix common LLM JSON errors
+        logger.debug("Initial JSON parse failed: %s, attempting recovery", exc)
+        import re
+
+        # Fix Chinese colons (：) to regular colons (:)
+        fixed = json_str.replace("：", ":")
+        # Fix double colons pattern: "key":": "value" → "key": "value"
+        fixed = re.sub(r'":\s*"\s*:\s*"', '": "', fixed)
+        # Fix missing commas between } and { (most common LLM error)
+        fixed = re.sub(r"\}\s*\n\s*\{", "},\n{", fixed)
+        # Fix trailing commas before ] or }
+        fixed = re.sub(r",\s*([}\]])", r"\1", fixed)
+        try:
+            parsed = json.loads(fixed)
+        except json.JSONDecodeError:
+            # Log the problematic region for debugging
+            pos = getattr(exc, "pos", None)
+            if pos is not None:
+                snippet = json_str[max(0, pos - 100) : pos + 100]
+                logger.warning("JSON parse error near position %d: ...%s...", pos, snippet)
+            raise
+    if not isinstance(parsed, list):
+        raise ValueError("triage response is not a JSON array")
+    return parsed
+
+
+def _normalize_batch_domain(domain: str | None) -> str:
+    value = (domain or "").strip().lower()
+    if value in {"p2", "国际政治", "geopolitics", "politics"}:
+        return "P2"
+    if value in {"p1", "投资", "投资理财", "finance", "market"}:
+        return "P1"
+    if value in {"tech", "technology", "技术", "ai", "dev"}:
+        return "Tech"
+    return "Other"
+
+
+def _coerce_batch_decision(decision: str | None, score: float) -> str:
+    value = (decision or "").strip().lower()
+    if value in {"must_read", "skim", "clear"}:
+        return value
+    if score >= 3.8:
+        return "must_read"
+    if score >= 2.5:
+        return "skim"
+    return "clear"
+
+
+def _p2_keyword_hit(article: dict) -> bool:
+    text = f"{article.get('title', '')} {_article_summary_snippet(article, 400)}".lower()
+    keywords = (
+        "地缘",
+        "国际政治",
+        "外交",
+        "制裁",
+        "关税",
+        "战争",
+        "停火",
+        "冲突",
+        "军援",
+        "北约",
+        "欧盟",
+        "联合国",
+        "白宫",
+        "五角大楼",
+        "国务院",
+        "中东",
+        "台海",
+        "台湾",
+        "乌克兰",
+        "俄罗斯",
+        "以色列",
+        "伊朗",
+        "哈马斯",
+        "美国",
+        "中国",
+        "拜登",
+        "特朗普",
+        "普京",
+    )
+    return any(keyword in text for keyword in keywords)
+
+
+def _fallback_batch_triage(article: dict, bucket: str | None = None) -> dict:
+    is_p2 = bucket == "国际政治 / P2" or _p2_keyword_hit(article)
+    summary = _article_summary_snippet(article, 400)
+    domain = "P2" if is_p2 else "Other"
+    score = 3.4 if is_p2 else 2.6
+    decision = "skim" if is_p2 else "skim"
+    return {
+        "domain": domain,
+        "domain_confidence": 0.65 if is_p2 else 0.35,
+        "score": score,
+        "decision": decision,
+        "event": article.get("title", "Untitled"),
+        "actors": "",
+        "region": "",
+        "core_fact": summary or article.get("title", "Untitled"),
+        "why_it_matters": "需要快速判断是否有新增事实。" if is_p2 else "",
+        "novelty": "unknown",
+        "needs_deep_read": bool(is_p2 and len(summary) < 240 and article.get("link")),
+        "rec": "P2 候选，需看事实增量" if is_p2 else "常规候选",
+        "source": "fallback",
+    }
+
+
+def _cached_batch_triage(article: dict) -> dict | None:
+    article_id = article.get("id", "")
+    if not article_id:
+        return None
+    cached = get_app_cache(f"batch_triage:v{BATCH_TRIAGE_CACHE_VERSION}:{article_id}")
+    if not cached:
+        return None
+    return dict(cached)
+
+
+def _save_batch_triage(article: dict, triage: dict) -> None:
+    article_id = article.get("id", "")
+    if not article_id:
+        return
+    set_app_cache(
+        f"batch_triage:v{BATCH_TRIAGE_CACHE_VERSION}:{article_id}",
+        triage,
+        ttl_seconds=14 * 24 * 60 * 60,
+    )
+
+
+def _build_batch_triage_prompt(articles: list[dict]) -> str:
+    items = []
+    for index, article in enumerate(articles, 1):
+        items.append(
+            {
+                "n": index,
+                "title": article.get("title", ""),
+                "origin": article.get("origin", ""),
+                "summary": _article_summary_snippet(article, 800),
+            }
+        )
+
+    return f"""你是一个批量阅读助手，目标是帮助用户快速阅读 RSS，尤其要提取 P2（国际政治/地缘政治/国际关系）里的有效信息。
+
+请对每篇文章做轻量 triage。不要只按标题吸引力评分，要结合 summary 判断事实增量。
+
+domain 只能是：
+- Tech：技术、AI、开发、工具
+- P1：投资理财、市场、宏观、资产
+- P2：国际政治、地缘政治、外交、安全、战争、制裁、国家关系
+- Other：其他
+
+decision 只能是：
+- must_read：值得点开或需要正文确认
+- skim：知道核心事实即可
+- clear：重复、低增量、广告或无关
+
+输出 JSON 数组，每篇必须一项：
+[
+  {{
+    "n": 1,
+    "domain": "P2",
+    "domain_confidence": 0.0-1.0,
+    "score": 1.0-5.0,
+    "decision": "must_read/skim/clear",
+    "event": "核心事件，20字内",
+    "actors": "主要相关方，逗号分隔",
+    "region": "地区/国家",
+    "core_fact": "新增事实或最重要事实，35字内",
+    "why_it_matters": "为什么值得关注，35字内",
+    "novelty": "new/repeat/unclear",
+    "needs_deep_read": true/false,
+    "rec": "一句阅读建议，16字内"
+  }}
+]
+
+文章数据：
+{json.dumps(items, ensure_ascii=False)}"""
+
+
+def _parse_batch_triage_results(articles: list[dict], raw_items: list) -> dict[str, dict]:
+    result: dict[str, dict] = {}
+    for entry in raw_items:
+        if not isinstance(entry, dict):
+            continue
+        idx = int(entry.get("n", 0) or 0) - 1
+        if not (0 <= idx < len(articles)):
+            continue
+        article = articles[idx]
+        score = float(entry.get("score") or 0.0)
+        triage = {
+            "domain": _normalize_batch_domain(entry.get("domain")),
+            "domain_confidence": float(entry.get("domain_confidence") or 0.0),
+            "score": score,
+            "decision": _coerce_batch_decision(entry.get("decision"), score),
+            "event": str(entry.get("event") or article.get("title", "")),
+            "actors": str(entry.get("actors") or ""),
+            "region": str(entry.get("region") or ""),
+            "core_fact": str(entry.get("core_fact") or _article_summary_snippet(article, 120) or article.get("title", "")),
+            "why_it_matters": str(entry.get("why_it_matters") or ""),
+            "novelty": str(entry.get("novelty") or "unclear"),
+            "needs_deep_read": _coerce_bool(entry.get("needs_deep_read"), False),
+            "rec": str(entry.get("rec") or ""),
+            "source": "llm",
+        }
+        result[article.get("id", "")] = triage
+    return result
+
+
+def _batch_triage_articles(articles: list[dict], chunk_size: int = 50) -> dict[str, dict]:
+    """Triage all articles with title + origin + summary, chunked for latency."""
+    from openai import OpenAI
+
+    from rss_analyzer.config import build_openai_client_kwargs, get_openai_task_config
+
+    if not articles:
+        return {}
+
+    cfg = get_openai_task_config("summary", "gpt-4o-mini")
+    client = OpenAI(**build_openai_client_kwargs(cfg))
+    final: dict[str, dict] = {}
+    uncached: list[dict] = []
+
+    for article in articles:
+        cached = _cached_batch_triage(article)
+        if cached:
+            final[article.get("id", "")] = cached
+        else:
+            uncached.append(article)
+
+    size = max(1, int(chunk_size or 50))
+    for chunk in _chunked(uncached, size):
+        try:
+            resp = client.chat.completions.create(
+                model=cfg.model,
+                messages=[{"role": "user", "content": _build_batch_triage_prompt(chunk)}],
+                temperature=0.2,
+                max_tokens=8192,
+            )
+            raw = resp.choices[0].message.content if resp.choices else ""
+            parsed = _parse_batch_triage_results(chunk, _extract_json_array(raw))
+            for article in chunk:
+                aid = article.get("id", "")
+                triage = parsed.get(aid) or _fallback_batch_triage(article)
+                final[aid] = triage
+                _save_batch_triage(article, triage)
+        except Exception:
+            logger.warning("Batch triage chunk failed; using fallback triage", exc_info=True)
+            for article in chunk:
+                aid = article.get("id", "")
+                triage = _fallback_batch_triage(article)
+                final[aid] = triage
+                _save_batch_triage(article, triage)
+
+    logger.info("Batch triaged %s/%s articles", len(final), len(articles))
+    return final
+
+
+def process_batch(
+    *,
+    stream_id: str | None,
+    stream_label: str | None = None,
+    batch_size: int = 100,
+    days: int = 3,
+) -> dict:
+    """Process a single batch of unread articles for batch reading mode.
+
+    Fetches the unread backlog, then triages every recent article in
+    chunked LLM calls using title, source, and Feedly summary.  ``batch_size``
+    controls LLM chunk size, not the number of articles fetched.
+    """
+    from rss_analyzer.stream_strategy import (
+        _bucket_key,
+        _is_low_priority,
+        _prefilter_articles,
+        _rank_article,
+        filter_recent_articles,
+    )
+
+    articles = fetch_filter_articles(BATCH_READ_FETCH_LIMIT, stream_id=stream_id)
+    if not articles:
+        return {
+            "success": True,
+            "strategy": "batch",
+            "article_count": 0,
+            "fetched_count": 0,
+            "summary": "No unread articles found.",
+            "digest": None,
+            "markdown": "",
+        }
+
+    recent = filter_recent_articles(articles, days)
+    prefiltered_out, recent = _prefilter_articles(recent)
+
+    logger.info("Batch triaging %s articles in chunks of %s...", len(recent), batch_size)
+    triage_map = _batch_triage_articles(recent, batch_size)
+
+    original_by_id = {a.get("id", ""): a for a in recent}
+    grouped: dict[str, list[dict]] = {}
+    clear_items: list[dict] = []
+    all_candidates: list[dict] = []
+
+    # Pre-filtered articles (keyword/URL/short) go directly to clear
+    for article in prefiltered_out:
+        clear_items.append({
+            "id": article.get("id", ""),
+            "title": article.get("title", "No Title"),
+            "link": article.get("link", ""),
+            "origin": article.get("origin", ""),
+            "published": article.get("published", 0),
+            "bucket": "prefiltered",
+            "summary": _article_summary_snippet(article, 400),
+            "low_priority": True,
+            "score": 0.0,
+            "interpretation": "关键词/URL/长度预筛命中",
+            "domain": "Other",
+            "domain_confidence": 1.0,
+            "decision": "clear",
+            "event": "",
+            "actors": "",
+            "region": "",
+            "core_fact": "",
+            "why_it_matters": "",
+            "novelty": "repeat",
+            "needs_deep_read": False,
+        })
+
+    for article in recent:
+        bucket = _bucket_key(article, stream_label)
+        aid = article.get("id", "")
+        triage = triage_map.get(aid) or _fallback_batch_triage(article, bucket)
+        if triage.get("domain") == "P2":
+            bucket = "国际政治 / P2"
+        is_low = _is_low_priority(article, bucket)
+        preview = {
+            "id": aid,
+            "title": article.get("title", "No Title"),
+            "link": article.get("link", ""),
+            "origin": article.get("origin", ""),
+            "published": article.get("published", 0),
+            "bucket": bucket,
+            "summary": _article_summary_snippet(article, 400),
+            "low_priority": is_low,
+            "score": triage.get("score"),
+            "interpretation": triage.get("rec", ""),
+            "domain": triage.get("domain", "Other"),
+            "domain_confidence": triage.get("domain_confidence", 0.0),
+            "decision": triage.get("decision", "skim"),
+            "event": triage.get("event", ""),
+            "actors": triage.get("actors", ""),
+            "region": triage.get("region", ""),
+            "core_fact": triage.get("core_fact", ""),
+            "why_it_matters": triage.get("why_it_matters", ""),
+            "novelty": triage.get("novelty", "unclear"),
+            "needs_deep_read": triage.get("needs_deep_read", False),
+        }
+        if preview["decision"] == "clear" or (is_low and preview["domain"] != "P2"):
+            clear_items.append(preview)
+        else:
+            grouped.setdefault(bucket, []).append(preview)
+            all_candidates.append(preview)
+
+    theme_groups = []
+    for bucket, items in sorted(
+        grouped.items(), key=lambda e: (-len(e[1]), e[0])
+    ):
+        sorted_items = sorted(
+            items,
+            key=lambda item: (float(item.get("score") or 0), _rank_article(item)),
+            reverse=True,
+        )
+        theme_groups.append(
+            {
+                "bucket": bucket,
+                "count": len(items),
+                "low_priority_count": sum(1 for item in items if item.get("low_priority")),
+                "summary": f"{len(items)} articles",
+                "representatives": sorted_items[:3],
+            }
+        )
+
+    p2_candidates = [item for item in all_candidates if item.get("domain") == "P2"]
+    deep_inputs = []
+    for preview in p2_candidates:
+        if not preview.get("needs_deep_read"):
+            continue
+        original = original_by_id.get(preview.get("id", ""))
+        if original:
+            merged = dict(original)
+            merged.update(preview)
+            deep_inputs.append(merged)
+        else:
+            deep_inputs.append(preview)
+
+    logger.info("Deep analyzing %s P2 candidates that need full text...", len(deep_inputs))
+    deep_results = _deep_analyze_digest_candidates(deep_inputs)
+    deep_by_id = {item.get("id", ""): item for item in deep_results}
+
+    must_read: list[dict] = []
+    skim: list[dict] = []
+    demoted_clear: list[dict] = []
+
+    for item in all_candidates:
+        enriched = deep_by_id.get(item.get("id", ""), item)
+        score = enriched.get("score")
+        decision = enriched.get("decision", item.get("decision", "skim"))
+        if item.get("id") in deep_by_id:
+            if score is not None and score < 2.5:
+                decision = "clear"
+            elif score is not None and score < 3.6:
+                decision = "skim"
+            elif score is not None:
+                decision = "must_read"
+            enriched["decision"] = decision
+
+        if decision == "clear":
+            demoted_clear.append(enriched)
+        elif decision == "must_read":
+            must_read.append(enriched)
+        else:
+            skim.append(enriched)
+
+    def _priority_key(item: dict) -> tuple:
+        is_p2 = 1 if item.get("domain") == "P2" else 0
+        needs_deep = 1 if item.get("needs_deep_read") else 0
+        return (
+            is_p2,
+            float(item.get("score") or 0),
+            needs_deep,
+            _rank_article(item),
+        )
+
+    must_read.sort(key=_priority_key, reverse=True)
+    skim.sort(key=_priority_key, reverse=True)
+
+    clear_items = demoted_clear + clear_items
+
+    p2_items = sorted(
+        [deep_by_id.get(item.get("id", ""), item) for item in p2_candidates],
+        key=_priority_key,
+        reverse=True,
+    )
+    p2_must = [item for item in p2_items if item.get("decision") == "must_read"]
+    p2_skim = [item for item in p2_items if item.get("decision") == "skim"]
+    p2_clear = [item for item in clear_items if item.get("domain") == "P2"]
+    p2_briefing = {
+        "headline": (
+            f"P2 命中 {len(p2_items) + len(p2_clear)} 条，"
+            f"{len(p2_must)} 条建议优先点开，{len(deep_results)} 条已做正文复核。"
+        ),
+        "must_read": _mark_digest_openable(p2_must),
+        "skim": _mark_digest_openable(p2_skim),
+        "clear": _mark_digest_openable(p2_clear),
+        "items": _mark_digest_openable(p2_items),
+    }
+
+    digest = {
+        "headline": (
+            f"{len(articles)} articles fetched, {len(recent)} in window, "
+            f"{len(triage_map)} triaged, {len(deep_results)} P2 deep-analyzed"
+        ),
+        "executive_summary": p2_briefing["headline"],
+        "top_themes": theme_groups,
+        "must_read_candidates": _mark_digest_openable(must_read),
+        "deep_analyzed_reads": _mark_digest_openable(must_read),
+        "skim_items": _mark_digest_openable(skim),
+        "clear_items": _mark_digest_openable(clear_items),
+        "triage_items": _mark_digest_openable(all_candidates + clear_items),
+        "p2_items": _mark_digest_openable(p2_items),
+        "p2_briefing": p2_briefing,
+        "actions": [],
+        "stats": {
+            "fetched_count": len(articles),
+            "article_count": len(recent),
+            "candidate_count": len(all_candidates),
+            "must_read_count": len(must_read),
+            "skim_count": len(skim),
+            "clear_count": len(clear_items),
+            "ai_scored_count": len(triage_map),
+            "triage_count": len(triage_map),
+            "p2_count": len(p2_items) + len(p2_clear),
+            "p2_deep_analyzed_count": len(deep_results),
+        },
+    }
+
+    mark_read_candidates = [item["id"] for item in clear_items if item.get("id")]
+
+    # Auto mark-read for low-score articles when threshold is configured
+    auto_mark_threshold = PROJ_CONFIG.get("auto_mark_read_threshold", 0)
+    auto_marked_result = None
+    if auto_mark_threshold and mark_read_candidates:
+        auto_marked_result = mark_articles_read(mark_read_candidates, dry_run=False)
+        digest["auto_marked_read"] = auto_marked_result
+        logger.info(
+            "Auto marked %s clear articles as read (threshold=%.1f)",
+            auto_marked_result.get("marked_count", 0),
+            auto_mark_threshold,
+        )
+
+    return {
+        "success": True,
+        "strategy": "batch",
+        "article_count": len(recent),
+        "fetched_count": len(articles),
+        "summary": digest["headline"],
+        "digest": digest,
+        "mark_read_candidates": mark_read_candidates,
+        "auto_marked_read": auto_marked_result,
+        "markdown": "",
+    }
+
+
+def mark_articles_read(article_ids: list[str], *, dry_run: bool = False) -> dict:
+    """Mark a list of article IDs as read in Feedly.
+
+    Returns a dict with success status and counts.
+    """
+    cleaned_ids = [aid for aid in article_ids if aid]
+    if not cleaned_ids:
+        return {"success": True, "marked_count": 0, "candidate_count": 0, "dry_run": dry_run}
+    success = mark_article_ids_as_read(
+        cleaned_ids, label="batch-read", dry_run=dry_run, mark_read=True
+    )
+    return {
+        "success": success,
+        "marked_count": len(cleaned_ids) if success and not dry_run else 0,
+        "candidate_count": len(cleaned_ids),
+        "dry_run": dry_run,
+    }
+
+
 def mark_stream_low_priority_read(article_ids: list[str], *, dry_run: bool = False) -> dict:
     cleaned_ids = [article_id for article_id in article_ids if article_id]
     success = mark_article_ids_as_read(
@@ -1344,6 +1996,15 @@ def _handle_generate_summary(msg: dict) -> dict:
     return regenerate_summary(input_file=input_file)
 
 
+def _handle_generate_daily_digest(msg: dict) -> dict:
+    return generate_daily_digest(
+        stream_id=msg.get("stream_id"),
+        stream_label=msg.get("stream_label"),
+        hours=int(msg.get("hours", 24)),
+        top_n=int(msg.get("top_n", 10)),
+    )
+
+
 def _handle_run_filters(msg: dict) -> dict:
     return run_filter_workflow(
         mode=msg.get("mode", "all"),
@@ -1540,6 +2201,8 @@ def handle_message(msg: dict) -> dict:
         return _handle_run_analysis(msg)
     if msg_type == "generate_summary":
         return _handle_generate_summary(msg)
+    if msg_type == "generate_daily_digest":
+        return _handle_generate_daily_digest(msg)
     if msg_type == "run_filters":
         return _handle_run_filters(msg)
     if msg_type == "process_stream":

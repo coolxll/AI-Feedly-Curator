@@ -94,7 +94,7 @@ class TestStreamStrategy(unittest.TestCase):
                 "title": "[程序员] GLM 5.1 有实际测试过的吗",
                 "link": "https://www.v2ex.com/t/1",
                 "origin": "V2EX",
-                "summary": "模型评测讨论",
+                "summary": "模型评测讨论" * 35,
                 "published": 4102444800000,
             },
             {
@@ -102,7 +102,7 @@ class TestStreamStrategy(unittest.TestCase):
                 "title": "[推广] 我们的中转站也上线了",
                 "link": "https://www.v2ex.com/t/2",
                 "origin": "V2EX",
-                "summary": "商业推广",
+                "summary": "商业推广" * 50,
                 "published": 4102444800000,
             },
             {
@@ -110,7 +110,7 @@ class TestStreamStrategy(unittest.TestCase):
                 "title": "[分享创造] 新项目发布",
                 "link": "https://www.v2ex.com/t/3",
                 "origin": "V2EX",
-                "summary": "产品发布说明",
+                "summary": "产品发布说明" * 35,
                 "published": 4102444800000,
             },
         ]
@@ -126,8 +126,8 @@ class TestStreamStrategy(unittest.TestCase):
         buckets = {group["bucket"] for group in result["theme_groups"]}
         self.assertIn("程序员", buckets)
         self.assertIn("分享创造", buckets)
-        self.assertIn("推广", buckets)
-        self.assertEqual(result["mark_read_candidates"], ["2"])
+        # "推广" article is now pre-filtered by keyword match, goes to low_priority_items
+        self.assertIn("2", result["mark_read_candidates"])
         self.assertTrue(result["worth_expanding_items"][0]["link"].startswith("https://"))
         self.assertTrue(result["worth_expanding_items"][0]["interpretation"])
         self.assertIn("解读:", result["markdown"])
@@ -143,7 +143,7 @@ class TestStreamStrategy(unittest.TestCase):
                 "title": "36Kr 快讯 1",
                 "link": "https://36kr.com/newsflashes/123",
                 "origin": "36Kr",
-                "summary": "快讯",
+                "summary": "快讯内容摘要，包含多项重要信息和市场动态分析。" * 10,
                 "published": 4102444800000,
             },
             {
@@ -151,7 +151,7 @@ class TestStreamStrategy(unittest.TestCase):
                 "title": "36Kr 正文",
                 "link": "https://36kr.com/p/456",
                 "origin": "36Kr",
-                "summary": "正文",
+                "summary": "正文内容详细描述，包含深度分析和专业观点。" * 10,
                 "published": 4102444800000,
             },
         ]
@@ -176,7 +176,7 @@ class TestStreamStrategy(unittest.TestCase):
                 "title": "跟仓雪球组合是否能赚钱",
                 "link": "https://xueqiu.com/1",
                 "origin": "雪球",
-                "summary": "组合、调仓、仓位和收益讨论",
+                "summary": "组合、调仓、仓位和收益讨论" * 20,
                 "published": 4102444800000,
             },
             {
@@ -184,7 +184,7 @@ class TestStreamStrategy(unittest.TestCase):
                 "title": "黄金 ETF 与红利 ETF 怎么选",
                 "link": "https://xueqiu.com/2",
                 "origin": "雪球",
-                "summary": "ETF、基金和宽基配置比较",
+                "summary": "ETF、基金和宽基配置比较" * 20,
                 "published": 4102444800000,
             },
             {
@@ -192,7 +192,7 @@ class TestStreamStrategy(unittest.TestCase):
                 "title": "华尔街上调衰退概率，市场风险怎么变",
                 "link": "https://xueqiu.com/3",
                 "origin": "雪球",
-                "summary": "宏观、衰退、美联储和市场风险",
+                "summary": "宏观、衰退、美联储和市场风险" * 20,
                 "published": 4102444800000,
             },
         ]
@@ -208,6 +208,28 @@ class TestStreamStrategy(unittest.TestCase):
         self.assertIn("策略 / 组合", buckets)
         self.assertIn("ETF / 基金", buckets)
         self.assertIn("宏观 / 市场", buckets)
+
+    def test_generate_stream_overview_groups_generic_p2_semantics(self):
+        articles = [
+            {
+                "id": "1",
+                "title": "例行外交声明",
+                "link": "https://example.com/p2",
+                "origin": "Reuters",
+                "summary": "美国与欧盟讨论对俄罗斯的新制裁方案。" * 20,
+                "published": 4102444800000,
+            }
+        ]
+
+        result = generate_stream_overview(
+            articles,
+            stream_id="feed/reuters",
+            stream_label="Feed: Reuters",
+            days=3,
+        )
+
+        buckets = {group["bucket"] for group in result["theme_groups"]}
+        self.assertIn("国际政治 / P2", buckets)
 
     @patch(
         "rss_analyzer.stream_strategy._llm_interpret_candidates",
@@ -226,7 +248,7 @@ class TestStreamStrategy(unittest.TestCase):
                 "title": "[程序员] GLM 5.1 有实际测试过的吗",
                 "link": "https://www.v2ex.com/t/1",
                 "origin": "V2EX",
-                "summary": "模型评测讨论",
+                "summary": "模型评测讨论" * 35,
                 "published": 4102444800000,
             }
         ]
@@ -253,7 +275,7 @@ class TestStreamStrategy(unittest.TestCase):
                 "title": "可转债双低策略本周怎么调",
                 "link": "https://www.jisilu.cn/1",
                 "origin": "集思录",
-                "summary": "转债、双低、强赎和回售讨论",
+                "summary": "转债、双低、强赎和回售讨论" * 20,
                 "published": 4102444800000,
             },
             {
@@ -261,7 +283,7 @@ class TestStreamStrategy(unittest.TestCase):
                 "title": "ETF 折价套利今天还有没有空间",
                 "link": "https://www.jisilu.cn/2",
                 "origin": "集思录",
-                "summary": "ETF、LOF、折价溢价和套利",
+                "summary": "ETF、LOF、折价溢价和套利" * 20,
                 "published": 4102444800000,
             },
             {
@@ -269,7 +291,7 @@ class TestStreamStrategy(unittest.TestCase):
                 "title": "低佣开户和券商免五怎么选",
                 "link": "https://www.jisilu.cn/3",
                 "origin": "集思录",
-                "summary": "开户、佣金、免五和账户规则",
+                "summary": "开户、佣金、免五和账户规则" * 20,
                 "published": 4102444800000,
             },
         ]

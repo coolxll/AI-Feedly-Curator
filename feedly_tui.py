@@ -116,14 +116,15 @@ def simple_menu():
         console.print("\n[bold]Main Menu:[/bold]")
         console.print("1. Run Filter")
         console.print("2. Process Stream")
-        console.print("3. Analyze Articles")
-        console.print("4. Regenerate Summary")
-        console.print("5. Export Articles")
-        console.print("6. Exit")
+        console.print("3. Batch Read")
+        console.print("4. Analyze Articles")
+        console.print("5. Regenerate Summary")
+        console.print("6. Export Articles")
+        console.print("7. Exit")
 
         choice = get_input("Select an option")
 
-        if choice == "6":
+        if choice == "7":
             console.print("[cyan]Goodbye![/cyan]")
             sys.exit()
         elif choice == "1":
@@ -131,10 +132,12 @@ def simple_menu():
         elif choice == "2":
             simple_process_stream_flow()
         elif choice == "3":
-            simple_analyze_flow()
+            run_batch_read_flow()
         elif choice == "4":
-            run_summary_flow()
+            simple_analyze_flow()
         elif choice == "5":
+            run_summary_flow()
+        elif choice == "6":
             simple_export_flow()
         else:
             console.print("[red]Invalid choice[/red]")
@@ -555,6 +558,7 @@ def main_menu():
             choices=[
                 questionary.Choice("Run Filter", value="run"),
                 questionary.Choice("Process Stream", value="process_stream"),
+                questionary.Choice("Batch Read", value="batch_read"),
                 questionary.Choice("Analyze Articles", value="analyze"),
                 questionary.Choice("Regenerate Summary", value="summary"),
                 questionary.Choice("Export Articles", value="export"),
@@ -582,6 +586,11 @@ def main_menu():
             render_main_header()
         elif action == "process_stream":
             run_process_stream_flow()
+            input("\nPress Enter to return to menu...")
+            console.clear()
+            render_main_header()
+        elif action == "batch_read":
+            run_batch_read_flow()
             input("\nPress Enter to return to menu...")
             console.clear()
             render_main_header()
@@ -754,6 +763,27 @@ def _render_stream_result(result):
                 f"- [cyan]{group['bucket']}[/cyan] ({group['count']}) - {group['summary']}"
             )
 
+    p2_briefing = digest.get("p2_briefing") or {}
+    p2_items = p2_briefing.get("must_read") or p2_briefing.get("items") or []
+    if p2_briefing:
+        console.print("\n[bold]P2 快速情报[/bold]")
+        console.print(f"- {p2_briefing.get('headline', 'No P2 items.')}")
+        for item in p2_items[:8]:
+            score = item.get("score")
+            score_text = f" [{score}/5.0]" if score is not None else ""
+            console.print(f"- {item.get('event') or item.get('title')}{score_text}")
+            if item.get("actors") or item.get("region"):
+                console.print(
+                    f"  [dim]相关方:[/dim] {item.get('actors', '')} "
+                    f"[dim]地区:[/dim] {item.get('region', '')}"
+                )
+            if item.get("core_fact"):
+                console.print(f"  [dim]事实:[/dim] {item['core_fact']}")
+            if item.get("why_it_matters"):
+                console.print(f"  [dim]影响:[/dim] {item['why_it_matters']}")
+            if item.get("link"):
+                console.print(f"  [dim]链接:[/dim] {item['link']}")
+
     must_read = digest.get("deep_analyzed_reads") or digest.get(
         "must_read_candidates", result.get("worth_expanding_items", [])
     )
@@ -856,6 +886,197 @@ def _prompt_open_stream_article(digest):
         console.print(f"[green]Opened:[/green] {selected['title']}")
     else:
         console.print("[red]Failed to open the article link.[/red]")
+
+
+def _loop_open_articles(digest):
+    """Open articles from digest in browser, one at a time in a loop."""
+    import questionary
+
+    openable_items = []
+    for section, items in (
+        ("Must Read", digest.get("deep_analyzed_reads", [])),
+        ("Skim", digest.get("skim_items", [])),
+    ):
+        for item in items:
+            if item.get("link"):
+                openable_items.append((section, item))
+
+    if not openable_items:
+        console.print("[yellow]No articles with links to open.[/yellow]")
+        return
+
+    # Build a label->item map since questionary.Choice value may not
+    # round-trip dicts reliably.
+    opened_links: set[str] = set()
+
+    while True:
+        remaining = [
+            (s, i) for s, i in openable_items if i.get("link") not in opened_links
+        ]
+        if not remaining:
+            console.print("[dim]All articles opened.[/dim]")
+            break
+
+        label_to_item: dict[str, dict] = {}
+        labels: list[str] = []
+        for section, item in remaining:
+            score_str = ""
+            score = item.get("score")
+            if score is not None:
+                score_str = f" [{score:.1f}]"
+            label = f"[{section}] {item['title']}{score_str}"
+            label_to_item[label] = item
+            labels.append(label)
+
+        labels.append("Done reading")
+        selected_label = questionary.select(
+            f"Open article ({len(remaining)} left):", choices=labels
+        ).ask()
+
+        if selected_label is None or selected_label == "Done reading":
+            break
+
+        item = label_to_item.get(selected_label)
+        if not item:
+            continue
+
+        if _open_stream_article(item):
+            opened_links.add(item["link"])
+            console.print(f"[green]Opened:[/green] {item['title']}")
+        else:
+            console.print("[red]Failed to open link.[/red]")
+
+
+def run_batch_read_flow():
+    """Batch reading mode: fetch N articles, AI filter, read, mark, repeat."""
+    import questionary
+
+    stream_id, stream_label = select_stream_interactive()
+    if stream_id is None and stream_label is None:
+        return
+
+    batch_str = questionary.text("LLM Chunk Size:", default="50").ask()
+    try:
+        batch_size = int(batch_str)
+    except ValueError:
+        batch_size = 50
+
+    days_str = questionary.text("Recent Days:", default="3").ask()
+    try:
+        days = int(days_str)
+    except ValueError:
+        days = 3
+
+    display_stream = stream_label if stream_label else (stream_id or "Global (All)")
+    console.print(
+        Panel(
+            f"Batch Reading Mode\n"
+            f"Stream: {display_stream}\n"
+            f"LLM Chunk Size: {batch_size}\n"
+            f"Recent Days: {days}",
+            title="Configuration",
+            border_style="cyan",
+        )
+    )
+
+    try:
+        backend = _load_backend_service()
+        if backend is None:
+            return
+
+        batch_num = 0
+        total_marked = 0
+
+        while True:
+            batch_num += 1
+            console.print(f"\n[bold cyan]━━━ Batch #{batch_num} ━━━[/bold cyan]")
+
+            result = backend.process_batch(
+                stream_id=stream_id,
+                stream_label=stream_label,
+                batch_size=batch_size,
+                days=days,
+            )
+
+            fetched = result.get("fetched_count", 0)
+            if fetched == 0:
+                console.print("[green]✓ All articles processed![/green]")
+                break
+
+            _render_stream_result(result)
+
+            digest = result.get("digest") or {}
+            mark_read_ids = result.get("mark_read_candidates", [])
+
+            # Interactive loop for this batch
+            while True:
+                choices = [
+                    questionary.Choice("Open an article to read", value="open"),
+                    questionary.Choice(
+                        f"Mark {len(mark_read_ids)} low-priority items as read",
+                        value="mark_clear",
+                    ),
+                    questionary.Choice("Mark ALL in this batch as read", value="mark_all"),
+                    questionary.Choice("Next batch (skip marking)", value="next"),
+                    questionary.Choice("Exit batch reading", value="exit"),
+                ]
+                action = questionary.select(
+                    "What to do with this batch?",
+                    choices=choices,
+                ).ask()
+
+                if action == "open":
+                    _loop_open_articles(digest)
+                elif action == "mark_clear":
+                    if mark_read_ids:
+                        mark_result = backend.mark_articles_read(mark_read_ids)
+                        if mark_result.get("success"):
+                            console.print(
+                                f"[green]Marked {mark_result['marked_count']} items as read.[/green]"
+                            )
+                            total_marked += mark_result["marked_count"]
+                        else:
+                            console.print("[red]Failed to mark items as read.[/red]")
+                    else:
+                        console.print("[yellow]No low-priority items to mark.[/yellow]")
+                elif action == "mark_all":
+                    all_ids = []
+                    for item in digest.get("deep_analyzed_reads", []):
+                        if item.get("id"):
+                            all_ids.append(item["id"])
+                    for item in digest.get("skim_items", []):
+                        if item.get("id"):
+                            all_ids.append(item["id"])
+                    for item in digest.get("clear_items", []):
+                        if item.get("id"):
+                            all_ids.append(item["id"])
+                    if all_ids:
+                        mark_result = backend.mark_articles_read(all_ids)
+                        if mark_result.get("success"):
+                            console.print(
+                                f"[green]Marked {mark_result['marked_count']} items as read.[/green]"
+                            )
+                            total_marked += mark_result["marked_count"]
+                        else:
+                            console.print("[red]Failed to mark items as read.[/red]")
+                    break  # move to next batch after marking all
+                elif action == "next":
+                    break
+                elif action == "exit":
+                    console.print(
+                        f"[cyan]Done. Total marked as read: {total_marked}[/cyan]"
+                    )
+                    return
+
+        console.print(
+            f"\n[bold green]Batch reading complete. Total marked as read: {total_marked}[/bold green]"
+        )
+
+    except KeyboardInterrupt:
+        console.print("\n[red]Batch reading cancelled.[/red]")
+    except Exception:
+        logger.exception("An error occurred during batch reading")
+        console.print("[red]An error occurred. Check logs above.[/red]")
 
 
 def run_process_stream_flow():

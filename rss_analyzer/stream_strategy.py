@@ -63,6 +63,45 @@ def determine_stream_strategy(
     return STRATEGY_RADAR
 
 
+def _prefilter_articles(articles: list[dict]) -> tuple[list[dict], list[dict]]:
+    """Pre-filter articles by keywords, URL patterns, and min length.
+
+    Returns ``(filtered_out, remaining)``.  Filtered-out articles are those
+    that match spam/promotion keywords, blocked URL patterns, or are too short
+    to be worth sending to the LLM.
+    """
+    from rss_analyzer.config import PROJ_CONFIG
+
+    keywords = PROJ_CONFIG.get("filter_keywords", [])
+    url_patterns = PROJ_CONFIG.get("filter_url_patterns", [])
+    min_length = PROJ_CONFIG.get("filter_min_length", 100)
+
+    filtered_out: list[dict] = []
+    remaining: list[dict] = []
+
+    for article in articles:
+        title = article.get("title", "")
+        summary = strip_html_tags(article.get("summary", ""))
+        link = article.get("link", "") or ""
+        text = f"{title} {summary}"
+
+        if url_patterns and any(pattern in link for pattern in url_patterns):
+            filtered_out.append(article)
+            continue
+
+        if keywords and any(kw in text for kw in keywords):
+            filtered_out.append(article)
+            continue
+
+        if len(summary) < min_length and not article.get("content"):
+            filtered_out.append(article)
+            continue
+
+        remaining.append(article)
+
+    return filtered_out, remaining
+
+
 def filter_recent_articles(articles: list[dict], days: int) -> list[dict]:
     if days <= 0:
         return list(articles)
@@ -165,6 +204,34 @@ def _generic_bucket(article: dict) -> str:
     text = f"{title} {summary}".lower()
 
     keyword_groups = (
+        (
+            "国际政治 / P2",
+            (
+                "地缘",
+                "国际政治",
+                "外交",
+                "制裁",
+                "关税",
+                "战争",
+                "停火",
+                "冲突",
+                "军援",
+                "北约",
+                "欧盟",
+                "联合国",
+                "白宫",
+                "五角大楼",
+                "中东",
+                "台海",
+                "台湾",
+                "乌克兰",
+                "俄罗斯",
+                "以色列",
+                "伊朗",
+                "美国",
+                "中国",
+            ),
+        ),
         ("AI / LLM", ("ai", "gpt", "claude", "llm", "qwen", "deepseek", "glm")),
         ("Apple / macOS", ("mac", "macos", "apple", "iphone", "safari", "ios")),
         ("投资 / 市场", ("股票", "基金", "投资", "市场", "美股", "港股", "财报", "雪球")),
@@ -226,6 +293,8 @@ def _interpret_candidate(title: str, summary: str, bucket: str) -> str:
         return "代表性较强，适合用来判断这一主题要不要继续追。"
     if bucket in {"宏观 / 市场", "可转债", "可转债 / 套利"}:
         return "更偏判断和盘感，适合建立全局认知，不必逐条细读。"
+    if bucket == "国际政治 / P2":
+        return "适合提取事件、相关方和影响，判断是否有新增事实。"
     if bucket in {"券商 / 账户 / 规则", "打新 / 现金管理", "ETF / LOF / 套利"}:
         return "偏规则和机会扫描，读代表项就够。"
     if bucket in {"Apple / macOS", "macOS", "Apple", "iPhone"}:
@@ -561,9 +630,15 @@ def generate_radar_overview(
     days: int = 3,
 ) -> dict:
     recent_articles = filter_recent_articles(articles, days)
+    prefiltered_out, recent_articles = _prefilter_articles(recent_articles)
     grouped: dict[str, list[dict]] = {}
     low_priority_items: list[dict] = []
     candidate_items: list[dict] = []
+
+    for article in prefiltered_out:
+        bucket = _bucket_key(article, stream_label)
+        preview = _article_preview(article, bucket, True)
+        low_priority_items.append(preview)
 
     for article in recent_articles:
         bucket = _bucket_key(article, stream_label)
