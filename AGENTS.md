@@ -97,6 +97,8 @@
     *   Run all tests: `python -m unittest discover tests`
 *   **Output:** Analyzed data is saved as JSON, summaries as Markdown. Files are timestamped and archived.
 *   **Architecture:** Treat this repo as one product with multiple deployable clients. Shared logic belongs in `rss_analyzer/`; UI clients should stay thin and call the local service rather than duplicating AI logic.
+    *   Agent skills (Hermes/Codex/Claude) are clients too. They may own prompts, orchestration, report style, and delivery, but Feedly API access, token refresh, caching, scoring, and mark-read behavior should live in `rss_analyzer/` or thin project CLIs.
+    *   Do not add a second Feedly client or token refresh implementation inside a skill. Add the shared capability here first, then have the skill call this repo.
 
 ## Key Configuration Concepts
 

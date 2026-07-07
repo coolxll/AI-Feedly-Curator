@@ -6,6 +6,7 @@ Feedly API 客户端模块
 import os
 import json
 import logging
+import time
 import requests
 from typing import Optional
 
@@ -14,8 +15,26 @@ from .config import PROJ_CONFIG
 
 logger = logging.getLogger(__name__)
 
-# Feedly 配置文件路径 (工作目录)
-FEEDLY_CONFIG_FILE = os.path.join(os.getcwd(), "feedly_config.json")
+TOKEN_URL = "https://cloud.feedly.com/v3/auth/token"
+WEB_CLIENT_ID = "feedly"
+PKCE_CLIENT_ID = "feedlydev"
+PKCE_CLIENT_SECRET = "feedlydev"
+
+
+def _resolve_feedly_config_file() -> str:
+    """Resolve the Feedly config file while preserving the old cwd default."""
+    candidates = [
+        os.getenv("FEEDLY_CONFIG_PATH"),
+        os.path.join(os.getcwd(), "feedly_config.json"),
+        os.path.join(os.path.dirname(os.path.dirname(__file__)), "feedly_config.json"),
+    ]
+    for candidate in candidates:
+        if candidate and os.path.exists(candidate):
+            return candidate
+    return candidates[1]
+
+
+FEEDLY_CONFIG_FILE = _resolve_feedly_config_file()
 
 
 def load_feedly_config() -> dict | None:
@@ -26,6 +45,12 @@ def load_feedly_config() -> dict | None:
     return None
 
 
+def save_feedly_config(config: dict) -> None:
+    """保存 Feedly 配置"""
+    with open(FEEDLY_CONFIG_FILE, "w") as f:
+        json.dump(config, f, indent=2, ensure_ascii=False)
+
+
 def get_feedly_headers(token: str) -> dict:
     """获取 Feedly API 请求头"""
     return {"Authorization": f"OAuth {token}"}
@@ -34,9 +59,94 @@ def get_feedly_headers(token: str) -> dict:
 def _get_proxy() -> dict | None:
     """获取代理配置"""
     proxy = (
-        os.getenv("HTTP_PROXY") or os.getenv("HTTPS_PROXY") or PROJ_CONFIG.get("proxy")
+        os.getenv("FEEDLY_PROXY_URL")
+        or os.getenv("HTTP_PROXY")
+        or os.getenv("HTTPS_PROXY")
+        or PROJ_CONFIG.get("proxy")
     )
+    if proxy and "://" not in proxy:
+        proxy = f"http://{proxy}"
     return {"http": proxy, "https": proxy} if proxy else None
+
+
+def refresh_access_token(refresh_token: str) -> dict:
+    """Refresh Feedly access_token using web-session first, then PKCE fallback."""
+    proxy = _get_proxy()
+    try:
+        response = requests.post(
+            TOKEN_URL,
+            data={
+                "client_id": WEB_CLIENT_ID,
+                "grant_type": "refresh_token",
+                "refresh_token": refresh_token,
+            },
+            proxies=proxy,
+            timeout=15,
+        )
+        if response.status_code == 200:
+            return response.json()
+    except requests.RequestException:
+        logger.debug(
+            "Feedly web-session token refresh failed; trying PKCE fallback",
+            exc_info=True,
+        )
+
+    response = requests.post(
+        TOKEN_URL,
+        data={
+            "client_id": PKCE_CLIENT_ID,
+            "client_secret": PKCE_CLIENT_SECRET,
+            "grant_type": "refresh_token",
+            "refresh_token": refresh_token,
+        },
+        proxies=proxy,
+        timeout=15,
+    )
+    response.raise_for_status()
+    return response.json()
+
+
+def refresh_feedly_config(config: dict) -> dict | None:
+    """Refresh token and persist the updated Feedly config."""
+    refresh_token = config.get("refresh_token")
+    if not refresh_token:
+        logger.error("Feedly token expired and no refresh_token is configured")
+        return None
+
+    try:
+        token_data = refresh_access_token(refresh_token)
+    except requests.RequestException as exc:
+        logger.error("Feedly token refresh failed: %s", exc)
+        return None
+
+    config["token"] = token_data["access_token"]
+    config["user_id"] = token_data.get("id", config.get("user_id", ""))
+    config["refresh_token"] = token_data.get("refresh_token") or refresh_token
+    expires_in = token_data.get("expires_in", 604800)
+    config["token_expires_in"] = expires_in
+    config["token_expires_at"] = int(time.time()) + expires_in
+    save_feedly_config(config)
+    logger.info("Feedly access_token refreshed successfully")
+    return config
+
+
+def _request_with_token_refresh(
+    method: str, url: str, config: dict, **kwargs
+) -> requests.Response:
+    """Perform one Feedly request and retry once after refreshing on 401."""
+    request_func = getattr(requests, method.lower())
+    kwargs["headers"] = get_feedly_headers(config["token"])
+    kwargs.setdefault("proxies", _get_proxy())
+    response = request_func(url, **kwargs)
+    if response.status_code != 401:
+        return response
+
+    refreshed = refresh_feedly_config(config)
+    if not refreshed:
+        return response
+
+    kwargs["headers"] = get_feedly_headers(refreshed["token"])
+    return request_func(url, **kwargs)
 
 
 def feedly_fetch_unread(
@@ -57,7 +167,6 @@ def feedly_fetch_unread(
         logger.error("Feedly未配置，无法获取未读文章")
         return None
 
-    token = config["token"]
     user_id = config["user_id"]
     base_url = "https://cloud.feedly.com/v3"
 
@@ -80,11 +189,11 @@ def feedly_fetch_unread(
             if continuation:
                 params["continuation"] = continuation
 
-            response = requests.get(
+            response = _request_with_token_refresh(
+                "GET",
                 f"{base_url}/streams/contents",
-                headers=get_feedly_headers(token),
+                config,
                 params=params,
-                proxies=_get_proxy(),
             )
 
             if response.status_code == 401:
@@ -146,7 +255,6 @@ def feedly_mark_read(article_ids: list | str) -> bool:
         logger.error("未找到 Feedly 配置，无法标记已读")
         return False
 
-    token = config["token"]
     base_url = "https://cloud.feedly.com/v3"
 
     if isinstance(article_ids, str):
@@ -154,11 +262,11 @@ def feedly_mark_read(article_ids: list | str) -> bool:
 
     try:
         data = {"action": "markAsRead", "type": "entries", "entryIds": article_ids}
-        response = requests.post(
+        response = _request_with_token_refresh(
+            "POST",
             f"{base_url}/markers",
-            headers=get_feedly_headers(token),
+            config,
             json=data,
-            proxies=_get_proxy(),
         )
 
         if response.status_code == 200:
@@ -181,14 +289,13 @@ def feedly_get_categories() -> list | None:
     if not config:
         return None
 
-    token = config["token"]
     base_url = "https://cloud.feedly.com/v3"
 
     try:
-        response = requests.get(
+        response = _request_with_token_refresh(
+            "GET",
             f"{base_url}/categories",
-            headers=get_feedly_headers(token),
-            proxies=_get_proxy(),
+            config,
         )
         if response.status_code == 200:
             return response.json()
@@ -209,14 +316,13 @@ def feedly_get_subscriptions() -> list | None:
     if not config:
         return None
 
-    token = config["token"]
     base_url = "https://cloud.feedly.com/v3"
 
     try:
-        response = requests.get(
+        response = _request_with_token_refresh(
+            "GET",
             f"{base_url}/subscriptions",
-            headers=get_feedly_headers(token),
-            proxies=_get_proxy(),
+            config,
         )
         if response.status_code == 200:
             return response.json()
@@ -239,14 +345,13 @@ def feedly_get_unread_counts() -> dict | None:
     if not config:
         return None
 
-    token = config["token"]
     base_url = "https://cloud.feedly.com/v3"
 
     try:
-        response = requests.get(
+        response = _request_with_token_refresh(
+            "GET",
             f"{base_url}/markers/counts",
-            headers=get_feedly_headers(token),
-            proxies=_get_proxy(),
+            config,
         )
         if response.status_code == 200:
             return response.json()

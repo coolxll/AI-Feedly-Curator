@@ -17,6 +17,7 @@
 - SQLite 缓存
 - Chroma 向量检索
 - Feedly 相关数据处理
+- Feedly token refresh 与配置解析
 
 ### 2. Service
 
@@ -38,6 +39,15 @@
 - 后续桌面 GUI：也应走同一服务接口
 
 客户端不应该各自保存 AI 逻辑，不应该各自直连模型，不应该各自维护缓存副本。
+
+### 4. Agent Skills
+
+Hermes/Codex/Claude skills 也按客户端处理，而不是新的业务边界：
+
+- skills 可以负责编排、提示词、日报格式、投递和人工偏好
+- skills 不应复制 Feedly API、token refresh、缓存、评分等核心逻辑
+- 需要读写 Feedly 状态时，优先调用本仓库的 CLI、service 或 `rss_analyzer/` 能力
+- Agent 专用临时文件可以继续放在 `/tmp/`，但数据来源和状态变更应由 core 提供
 
 ## 为什么不是拆成两个 repo
 
@@ -65,4 +75,5 @@
 
 1. 把本地 GUI/Streamlit 中直接访问底层模块的地方，逐步收敛到同一套 service API。
 2. 若后端接口继续增长，把消息分发从 `type`-switch 进一步整理成显式路由表。
-3. 当确认没有人再使用 native host 后，可将 `native_host/` 降级为 legacy 或直接删除。
+3. Agent skills 继续作为薄客户端维护；若某个 skill 里的脚本变成通用能力，应迁回 `rss_analyzer/` 或项目 CLI。
+4. 当确认没有人再使用 native host 后，可将 `native_host/` 降级为 legacy 或直接删除。

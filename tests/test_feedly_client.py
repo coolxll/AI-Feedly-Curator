@@ -60,6 +60,35 @@ class TestFeedlyMarkRead(unittest.TestCase):
 
         self.assertFalse(result)
 
+    @patch("rss_analyzer.feedly_client.refresh_feedly_config")
+    @patch("rss_analyzer.feedly_client.load_feedly_config")
+    @patch("rss_analyzer.feedly_client.requests.post")
+    def test_mark_read_refreshes_token_on_401(self, mock_post, mock_config, mock_refresh):
+        """测试 401 时自动刷新 token 并重试"""
+        mock_config.return_value = {
+            "token": "old_token",
+            "refresh_token": "refresh_token",
+            "user_id": "user_id",
+        }
+        mock_refresh.return_value = {
+            "token": "new_token",
+            "refresh_token": "refresh_token",
+            "user_id": "user_id",
+        }
+        mock_post.side_effect = [
+            MagicMock(status_code=401, text="Unauthorized"),
+            MagicMock(status_code=200),
+        ]
+
+        result = feedly_mark_read("article_id")
+
+        self.assertTrue(result)
+        self.assertEqual(mock_post.call_count, 2)
+        self.assertEqual(
+            mock_post.call_args_list[1].kwargs["headers"]["Authorization"],
+            "OAuth new_token",
+        )
+
     @patch("rss_analyzer.feedly_client.load_feedly_config")
     @patch("rss_analyzer.feedly_client.requests.post")
     def test_mark_read_logs_success(self, mock_post, mock_config):
