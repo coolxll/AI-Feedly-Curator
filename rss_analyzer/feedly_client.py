@@ -150,14 +150,14 @@ def _request_with_token_refresh(
 
 
 def feedly_fetch_unread(
-    stream_id: Optional[str] = None, limit: int = 999
+    stream_id: Optional[str] = None, limit: Optional[int] = None
 ) -> list | None:
     """
     从 Feedly 获取未读文章
 
     Args:
         stream_id: Feedly 流 ID，默认为所有文章
-        limit: 获取文章数量限制
+        limit: 获取文章数量限制 (None 或 <=0 代表不设限，获取全量未读)
 
     Returns:
         文章列表，失败返回 None
@@ -175,11 +175,15 @@ def feedly_fetch_unread(
     try:
         articles = []
         continuation = None
+        has_limit = limit is not None and limit > 0
 
-        while len(articles) < limit:
+        while not has_limit or len(articles) < limit:
             # Calculate remaining needed, but cap at 1000 per request (Feedly API limit usually)
-            remaining = limit - len(articles)
-            batch_size = min(remaining, 1000)
+            if has_limit:
+                remaining = limit - len(articles)
+                batch_size = min(remaining, 1000)
+            else:
+                batch_size = 1000
 
             params = {
                 "streamId": target_stream,
@@ -227,10 +231,13 @@ def feedly_fetch_unread(
             if not continuation:
                 break
 
-            logger.debug(f"Fetched {len(articles)}/{limit} articles... (Continuating)")
+            if has_limit:
+                logger.debug(f"Fetched {len(articles)}/{limit} articles... (Continuating)")
+            else:
+                logger.debug(f"Fetched {len(articles)} articles so far... (Continuating)")
 
-        # Trim to exact limit if we over-fetched (though unlikely with logic above)
-        return articles[:limit]
+        # Trim to exact limit if we over-fetched
+        return articles if not has_limit else articles[:limit]
     except Exception as e:
         logger.error(f"获取Feedly未读文章异常: {str(e)}")
         import traceback
@@ -260,21 +267,29 @@ def feedly_mark_read(article_ids: list | str) -> bool:
     if isinstance(article_ids, str):
         article_ids = [article_ids]
 
-    try:
-        data = {"action": "markAsRead", "type": "entries", "entryIds": article_ids}
-        response = _request_with_token_refresh(
-            "POST",
-            f"{base_url}/markers",
-            config,
-            json=data,
-        )
+    if not article_ids:
+        return True
 
-        if response.status_code == 200:
-            logger.info(f"成功标记 {len(article_ids)} 篇文章为已读")
-            return True
-        else:
-            logger.error(f"标记已读失败: {response.status_code} - {response.text}")
-            return False
+    try:
+        batch_size = 1000
+        all_success = True
+        for i in range(0, len(article_ids), batch_size):
+            chunk = article_ids[i : i + batch_size]
+            data = {"action": "markAsRead", "type": "entries", "entryIds": chunk}
+            response = _request_with_token_refresh(
+                "POST",
+                f"{base_url}/markers",
+                config,
+                json=data,
+            )
+
+            if response.status_code == 200:
+                logger.info(f"成功标记 {len(chunk)} 篇文章为已读")
+            else:
+                logger.error(f"标记已读失败: {response.status_code} - {response.text}")
+                all_success = False
+
+        return all_success
     except Exception as e:
         logger.error(f"标记已读异常: {str(e)}")
         return False

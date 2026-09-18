@@ -327,15 +327,25 @@ def execute_export(limit, stream_id, filename, stream_label=None):
         console.print("[red]Export failed.[/red]")
 
 
+def _format_limit_display(limit: int | None) -> str:
+    if limit is None or limit <= 0:
+        return "All (全量)"
+    return str(limit)
+
+
 def _get_cleanup_defaults() -> tuple[int, float, bool]:
     limit_str = os.getenv("CLEANUP_DEFAULT_LIMIT")
-    if limit_str:
-        try:
-            default_limit = int(limit_str)
-        except ValueError:
-            default_limit = 1000
+    if limit_str is not None and limit_str != "":
+        val = limit_str.strip().lower()
+        if val in ("all", "0", "full", "none", "inf"):
+            default_limit = 0
+        else:
+            try:
+                default_limit = int(val)
+            except ValueError:
+                default_limit = 0
     else:
-        default_limit = 1000
+        default_limit = 0
 
     thresh_str = os.getenv("CLEANUP_DEFAULT_THRESHOLD")
     if thresh_str:
@@ -358,16 +368,17 @@ def _get_cleanup_defaults() -> tuple[int, float, bool]:
 def simple_filter_flow():
     """Fallback filter flow"""
     default_limit, default_threshold, default_mark_read = _get_cleanup_defaults()
+    limit_text = _format_limit_display(default_limit)
     mark_text = "Yes" if default_mark_read else "No"
     console.print("\n[bold]Clean Up Unread:[/bold]")
     console.print(
-        f"1. Quick Clean: All Filters (Limit: {default_limit}, Score < {default_threshold}, Mark Read: {mark_text})"
+        f"1. Quick Clean: All Filters (Limit: {limit_text}, Score < {default_threshold}, Mark Read: {mark_text})"
     )
     console.print(
-        f"2. Quick Clean: Newsflash Only (Limit: {default_limit}, Mark Read: {mark_text})"
+        f"2. Quick Clean: Newsflash Only (Limit: {limit_text}, Mark Read: {mark_text})"
     )
     console.print(
-        f"3. Quick Clean: Low Score Only (Limit: {default_limit}, Score < {default_threshold}, Mark Read: {mark_text})"
+        f"3. Quick Clean: Low Score Only (Limit: {limit_text}, Score < {default_threshold}, Mark Read: {mark_text})"
     )
     console.print("4. Custom Configuration")
     console.print("5. Back")
@@ -1374,10 +1385,11 @@ def execute_filter(
 ):
     """Shared execution logic"""
     display_stream = stream_label if stream_label else (stream_id or "Global (All)")
+    limit_display = _format_limit_display(limit)
     console.print(
         Panel(
             f"Running Mode: [bold]{mode}[/bold]\n"
-            f"Limit: {limit}\n"
+            f"Limit: {limit_display}\n"
             f"Threshold: {threshold}\n"
             f"Stream: {display_stream}\n"
             f"Dry Run: {dry_run}\n"
@@ -1428,6 +1440,7 @@ def run_filter_flow():
     import questionary
 
     default_limit, default_threshold, default_mark_read = _get_cleanup_defaults()
+    limit_text = _format_limit_display(default_limit)
     mark_text = "Yes" if default_mark_read else "No"
 
     # 1. Select Mode or Quick Run
@@ -1435,15 +1448,15 @@ def run_filter_flow():
         "Clean Up Unread:",
         choices=[
             questionary.Choice(
-                f"⚡ Quick Clean: All Filters (Limit: {default_limit}, Score < {default_threshold}, Mark Read: {mark_text})",
+                f"⚡ Quick Clean: All Filters (Limit: {limit_text}, Score < {default_threshold}, Mark Read: {mark_text})",
                 value="quick_all",
             ),
             questionary.Choice(
-                f"⚡ Quick Clean: Newsflash Only (Limit: {default_limit}, Mark Read: {mark_text})",
+                f"⚡ Quick Clean: Newsflash Only (Limit: {limit_text}, Mark Read: {mark_text})",
                 value="quick_newsflash",
             ),
             questionary.Choice(
-                f"⚡ Quick Clean: Low Score Only (Limit: {default_limit}, Score < {default_threshold}, Mark Read: {mark_text})",
+                f"⚡ Quick Clean: Low Score Only (Limit: {limit_text}, Score < {default_threshold}, Mark Read: {mark_text})",
                 value="quick_low_score",
             ),
             questionary.Choice(
@@ -1488,12 +1501,19 @@ def run_filter_flow():
         return
 
     # Configure Parameters
-    limit_str = questionary.text("Article Limit:", default=str(default_limit)).ask()
-    try:
-        limit = int(limit_str)
-    except ValueError:
-        console.print(f"[red]Invalid limit, using default {default_limit}[/red]")
-        limit = default_limit
+    limit_default_str = "0" if default_limit <= 0 else str(default_limit)
+    limit_str = questionary.text(
+        "Article Limit (0 or 'all' for full unread 全量):",
+        default=limit_default_str,
+    ).ask()
+    if not limit_str or limit_str.strip().lower() in ("all", "0", "full"):
+        limit = 0
+    else:
+        try:
+            limit = int(limit_str)
+        except ValueError:
+            console.print(f"[red]Invalid limit, using default {limit_default_str}[/red]")
+            limit = default_limit
 
     threshold = default_threshold
     if mode in ["all", "low-score"]:

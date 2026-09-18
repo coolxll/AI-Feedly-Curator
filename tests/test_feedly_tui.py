@@ -154,6 +154,29 @@ class TestFeedlyTUI(unittest.TestCase):
             "all", 999, 3.0, False, True
         )
 
+    def test_run_filter_flow_quick_all_executes_with_full_unread_limit(self):
+        fake_questionary = types.SimpleNamespace(
+            Choice=_FakeChoice,
+            select=lambda *args, **kwargs: _FakePrompt("quick_all"),
+        )
+
+        with patch.dict(sys.modules, {"questionary": fake_questionary}):
+            with patch.dict(
+                "os.environ",
+                {
+                    "CLEANUP_DEFAULT_LIMIT": "all",
+                    "CLEANUP_DEFAULT_THRESHOLD": "3.0",
+                    "CLEANUP_DEFAULT_MARK_READ": "true",
+                },
+                clear=False,
+            ):
+                with patch("feedly_tui.execute_filter") as mock_filter:
+                    feedly_tui.run_filter_flow()
+
+        mock_filter.assert_called_once_with(
+            "all", 0, 3.0, False, True
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

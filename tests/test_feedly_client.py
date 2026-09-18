@@ -5,7 +5,7 @@ feedly_client 模块单元测试
 import unittest
 from unittest.mock import patch, MagicMock
 
-from rss_analyzer.feedly_client import feedly_mark_read
+from rss_analyzer.feedly_client import feedly_fetch_unread, feedly_mark_read
 
 
 class TestFeedlyMarkRead(unittest.TestCase):
@@ -100,6 +100,34 @@ class TestFeedlyMarkRead(unittest.TestCase):
             feedly_mark_read(["id1", "id2"])
 
         self.assertTrue(any("成功标记 2 篇文章为已读" in log for log in cm.output))
+
+
+class TestFeedlyFetchUnread(unittest.TestCase):
+    @patch("rss_analyzer.feedly_client.load_feedly_config")
+    @patch("rss_analyzer.feedly_client._request_with_token_refresh")
+    def test_fetch_unread_supports_full_unread_pagination(
+        self, mock_request, mock_config
+    ):
+        mock_config.return_value = {"user_id": "u123", "token": "tok"}
+
+        # First page has 1 item and continuation token, second page has 1 item and no continuation
+        resp1 = MagicMock(status_code=200)
+        resp1.json.return_value = {
+            "items": [{"id": "entry-1", "title": "Post 1"}],
+            "continuation": "cont-token-1",
+        }
+        resp2 = MagicMock(status_code=200)
+        resp2.json.return_value = {
+            "items": [{"id": "entry-2", "title": "Post 2"}],
+        }
+        mock_request.side_effect = [resp1, resp2]
+
+        articles = feedly_fetch_unread(limit=0)
+
+        self.assertEqual(len(articles), 2)
+        self.assertEqual(articles[0]["id"], "entry-1")
+        self.assertEqual(articles[1]["id"], "entry-2")
+        self.assertEqual(mock_request.call_count, 2)
 
 
 if __name__ == "__main__":
