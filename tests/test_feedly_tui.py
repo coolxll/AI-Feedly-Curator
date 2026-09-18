@@ -1,3 +1,4 @@
+import os
 import sys
 import types
 import unittest
@@ -102,6 +103,58 @@ class TestFeedlyTUI(unittest.TestCase):
 
         mock_quick.assert_not_called()
         mock_batch.assert_called_once()
+
+    def test_run_review_menu_routes_quick_default(self):
+        fake_questionary = types.SimpleNamespace(
+            Choice=_FakeChoice,
+            select=lambda *args, **kwargs: _FakePrompt("quick_default"),
+        )
+
+        with patch.dict(sys.modules, {"questionary": fake_questionary}):
+            with patch("feedly_tui.execute_process_stream") as mock_exec:
+                feedly_tui.run_review_menu()
+
+        mock_exec.assert_called_once_with(
+            stream_id=None,
+            limit=500,
+            days=3,
+            stream_label="Global All",
+        )
+
+    def test_run_review_menu_routes_batch_default(self):
+        fake_questionary = types.SimpleNamespace(
+            Choice=_FakeChoice,
+            select=lambda *args, **kwargs: _FakePrompt("batch_default"),
+        )
+
+        with patch.dict(sys.modules, {"questionary": fake_questionary}):
+            with patch("feedly_tui.execute_batch_read") as mock_exec:
+                feedly_tui.run_review_menu()
+
+        mock_exec.assert_called_once_with(
+            stream_id=None,
+            stream_label="Global All",
+            batch_size=50,
+            days=3,
+        )
+
+    def test_get_review_defaults_env_overrides(self):
+        with patch.dict(
+            os.environ,
+            {
+                "REVIEW_DEFAULT_LIMIT": "200",
+                "REVIEW_DEFAULT_DAYS": "7",
+                "REVIEW_DEFAULT_CHUNK_SIZE": "25",
+            },
+        ):
+            limit, days, chunk = feedly_tui._get_review_defaults()
+            self.assertEqual(limit, 200)
+            self.assertEqual(days, 7)
+            self.assertEqual(chunk, 25)
+
+        with patch.dict(os.environ, {"REVIEW_DEFAULT_LIMIT": "all"}):
+            limit, _, _ = feedly_tui._get_review_defaults()
+            self.assertEqual(limit, 0)
 
     def test_run_reports_menu_routes_analyze(self):
         fake_questionary = types.SimpleNamespace(

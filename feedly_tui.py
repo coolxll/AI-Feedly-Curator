@@ -147,17 +147,39 @@ def simple_menu():
 
 
 def simple_review_menu():
+    default_limit, default_days, default_chunk = _get_review_defaults()
+    limit_text = _format_limit_display(default_limit)
     while True:
         console.print("\n[bold]Review Unread:[/bold]")
-        console.print("1. Quick Review Stream")
-        console.print("2. Batch Clear Backlog")
-        console.print("3. Back")
-        choice = get_input("Select an option")
+        console.print(
+            f"1. Quick Review Stream (Global All, Limit: {limit_text}, Recent Days: {default_days})"
+        )
+        console.print(
+            f"2. Quick Batch Clear (Global All, Chunk: {default_chunk}, Recent Days: {default_days})"
+        )
+        console.print("3. Custom Review Stream")
+        console.print("4. Custom Batch Clear Backlog")
+        console.print("5. Back")
+        choice = get_input("Select an option", default="1")
         if choice == "1":
-            simple_process_stream_flow()
+            execute_process_stream(
+                stream_id=None,
+                limit=default_limit if default_limit > 0 else 9999,
+                days=default_days,
+                stream_label="Global All",
+            )
         elif choice == "2":
-            run_batch_read_flow()
+            execute_batch_read(
+                stream_id=None,
+                stream_label="Global All",
+                batch_size=default_chunk,
+                days=default_days,
+            )
         elif choice == "3":
+            simple_process_stream_flow()
+        elif choice == "4":
+            run_batch_read_flow()
+        elif choice == "5":
             return
         else:
             console.print("[red]Invalid choice[/red]")
@@ -241,23 +263,35 @@ def simple_export_flow():
 
 
 def simple_process_stream_flow():
+    default_limit, default_days, _ = _get_review_defaults()
     console.print("\n[bold]Quick Review Stream:[/bold]")
     sid = get_input("Stream ID (Optional, press Enter for Global)", default="")
     stream_id = sid if sid else None
 
-    limit_str = get_input("Limit", default="500")
-    try:
-        limit = int(limit_str)
-    except ValueError:
-        limit = 500
+    limit_default_str = "0" if default_limit <= 0 else str(default_limit)
+    limit_str = get_input(
+        "Limit (0 or 'all' for full unread)", default=limit_default_str
+    )
+    if not limit_str or limit_str.strip().lower() in ("all", "0", "full"):
+        limit = 0
+    else:
+        try:
+            limit = int(limit_str)
+        except ValueError:
+            limit = default_limit
 
-    days_str = get_input("Recent Days", default="3")
+    days_str = get_input("Recent Days", default=str(default_days))
     try:
         days = int(days_str)
     except ValueError:
-        days = 3
+        days = default_days
 
-    execute_process_stream(stream_id, limit=limit, days=days)
+    execute_process_stream(
+        stream_id,
+        limit=limit if limit > 0 else 9999,
+        days=days,
+        stream_label="Global All" if not stream_id else None,
+    )
 
 
 def run_export_flow():
@@ -363,6 +397,48 @@ def _get_cleanup_defaults() -> tuple[int, float, bool]:
         default_mark_read = True
 
     return default_limit, default_threshold, default_mark_read
+
+
+def _get_review_defaults() -> tuple[int, int, int]:
+    """
+    Returns (default_limit, default_days, default_chunk_size) for Review Unread.
+    Supported env overrides:
+    - REVIEW_DEFAULT_LIMIT (default: 500, 0/'all' for full unread)
+    - REVIEW_DEFAULT_DAYS (default: 3)
+    - REVIEW_DEFAULT_CHUNK_SIZE (default: 50)
+    """
+    limit_str = os.getenv("REVIEW_DEFAULT_LIMIT")
+    if limit_str is not None and limit_str != "":
+        val = limit_str.strip().lower()
+        if val in ("all", "0", "full", "none", "inf"):
+            default_limit = 0
+        else:
+            try:
+                default_limit = int(val)
+            except ValueError:
+                default_limit = 500
+    else:
+        default_limit = 500
+
+    days_str = os.getenv("REVIEW_DEFAULT_DAYS")
+    if days_str is not None and days_str != "":
+        try:
+            default_days = int(days_str)
+        except ValueError:
+            default_days = 3
+    else:
+        default_days = 3
+
+    chunk_str = os.getenv("REVIEW_DEFAULT_CHUNK_SIZE")
+    if chunk_str is not None and chunk_str != "":
+        try:
+            default_chunk = int(chunk_str)
+        except ValueError:
+            default_chunk = 50
+    else:
+        default_chunk = 50
+
+    return default_limit, default_days, default_chunk
 
 
 def simple_filter_flow():
@@ -724,22 +800,52 @@ def main_menu():
 def run_review_menu():
     import questionary
 
+    default_limit, default_days, default_chunk = _get_review_defaults()
+    limit_text = _format_limit_display(default_limit)
+
     action = questionary.select(
         "Review Unread:",
         choices=[
             questionary.Choice(
-                "Quick Review Stream - one-shot radar preview", value="quick"
+                f"⚡ Quick Review Stream (Global All, Limit: {limit_text}, Recent Days: {default_days})",
+                value="quick_default",
             ),
             questionary.Choice(
-                "Batch Clear Backlog - cached triage loop", value="batch"
+                f"⚡ Quick Batch Clear (Global All, Chunk: {default_chunk}, Recent Days: {default_days})",
+                value="batch_default",
+            ),
+            questionary.Choice(
+                "🛠 Custom Review Stream (Select Stream/Feed, Limit, Days...)",
+                value="quick_custom",
+            ),
+            questionary.Choice(
+                "🛠 Custom Batch Clear Backlog (Select Stream/Feed, Chunk Size, Days...)",
+                value="batch_custom",
             ),
             questionary.Choice("Back", value="back"),
         ],
     ).ask()
 
-    if action == "quick":
+    if not action or action == "back":
+        return
+
+    if action in ("quick_default", "quick_all"):
+        execute_process_stream(
+            stream_id=None,
+            limit=default_limit if default_limit > 0 else 9999,
+            days=default_days,
+            stream_label="Global All",
+        )
+    elif action in ("batch_default", "batch_all"):
+        execute_batch_read(
+            stream_id=None,
+            stream_label="Global All",
+            batch_size=default_chunk,
+            days=default_days,
+        )
+    elif action in ("quick_custom", "quick"):
         run_process_stream_flow()
-    elif action == "batch":
+    elif action in ("batch_custom", "batch"):
         run_batch_read_flow()
 
 
@@ -1119,21 +1225,41 @@ def run_batch_read_flow():
     """Batch reading mode: fetch N articles, AI filter, read, mark, repeat."""
     import questionary
 
-    stream_id, stream_label = select_stream_interactive()
-    if stream_id is None and stream_label is None:
-        return
+    _, default_days, default_chunk = _get_review_defaults()
 
-    batch_str = questionary.text("LLM Chunk Size:", default="50").ask()
+    use_stream = questionary.confirm(
+        "Select specific Category/Feed?", default=False
+    ).ask()
+    if use_stream:
+        stream_id, stream_label = select_stream_interactive()
+        if stream_id is None and stream_label is None:
+            return
+    else:
+        stream_id = None
+        stream_label = "Global (All)"
+
+    batch_str = questionary.text("LLM Chunk Size:", default=str(default_chunk)).ask()
     try:
         batch_size = int(batch_str)
     except ValueError:
-        batch_size = 50
+        batch_size = default_chunk
 
-    days_str = questionary.text("Recent Days:", default="3").ask()
+    days_str = questionary.text("Recent Days:", default=str(default_days)).ask()
     try:
         days = int(days_str)
     except ValueError:
-        days = 3
+        days = default_days
+
+    execute_batch_read(
+        stream_id,
+        stream_label=stream_label,
+        batch_size=batch_size,
+        days=days,
+    )
+
+
+def execute_batch_read(stream_id, stream_label=None, batch_size=50, days=3):
+    import questionary
 
     display_stream = stream_label if stream_label else (stream_id or "Global (All)")
     console.print(
@@ -1250,23 +1376,43 @@ def run_batch_read_flow():
 def run_process_stream_flow():
     import questionary
 
-    stream_id, stream_label = select_stream_interactive()
-    if stream_id is None and stream_label is None:
-        return
+    default_limit, default_days, _ = _get_review_defaults()
 
-    limit_str = questionary.text("Fetch Limit:", default="500").ask()
-    try:
-        limit = int(limit_str)
-    except ValueError:
-        limit = 500
+    use_stream = questionary.confirm(
+        "Select specific Category/Feed?", default=False
+    ).ask()
+    if use_stream:
+        stream_id, stream_label = select_stream_interactive()
+        if stream_id is None and stream_label is None:
+            return
+    else:
+        stream_id = None
+        stream_label = "Global (All)"
 
-    days_str = questionary.text("Recent Days:", default="3").ask()
+    limit_default_str = "0" if default_limit <= 0 else str(default_limit)
+    limit_str = questionary.text(
+        "Fetch Limit (0 or 'all' for full unread):", default=limit_default_str
+    ).ask()
+    if not limit_str or limit_str.strip().lower() in ("all", "0", "full"):
+        limit = 0
+    else:
+        try:
+            limit = int(limit_str)
+        except ValueError:
+            limit = default_limit
+
+    days_str = questionary.text("Recent Days:", default=str(default_days)).ask()
     try:
         days = int(days_str)
     except ValueError:
-        days = 3
+        days = default_days
 
-    execute_process_stream(stream_id, limit=limit, days=days, stream_label=stream_label)
+    execute_process_stream(
+        stream_id,
+        limit=limit if limit > 0 else 9999,
+        days=days,
+        stream_label=stream_label,
+    )
 
 
 def execute_process_stream(stream_id, *, limit=500, days=3, stream_label=None):
