@@ -51,6 +51,69 @@
     *   Define shared chat provider keys plus task-scoped models in `.env` (e.g., `OPENAI_BASE_URL`, `ANALYSIS_OPENAI_MODEL`, `SUMMARY_OPENAI_MODEL`).
     *   If semantic search is enabled, configure embedding separately via `EMBEDDING_API_KEY`, `EMBEDDING_BASE_URL`, `EMBEDDING_MODEL`.
 
+### Virtual Environments (Windows vs WSL)
+
+Source code, `pyproject.toml`, and `uv.lock` are shared across Windows and
+WSL, but the virtual environment is **not** — a Windows venv
+(`Scripts/python.exe`) and a Linux venv (`bin/python`, `lib64 -> lib`) are
+incompatible. Do not let one `.venv` serve both. Use explicitly named venvs
+per platform so neither side can clobber or delete the other:
+
+| Platform | Venv path | Interpreter |
+|---|---|---|
+| Windows | `.venv-win/` | `.venv-win/Scripts/python.exe` |
+| WSL/Linux | `.venv-wsl/` | `.venv-wsl/bin/python` |
+
+All three of `.venv/`, `.venv-wsl/`, `.venv-win/` are gitignored. `uv.lock`
+**is** committed; venvs are not.
+
+> The repo historically shipped a Linux-created `.venv/` (its `pyvenv.cfg`
+> points at a Linux interpreter and it only has a `lib64` symlink), which
+> breaks `uv run` on Windows with "access denied" when uv tries to rebuild
+> the symlink. The fix is to stop using the shared `.venv/` name and use the
+> per-platform names above. On WSL, rename the existing `.venv/` to
+> `.venv-wsl/` (or recreate it) so Windows is never tempted to touch it.
+
+#### Windows setup (PowerShell)
+
+```powershell
+$env:UV_PROJECT_ENVIRONMENT=".venv-win"
+uv sync                       # one-time; installs into .venv-win
+uv run python -V              # should print 3.13.x
+uv run python article_analyzer.py --refresh
+uv run python rss_backend_service.py --host 127.0.0.1 --port 8765
+uv run python skills/feedly-readflow/scripts/prepare_packets.py --limit 60
+```
+
+`uv run` reads `UV_PROJECT_ENVIRONMENT` and syncs deps into that venv before
+running, so the bare `.venv/` is never touched. Set it once per shell, or
+persist it in a `.env` / shell profile.
+
+> If `uv` is unavailable, the system Python (3.11+) with the same packages
+> installed globally also works for non-chromadb scripts, but prefer
+> `.venv-win/` so chromadb/opentelemetry versions stay consistent. To build
+> the venv manually without `uv sync`:
+> ```powershell
+> uv venv .venv-win --python 3.13
+> uv pip install --python .venv-win/Scripts/python.exe `
+>   beautifulsoup4 chromadb "httpx[socks]" openai pandas prompt-toolkit `
+>   python-dotenv questionary requests rich socksio streamlit trafilatura
+> ```
+
+#### WSL setup (bash)
+
+```bash
+export UV_PROJECT_ENVIRONMENT=.venv-wsl
+uv sync
+uv run python -V
+```
+
+#### VSCode
+
+When opening via WSL Remote, select `.venv-wsl/bin/python`; when opening
+locally on Windows, select `.venv-win/Scripts/python.exe`. Do not let VSCode
+auto-pick a bare `.venv/` — that is what causes the Windows/WSL mix-up.
+
 ### Usage Commands
 
 *   **Fetch and Analyze (Standard Run):**

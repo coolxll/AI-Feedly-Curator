@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 OPENAI_DEFAULT_BASE_URL = "https://api.openai.com/v1"
 EMBEDDING_DEFAULT_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 EMBEDDING_DEFAULT_MODEL = "text-embedding-v3"
+DEFAULT_OPENAI_USER_AGENT = "AI-Feedly-Curator/0.1"
 OUTPUT_DIR = "output"
 LATEST_UNREAD_FILE = os.path.join(OUTPUT_DIR, "unread_news.json")
 LATEST_ANALYZED_FILE = os.path.join(OUTPUT_DIR, "analyzed_articles_latest.json")
@@ -40,6 +41,7 @@ class EmbeddingConfig:
     api_key: str | None
     base_url: str
     model: str
+    default_headers: dict[str, str]
 
 
 @dataclass(frozen=True)
@@ -190,6 +192,7 @@ def get_openai_task_config(task: str, default_model: str) -> OpenAIConfig:
         default_headers={
             key: value
             for key, value in {
+                "User-Agent": get_config("OPENAI_USER_AGENT", DEFAULT_OPENAI_USER_AGENT),
                 "HTTP-Referer": get_config("OPENAI_HTTP_REFERER"),
                 "X-Title": get_config("OPENAI_X_TITLE"),
             }.items()
@@ -199,6 +202,16 @@ def get_openai_task_config(task: str, default_model: str) -> OpenAIConfig:
 
 
 def build_openai_client_kwargs(config: OpenAIConfig) -> dict:
+    kwargs = {
+        "api_key": config.api_key,
+        "base_url": config.base_url,
+    }
+    if config.default_headers:
+        kwargs["default_headers"] = config.default_headers
+    return kwargs
+
+
+def build_embedding_client_kwargs(config: EmbeddingConfig) -> dict:
     kwargs = {
         "api_key": config.api_key,
         "base_url": config.base_url,
@@ -235,6 +248,17 @@ def get_embedding_config() -> EmbeddingConfig:
             or EMBEDDING_DEFAULT_BASE_URL
         ),
         model=os.getenv("EMBEDDING_MODEL", EMBEDDING_DEFAULT_MODEL),
+        default_headers={
+            key: value
+            for key, value in {
+                "User-Agent": (
+                    os.getenv("EMBEDDING_USER_AGENT")
+                    or os.getenv("OPENAI_USER_AGENT")
+                    or DEFAULT_OPENAI_USER_AGENT
+                ),
+            }.items()
+            if value
+        },
     )
 
 

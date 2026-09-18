@@ -9,6 +9,7 @@ from datetime import datetime
 from typing import List, Dict, Any
 from openai import OpenAI
 from rss_analyzer.config import (
+    build_embedding_client_kwargs,
     get_embedding_config,
     get_vector_store_config,
     is_vector_store_enabled,
@@ -71,7 +72,7 @@ class DashScopeEmbeddingFunction(EmbeddingFunction):
         self.client = None
 
         if self.api_key:
-            self.client = OpenAI(api_key=self.api_key, base_url=self.base_url)
+            self.client = OpenAI(**build_embedding_client_kwargs(embedding_config))
 
     def __call__(self, input: Documents) -> Embeddings:
         if not self.client:

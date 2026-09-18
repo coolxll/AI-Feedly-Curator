@@ -4,7 +4,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from rss_analyzer.vector_store import ChromaVectorStore
+from rss_analyzer.vector_store import ChromaVectorStore, DashScopeEmbeddingFunction
 
 
 class FakeCollection:
@@ -85,6 +85,28 @@ class TestVectorStoreEmbeddingFingerprint(unittest.TestCase):
         fingerprint = mock_write.call_args.args[0]
         self.assertEqual(fingerprint["model"], "embedding-model-b")
         self.assertEqual(fingerprint["base_url"], "https://embedding-b.example/v1")
+
+
+class TestDashScopeEmbeddingFunction(unittest.TestCase):
+    @patch("rss_analyzer.vector_store.OpenAI")
+    def test_openai_client_includes_user_agent_header(self, mock_openai):
+        with patch.dict(
+            os.environ,
+            {
+                "EMBEDDING_API_KEY": "embedding-key",
+                "EMBEDDING_BASE_URL": "https://embedding.example/v1",
+                "EMBEDDING_USER_AGENT": "EmbeddingUA/1.0",
+            },
+            clear=True,
+        ):
+            embedding_fn = DashScopeEmbeddingFunction()
+
+        mock_openai.assert_called_once_with(
+            api_key="embedding-key",
+            base_url="https://embedding.example/v1",
+            default_headers={"User-Agent": "EmbeddingUA/1.0"},
+        )
+        self.assertIsNotNone(embedding_fn.client)
 
 
 class TestVectorStoreRecovery(unittest.TestCase):

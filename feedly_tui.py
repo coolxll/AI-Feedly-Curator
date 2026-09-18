@@ -74,11 +74,20 @@ def _maybe_reexec_in_project_venv() -> None:
         return
     if os.environ.get("RSS_OPML_VENV_REEXEC") == "1":
         return
+    if sys.prefix != sys.base_prefix:
+        return
 
     script_dir = os.path.dirname(os.path.abspath(__file__))
+    venv_name = os.environ.get("UV_PROJECT_ENVIRONMENT")
+    if not venv_name:
+        if sys.platform == "win32":
+            venv_name = ".venv-win" if os.path.exists(os.path.join(script_dir, ".venv-win")) else ".venv"
+        else:
+            venv_name = ".venv-wsl" if os.path.exists(os.path.join(script_dir, ".venv-wsl")) else ".venv"
+
     candidates = [
-        os.path.join(script_dir, ".venv", "Scripts", "python.exe"),  # Windows
-        os.path.join(script_dir, ".venv", "bin", "python"),  # POSIX
+        os.path.join(script_dir, venv_name, "Scripts", "python.exe"),  # Windows
+        os.path.join(script_dir, venv_name, "bin", "python"),  # POSIX
     ]
 
     current = os.path.abspath(sys.executable)
@@ -114,38 +123,66 @@ def simple_menu():
 
     while True:
         console.print("\n[bold]Main Menu:[/bold]")
-        console.print("1. Run Filter")
-        console.print("2. Process Stream")
-        console.print("3. Batch Read")
-        console.print("4. Analyze Articles")
-        console.print("5. Regenerate Summary")
-        console.print("6. Export Articles")
-        console.print("7. Exit")
+        console.print("1. Review Unread")
+        console.print("2. Clean Up Unread")
+        console.print("3. Analyze & Reports")
+        console.print("4. Export Unread JSON")
+        console.print("5. Exit")
 
         choice = get_input("Select an option")
 
-        if choice == "7":
+        if choice == "5":
             console.print("[cyan]Goodbye![/cyan]")
             sys.exit()
         elif choice == "1":
-            simple_filter_flow()
+            simple_review_menu()
         elif choice == "2":
-            simple_process_stream_flow()
+            simple_filter_flow()
         elif choice == "3":
-            run_batch_read_flow()
+            simple_reports_menu()
         elif choice == "4":
-            simple_analyze_flow()
-        elif choice == "5":
-            run_summary_flow()
-        elif choice == "6":
             simple_export_flow()
+        else:
+            console.print("[red]Invalid choice[/red]")
+
+
+def simple_review_menu():
+    while True:
+        console.print("\n[bold]Review Unread:[/bold]")
+        console.print("1. Quick Review Stream")
+        console.print("2. Batch Clear Backlog")
+        console.print("3. Back")
+        choice = get_input("Select an option")
+        if choice == "1":
+            simple_process_stream_flow()
+        elif choice == "2":
+            run_batch_read_flow()
+        elif choice == "3":
+            return
+        else:
+            console.print("[red]Invalid choice[/red]")
+
+
+def simple_reports_menu():
+    while True:
+        console.print("\n[bold]Analyze & Reports:[/bold]")
+        console.print("1. Full Analyze + Report")
+        console.print("2. Summary / Report")
+        console.print("3. Back")
+        choice = get_input("Select an option")
+        if choice == "1":
+            simple_analyze_flow()
+        elif choice == "2":
+            run_summary_flow()
+        elif choice == "3":
+            return
         else:
             console.print("[red]Invalid choice[/red]")
 
 
 def simple_analyze_flow():
     """Fallback analyze flow"""
-    console.print("\n[bold]Analyze Articles Configuration:[/bold]")
+    console.print("\n[bold]Full Analyze + Report Configuration:[/bold]")
 
     limit_str = get_input("Article Limit", default="100")
     try:
@@ -199,7 +236,7 @@ def simple_export_flow():
 
 
 def simple_process_stream_flow():
-    console.print("\n[bold]Process Stream:[/bold]")
+    console.print("\n[bold]Quick Review Stream:[/bold]")
     sid = get_input("Stream ID (Optional, press Enter for Global)", default="")
     stream_id = sid if sid else None
 
@@ -538,6 +575,12 @@ def _verify_startup_dependencies_or_exit() -> None:
             raise SystemExit(1)
 
 
+def _pause_and_render_main_header() -> None:
+    input("\nPress Enter to return to menu...")
+    console.clear()
+    render_main_header()
+
+
 def main_menu():
     """Fancy menu using questionary"""
     try:
@@ -556,12 +599,10 @@ def main_menu():
         action = questionary.select(
             "What would you like to do?",
             choices=[
-                questionary.Choice("Run Filter", value="run"),
-                questionary.Choice("Process Stream", value="process_stream"),
-                questionary.Choice("Batch Read", value="batch_read"),
-                questionary.Choice("Analyze Articles", value="analyze"),
-                questionary.Choice("Regenerate Summary", value="summary"),
-                questionary.Choice("Export Articles", value="export"),
+                questionary.Choice("Review Unread", value="review"),
+                questionary.Choice("Clean Up Unread", value="cleanup"),
+                questionary.Choice("Analyze & Reports", value="reports"),
+                questionary.Choice("Export Unread JSON", value="export"),
                 questionary.Choice("Exit", value="exit"),
             ],
             style=questionary.Style(
@@ -579,36 +620,58 @@ def main_menu():
         if action == "exit":
             console.print("[cyan]Goodbye![/cyan]")
             sys.exit()
-        elif action == "run":
+        elif action == "review":
+            run_review_menu()
+            _pause_and_render_main_header()
+        elif action == "cleanup":
             run_filter_flow()
-            input("\nPress Enter to return to menu...")
-            console.clear()
-            render_main_header()
-        elif action == "process_stream":
-            run_process_stream_flow()
-            input("\nPress Enter to return to menu...")
-            console.clear()
-            render_main_header()
-        elif action == "batch_read":
-            run_batch_read_flow()
-            input("\nPress Enter to return to menu...")
-            console.clear()
-            render_main_header()
-        elif action == "analyze":
-            run_analyze_flow()
-            input("\nPress Enter to return to menu...")
-            console.clear()
-            render_main_header()
-        elif action == "summary":
-            run_summary_flow()
-            input("\nPress Enter to return to menu...")
-            console.clear()
-            render_main_header()
+            _pause_and_render_main_header()
+        elif action == "reports":
+            run_reports_menu()
+            _pause_and_render_main_header()
         elif action == "export":
             run_export_flow()
-            input("\nPress Enter to return to menu...")
-            console.clear()
-            render_main_header()
+            _pause_and_render_main_header()
+
+
+def run_review_menu():
+    import questionary
+
+    action = questionary.select(
+        "Review Unread:",
+        choices=[
+            questionary.Choice(
+                "Quick Review Stream - one-shot radar preview", value="quick"
+            ),
+            questionary.Choice(
+                "Batch Clear Backlog - cached triage loop", value="batch"
+            ),
+            questionary.Choice("Back", value="back"),
+        ],
+    ).ask()
+
+    if action == "quick":
+        run_process_stream_flow()
+    elif action == "batch":
+        run_batch_read_flow()
+
+
+def run_reports_menu():
+    import questionary
+
+    action = questionary.select(
+        "Analyze & Reports:",
+        choices=[
+            questionary.Choice("Full Analyze + Report", value="analyze"),
+            questionary.Choice("Summary / Report", value="summary"),
+            questionary.Choice("Back", value="back"),
+        ],
+    ).ask()
+
+    if action == "analyze":
+        run_analyze_flow()
+    elif action == "summary":
+        run_summary_flow()
 
 
 def run_summary_flow():
@@ -635,9 +698,11 @@ def run_summary_flow():
     mode = questionary.select(
         "Summary Mode:",
         choices=[
-            questionary.Choice("Summarize local analyzed articles", value="local"),
             questionary.Choice(
-                "Refresh from Feedly (analyze & summarize)", value="refresh"
+                "Summarize existing analyzed file", value="local"
+            ),
+            questionary.Choice(
+                "Refresh Feedly, full analyze, then summarize", value="refresh"
             ),
             questionary.Choice("Back", value="back"),
         ],
@@ -837,6 +902,14 @@ def _render_stream_result(result):
             f"skim {stats.get('skim_count', 0)} | "
             f"clear {stats.get('clear_count', 0)}[/dim]"
         )
+        if "llm_chunk_count" in stats:
+            console.print(
+                f"[dim]LLM chunks {stats.get('llm_chunk_count', 0)} "
+                f"(size {stats.get('llm_chunk_size', 0)}) | "
+                f"uncached {stats.get('triage_uncached_count', 0)} | "
+                f"cached {stats.get('triage_cached_count', 0)} | "
+                f"fallback {stats.get('fallback_chunk_count', 0)}[/dim]"
+            )
 
 
 def _open_stream_article(article: dict) -> bool:
@@ -974,7 +1047,7 @@ def run_batch_read_flow():
             f"Stream: {display_stream}\n"
             f"LLM Chunk Size: {batch_size}\n"
             f"Recent Days: {days}",
-            title="Configuration",
+            title="Batch Clear Backlog",
             border_style="cyan",
         )
     )
@@ -1105,7 +1178,7 @@ def execute_process_stream(stream_id, *, limit=500, days=3, stream_label=None):
     display_stream = stream_label if stream_label else (stream_id or "Global (All)")
     console.print(
         Panel(
-            f"Processing Stream\n"
+            f"Quick Review Stream\n"
             f"Stream: {display_stream}\n"
             f"Limit: {limit}\n"
             f"Recent Days: {days}",
@@ -1169,7 +1242,7 @@ def execute_analyze(
     display_stream = stream_label if stream_label else (stream_id or "Global (All)")
     console.print(
         Panel(
-            f"Analyzing Articles\n"
+            f"Full Analyze + Report\n"
             f"Limit: {limit}\n"
             f"Refresh: {refresh}\n"
             f"Stream: {display_stream}\n"

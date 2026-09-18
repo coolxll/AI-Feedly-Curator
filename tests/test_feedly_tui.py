@@ -75,6 +75,48 @@ class TestFeedlyTUI(unittest.TestCase):
         self.assertEqual(stream_id, "feed/http://example.com/rss")
         self.assertEqual(stream_label, "Manual ID: feed/http://example.com/rss")
 
+    def test_run_review_menu_routes_quick_review(self):
+        fake_questionary = types.SimpleNamespace(
+            Choice=_FakeChoice,
+            select=lambda *args, **kwargs: _FakePrompt("quick"),
+        )
+
+        with patch.dict(sys.modules, {"questionary": fake_questionary}):
+            with patch("feedly_tui.run_process_stream_flow") as mock_quick:
+                with patch("feedly_tui.run_batch_read_flow") as mock_batch:
+                    feedly_tui.run_review_menu()
+
+        mock_quick.assert_called_once()
+        mock_batch.assert_not_called()
+
+    def test_run_review_menu_routes_batch_read(self):
+        fake_questionary = types.SimpleNamespace(
+            Choice=_FakeChoice,
+            select=lambda *args, **kwargs: _FakePrompt("batch"),
+        )
+
+        with patch.dict(sys.modules, {"questionary": fake_questionary}):
+            with patch("feedly_tui.run_process_stream_flow") as mock_quick:
+                with patch("feedly_tui.run_batch_read_flow") as mock_batch:
+                    feedly_tui.run_review_menu()
+
+        mock_quick.assert_not_called()
+        mock_batch.assert_called_once()
+
+    def test_run_reports_menu_routes_analyze(self):
+        fake_questionary = types.SimpleNamespace(
+            Choice=_FakeChoice,
+            select=lambda *args, **kwargs: _FakePrompt("analyze"),
+        )
+
+        with patch.dict(sys.modules, {"questionary": fake_questionary}):
+            with patch("feedly_tui.run_analyze_flow") as mock_analyze:
+                with patch("feedly_tui.run_summary_flow") as mock_summary:
+                    feedly_tui.run_reports_menu()
+
+        mock_analyze.assert_called_once()
+        mock_summary.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -12,6 +12,7 @@ from rss_analyzer.backend_service import (
     process_batch,
     process_stream,
 )
+from rss_analyzer.config import PROJ_CONFIG
 
 
 class TestBackendService(unittest.TestCase):
@@ -115,6 +116,19 @@ class TestBackendService(unittest.TestCase):
                 "rec": "可清理",
             },
         }
+        def fill_triage_stats(_articles, _batch_size, stats=None):
+            if stats is not None:
+                stats.update(
+                    {
+                        "triage_cached_count": 0,
+                        "triage_uncached_count": 2,
+                        "llm_chunk_count": 2,
+                        "fallback_chunk_count": 0,
+                        "llm_chunk_size": 1,
+                    }
+                )
+            return mock_batch_triage.return_value
+        mock_batch_triage.side_effect = fill_triage_stats
         mock_deep_analyze.return_value = []
 
         result = process_batch(stream_id="feed/all", batch_size=1, days=3)
@@ -126,6 +140,8 @@ class TestBackendService(unittest.TestCase):
         mock_batch_triage.assert_called_once()
         self.assertEqual(mock_batch_triage.call_args.args[1], 1)
         self.assertEqual(result["digest"]["stats"]["p2_count"], 1)
+        self.assertEqual(result["digest"]["stats"]["llm_chunk_count"], 2)
+        self.assertEqual(result["digest"]["stats"]["triage_uncached_count"], 2)
         self.assertEqual(result["digest"]["p2_briefing"]["must_read"][0]["id"], "p2-1")
         self.assertEqual(result["mark_read_candidates"], ["tech-1"])
 
@@ -312,7 +328,7 @@ class TestBackendService(unittest.TestCase):
 
         self.assertTrue(response["success"])
         mock_analyze_articles.assert_called_once_with(
-            input_file="output\\unread_news.json",
+            input_file=PROJ_CONFIG["input_file"],
             limit=10,
             mark_read=True,
             refresh=False,

@@ -7,10 +7,12 @@ import unittest
 from unittest.mock import patch
 
 from rss_analyzer.config import (
+    DEFAULT_OPENAI_USER_AGENT,
     EMBEDDING_DEFAULT_BASE_URL,
     EMBEDDING_DEFAULT_MODEL,
     OPENAI_DEFAULT_BASE_URL,
     PROJ_CONFIG,
+    build_embedding_client_kwargs,
     build_openai_client_kwargs,
     get_config,
     get_embedding_config,
@@ -62,6 +64,7 @@ class TestConfig(unittest.TestCase):
             self.assertEqual(
                 config.default_headers,
                 {
+                    "User-Agent": DEFAULT_OPENAI_USER_AGENT,
                     "HTTP-Referer": "https://github.com/example/project",
                     "X-Title": "rss-opml",
                 },
@@ -73,7 +76,7 @@ class TestConfig(unittest.TestCase):
             self.assertIsNone(config.api_key)
             self.assertEqual(config.base_url, OPENAI_DEFAULT_BASE_URL)
             self.assertEqual(config.model, "fallback-model")
-            self.assertEqual(config.default_headers, {})
+            self.assertEqual(config.default_headers, {"User-Agent": DEFAULT_OPENAI_USER_AGENT})
 
     def test_get_openai_task_config_ignores_task_specific_key_and_base_url(self):
         with patch.dict(
@@ -92,7 +95,7 @@ class TestConfig(unittest.TestCase):
             self.assertEqual(config.base_url, "https://shared.example/v1")
             self.assertEqual(config.model, "summary-model")
 
-    def test_build_openai_client_kwargs_omits_headers_when_empty(self):
+    def test_build_openai_client_kwargs_includes_default_user_agent(self):
         with patch.dict(os.environ, {}, clear=True):
             config = get_openai_task_config("summary", default_model="fallback-model")
             kwargs = build_openai_client_kwargs(config)
@@ -101,8 +104,14 @@ class TestConfig(unittest.TestCase):
                 {
                     "api_key": None,
                     "base_url": OPENAI_DEFAULT_BASE_URL,
+                    "default_headers": {"User-Agent": DEFAULT_OPENAI_USER_AGENT},
                 },
             )
+
+    def test_get_openai_task_config_allows_user_agent_override(self):
+        with patch.dict(os.environ, {"OPENAI_USER_AGENT": "CustomUA/1.0"}, clear=True):
+            config = get_openai_task_config("summary", default_model="fallback-model")
+            self.assertEqual(config.default_headers["User-Agent"], "CustomUA/1.0")
 
     def test_get_embedding_config_prefers_embedding_specific_settings(self):
         with patch.dict(
@@ -120,6 +129,28 @@ class TestConfig(unittest.TestCase):
             self.assertEqual(config.api_key, "embedding-key")
             self.assertEqual(config.base_url, "https://embedding.example/v1")
             self.assertEqual(config.model, "embedding-model")
+            self.assertEqual(config.default_headers, {"User-Agent": DEFAULT_OPENAI_USER_AGENT})
+
+    def test_embedding_client_kwargs_include_user_agent(self):
+        with patch.dict(
+            os.environ,
+            {
+                "EMBEDDING_API_KEY": "embedding-key",
+                "EMBEDDING_BASE_URL": "https://embedding.example/v1",
+                "EMBEDDING_USER_AGENT": "EmbeddingUA/1.0",
+            },
+            clear=True,
+        ):
+            config = get_embedding_config()
+            kwargs = build_embedding_client_kwargs(config)
+            self.assertEqual(
+                kwargs,
+                {
+                    "api_key": "embedding-key",
+                    "base_url": "https://embedding.example/v1",
+                    "default_headers": {"User-Agent": "EmbeddingUA/1.0"},
+                },
+            )
 
     def test_get_embedding_config_does_not_fall_back_to_openai_base_url(self):
         with patch.dict(

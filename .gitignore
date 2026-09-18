@@ -7,6 +7,8 @@ __pycache__/
 env/
 venv/
 .venv/
+.venv-wsl/
+.venv-win/
 ENV/
 build/
 develop-eggs/
@@ -42,6 +44,8 @@ unread_news.json
 articles_summary.md
 rss-summary-*.md
 output/
+feedly_final_report.md
+tmp/readflow/
 
 # Claude skills
 .claude/
