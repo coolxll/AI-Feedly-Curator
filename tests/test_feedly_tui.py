@@ -117,6 +117,43 @@ class TestFeedlyTUI(unittest.TestCase):
         mock_analyze.assert_called_once()
         mock_summary.assert_not_called()
 
+    def test_run_reports_menu_routes_quick_analyze(self):
+        fake_questionary = types.SimpleNamespace(
+            Choice=_FakeChoice,
+            select=lambda *args, **kwargs: _FakePrompt("quick_analyze"),
+        )
+
+        with patch.dict(sys.modules, {"questionary": fake_questionary}):
+            with patch("feedly_tui.execute_analyze") as mock_exec:
+                feedly_tui.run_reports_menu()
+
+        mock_exec.assert_called_once_with(
+            limit=100, refresh=True, mark_read=False, stream_id=None, threads=3
+        )
+
+    def test_run_filter_flow_quick_all_executes_with_defaults(self):
+        fake_questionary = types.SimpleNamespace(
+            Choice=_FakeChoice,
+            select=lambda *args, **kwargs: _FakePrompt("quick_all"),
+        )
+
+        with patch.dict(sys.modules, {"questionary": fake_questionary}):
+            with patch.dict(
+                "os.environ",
+                {
+                    "CLEANUP_DEFAULT_LIMIT": "999",
+                    "CLEANUP_DEFAULT_THRESHOLD": "3.0",
+                    "CLEANUP_DEFAULT_MARK_READ": "true",
+                },
+                clear=False,
+            ):
+                with patch("feedly_tui.execute_filter") as mock_filter:
+                    feedly_tui.run_filter_flow()
+
+        mock_filter.assert_called_once_with(
+            "all", 999, 3.0, False, True
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -166,15 +166,20 @@ def simple_review_menu():
 def simple_reports_menu():
     while True:
         console.print("\n[bold]Analyze & Reports:[/bold]")
-        console.print("1. Full Analyze + Report")
-        console.print("2. Summary / Report")
-        console.print("3. Back")
-        choice = get_input("Select an option")
+        console.print("1. Quick Full Analyze (Limit: 100, Refresh: Yes, Threads: 3)")
+        console.print("2. Custom Full Analyze + Report")
+        console.print("3. Summary / Report")
+        console.print("4. Back")
+        choice = get_input("Select an option", default="1")
         if choice == "1":
-            simple_analyze_flow()
+            execute_analyze(
+                limit=100, refresh=True, mark_read=False, stream_id=None, threads=3
+            )
         elif choice == "2":
-            run_summary_flow()
+            simple_analyze_flow()
         elif choice == "3":
+            run_summary_flow()
+        elif choice == "4":
             return
         else:
             console.print("[red]Invalid choice[/red]")
@@ -322,49 +327,120 @@ def execute_export(limit, stream_id, filename, stream_label=None):
         console.print("[red]Export failed.[/red]")
 
 
+def _get_cleanup_defaults() -> tuple[int, float, bool]:
+    limit_str = os.getenv("CLEANUP_DEFAULT_LIMIT")
+    if limit_str:
+        try:
+            default_limit = int(limit_str)
+        except ValueError:
+            default_limit = 1000
+    else:
+        default_limit = 1000
+
+    thresh_str = os.getenv("CLEANUP_DEFAULT_THRESHOLD")
+    if thresh_str:
+        try:
+            default_threshold = float(thresh_str)
+        except ValueError:
+            default_threshold = 3.0
+    else:
+        default_threshold = 3.0
+
+    env_mark = os.getenv("CLEANUP_DEFAULT_MARK_READ")
+    if env_mark is not None:
+        default_mark_read = env_mark.strip().lower() in ("1", "true", "yes", "on")
+    else:
+        default_mark_read = True
+
+    return default_limit, default_threshold, default_mark_read
+
+
 def simple_filter_flow():
     """Fallback filter flow"""
-    console.print("\n[bold]Select Filter Mode:[/bold]")
-    console.print("1. All Filters (Newsflash + Low Score)")
-    console.print("2. Newsflash Only")
-    console.print("3. Low Score Only")
-    console.print("4. Back")
+    default_limit, default_threshold, default_mark_read = _get_cleanup_defaults()
+    mark_text = "Yes" if default_mark_read else "No"
+    console.print("\n[bold]Clean Up Unread:[/bold]")
+    console.print(
+        f"1. Quick Clean: All Filters (Limit: {default_limit}, Score < {default_threshold}, Mark Read: {mark_text})"
+    )
+    console.print(
+        f"2. Quick Clean: Newsflash Only (Limit: {default_limit}, Mark Read: {mark_text})"
+    )
+    console.print(
+        f"3. Quick Clean: Low Score Only (Limit: {default_limit}, Score < {default_threshold}, Mark Read: {mark_text})"
+    )
+    console.print("4. Custom Configuration")
+    console.print("5. Back")
 
-    choice = get_input("Select mode")
+    choice = get_input("Select an option", default="1")
 
-    mode = "all"
     if choice == "1":
-        mode = "all"
-    elif choice == "2":
-        mode = "newsflash"
-    elif choice == "3":
-        mode = "low-score"
-    elif choice == "4":
+        execute_filter(
+            "all", default_limit, default_threshold, False, mark_read=default_mark_read
+        )
         return
-    else:
-        console.print("[red]Invalid mode, defaulting to All[/red]")
+    elif choice == "2":
+        execute_filter(
+            "newsflash",
+            default_limit,
+            default_threshold,
+            False,
+            mark_read=default_mark_read,
+        )
+        return
+    elif choice == "3":
+        execute_filter(
+            "low-score",
+            default_limit,
+            default_threshold,
+            False,
+            mark_read=default_mark_read,
+        )
+        return
+    elif choice == "5":
+        return
+    elif choice == "4":
+        console.print("\n[bold]Select Filter Mode:[/bold]")
+        console.print("1. All Filters (Newsflash + Low Score)")
+        console.print("2. Newsflash Only")
+        console.print("3. Low Score Only")
+        console.print("4. Back")
 
-    limit_str = get_input("Article Limit", default="500")
-    try:
-        limit = int(limit_str)
-    except ValueError:
-        limit = 500
+        m_choice = get_input("Select mode", default="1")
+        if m_choice == "1":
+            mode = "all"
+        elif m_choice == "2":
+            mode = "newsflash"
+        elif m_choice == "3":
+            mode = "low-score"
+        else:
+            return
 
-    threshold = 3.0
-    if mode in ["all", "low-score"]:
-        t_str = get_input("Score Threshold", default="3.0")
+        limit_str = get_input("Article Limit", default=str(default_limit))
         try:
-            threshold = float(t_str)
+            limit = int(limit_str)
         except ValueError:
-            threshold = 3.0
+            limit = default_limit
 
-    dr_str = get_input("Dry Run? (y/n)", default="n")
-    dry_run = dr_str.lower().startswith("y")
+        threshold = default_threshold
+        if mode in ["all", "low-score"]:
+            t_str = get_input("Score Threshold", default=str(default_threshold))
+            try:
+                threshold = float(t_str)
+            except ValueError:
+                threshold = default_threshold
 
-    mark_read_str = get_input("Mark as read? (y/n)", default="n")
-    mark_read = mark_read_str.lower().startswith("y")
+        dr_str = get_input("Dry Run? (y/n)", default="n")
+        dry_run = dr_str.lower().startswith("y")
 
-    execute_filter(mode, limit, threshold, dry_run, mark_read=mark_read)
+        mark_read_str = get_input(
+            "Mark as read? (y/n)", default="y" if default_mark_read else "n"
+        )
+        mark_read = mark_read_str.lower().startswith("y")
+
+        execute_filter(mode, limit, threshold, dry_run, mark_read=mark_read)
+    else:
+        console.print("[red]Invalid choice[/red]")
 
 
 def select_stream_interactive():
@@ -662,13 +738,21 @@ def run_reports_menu():
     action = questionary.select(
         "Analyze & Reports:",
         choices=[
-            questionary.Choice("Full Analyze + Report", value="analyze"),
+            questionary.Choice(
+                "⚡ Quick Full Analyze (Limit: 100, Refresh: Yes, All Feeds, Threads: 3)",
+                value="quick_analyze",
+            ),
+            questionary.Choice("🛠 Custom Full Analyze + Report...", value="analyze"),
             questionary.Choice("Summary / Report", value="summary"),
             questionary.Choice("Back", value="back"),
         ],
     ).ask()
 
-    if action == "analyze":
+    if action == "quick_analyze":
+        execute_analyze(
+            limit=100, refresh=True, mark_read=False, stream_id=None, threads=3
+        )
+    elif action == "analyze":
         run_analyze_flow()
     elif action == "summary":
         run_summary_flow()
@@ -1343,7 +1427,53 @@ def execute_filter(
 def run_filter_flow():
     import questionary
 
-    # 1. Select Mode
+    default_limit, default_threshold, default_mark_read = _get_cleanup_defaults()
+    mark_text = "Yes" if default_mark_read else "No"
+
+    # 1. Select Mode or Quick Run
+    action = questionary.select(
+        "Clean Up Unread:",
+        choices=[
+            questionary.Choice(
+                f"⚡ Quick Clean: All Filters (Limit: {default_limit}, Score < {default_threshold}, Mark Read: {mark_text})",
+                value="quick_all",
+            ),
+            questionary.Choice(
+                f"⚡ Quick Clean: Newsflash Only (Limit: {default_limit}, Mark Read: {mark_text})",
+                value="quick_newsflash",
+            ),
+            questionary.Choice(
+                f"⚡ Quick Clean: Low Score Only (Limit: {default_limit}, Score < {default_threshold}, Mark Read: {mark_text})",
+                value="quick_low_score",
+            ),
+            questionary.Choice(
+                "🛠 Custom Configuration (Customize Limit, Threshold, Stream, Dry-Run...)",
+                value="custom",
+            ),
+            questionary.Choice("Back", value="back"),
+        ],
+    ).ask()
+
+    if not action or action == "back":
+        return
+
+    if action == "quick_all":
+        execute_filter(
+            "all", default_limit, default_threshold, False, default_mark_read
+        )
+        return
+    elif action == "quick_newsflash":
+        execute_filter(
+            "newsflash", default_limit, default_threshold, False, default_mark_read
+        )
+        return
+    elif action == "quick_low_score":
+        execute_filter(
+            "low-score", default_limit, default_threshold, False, default_mark_read
+        )
+        return
+
+    # If "custom", select filter mode then prompt parameters
     mode = questionary.select(
         "Select Filter Mode:",
         choices=[
@@ -1354,31 +1484,33 @@ def run_filter_flow():
         ],
     ).ask()
 
-    if mode == "back":
+    if not mode or mode == "back":
         return
 
-    # 2. Configure Parameters
-    limit_str = questionary.text("Article Limit:", default="500").ask()
+    # Configure Parameters
+    limit_str = questionary.text("Article Limit:", default=str(default_limit)).ask()
     try:
         limit = int(limit_str)
     except ValueError:
-        console.print("[red]Invalid limit, using default 500[/red]")
-        limit = 500
+        console.print(f"[red]Invalid limit, using default {default_limit}[/red]")
+        limit = default_limit
 
-    threshold = 3.0
+    threshold = default_threshold
     if mode in ["all", "low-score"]:
-        threshold_str = questionary.text("Score Threshold:", default="3.0").ask()
+        threshold_str = questionary.text(
+            "Score Threshold:", default=str(default_threshold)
+        ).ask()
         try:
             threshold = float(threshold_str)
         except ValueError:
-            console.print("[red]Invalid threshold, using default 3.0[/red]")
-            threshold = 3.0
+            console.print(f"[red]Invalid threshold, using default {default_threshold}[/red]")
+            threshold = default_threshold
 
     dry_run = questionary.confirm(
         "Dry Run? (Simulate only, no changes)", default=False
     ).ask()
 
-    # 4. Stream Selection
+    # Stream Selection
     stream_id = None
     stream_label = None
     use_stream = questionary.confirm(
@@ -1387,9 +1519,9 @@ def run_filter_flow():
     if use_stream:
         stream_id, stream_label = select_stream_interactive()
 
-    # 3. Execution
+    # Execution
     mark_read = questionary.confirm(
-        "Mark as read after filter?", default=PROJ_CONFIG.get("mark_read", False)
+        "Mark as read after filter?", default=default_mark_read
     ).ask()
 
     execute_filter(mode, limit, threshold, dry_run, mark_read, stream_id, stream_label)
