@@ -539,6 +539,83 @@ class TestBackendService(unittest.TestCase):
         self.assertEqual(result.label, "low-score")
         mock_feedly_mark_read.assert_not_called()
 
+    @patch("rss_analyzer.backend_service.feedly_mark_read", return_value=True)
+    @patch("rss_analyzer.backend_service.get_cached_score")
+    def test_low_score_filter_incremental_mark_batches(
+        self, mock_get_cached_score, mock_feedly_mark_read
+    ):
+        from rss_analyzer.backend_service import low_score_filter
+
+        mock_get_cached_score.side_effect = [
+            {"score": 1.5},
+            {"score": 2.0},
+            {"score": 1.8},
+            {"score": 2.2},
+            {"score": 1.0},
+        ]
+        articles = [{"id": f"article-{i}", "title": f"Article {i}"} for i in range(1, 6)]
+
+        result = low_score_filter(
+            articles,
+            threshold=3.0,
+            dry_run=False,
+            mark_read=True,
+            incremental_mark=True,
+            mark_batch_size=2,
+        )
+
+        self.assertEqual(len(result.matched), 5)
+        self.assertEqual(len(result.remaining), 0)
+        self.assertEqual(result.marked_ids, {f"article-{i}" for i in range(1, 6)})
+        self.assertEqual(mock_feedly_mark_read.call_count, 3)
+        mock_feedly_mark_read.assert_any_call(["article-1", "article-2"])
+        mock_feedly_mark_read.assert_any_call(["article-3", "article-4"])
+        mock_feedly_mark_read.assert_any_call(["article-5"])
+
+    @patch("rss_analyzer.backend_service.feedly_mark_read")
+    @patch("rss_analyzer.backend_service.get_cached_score")
+    def test_low_score_filter_incremental_mark_dry_run(
+        self, mock_get_cached_score, mock_feedly_mark_read
+    ):
+        from rss_analyzer.backend_service import low_score_filter
+
+        mock_get_cached_score.return_value = {"score": 2.0}
+        articles = [{"id": "article-1", "title": "Article 1"}]
+
+        result = low_score_filter(
+            articles,
+            threshold=3.0,
+            dry_run=True,
+            mark_read=True,
+            incremental_mark=True,
+            mark_batch_size=1,
+        )
+
+        self.assertEqual(len(result.matched), 1)
+        self.assertEqual(len(result.marked_ids), 0)
+        mock_feedly_mark_read.assert_not_called()
+
+    @patch("rss_analyzer.backend_service.feedly_mark_read")
+    def test_run_filter_pipeline_skips_already_marked(self, mock_feedly_mark_read):
+        from rss_analyzer.backend_service import FilterResult, run_filter_pipeline
+
+        articles = [
+            {"id": "article-1", "title": "Article 1"},
+            {"id": "article-2", "title": "Article 2"},
+        ]
+        dummy_filter = lambda items: FilterResult(
+            matched=[{"id": "article-1"}],
+            remaining=[{"id": "article-2"}],
+            label="low-score",
+            marked_ids={"article-1"},
+        )
+
+        result = run_filter_pipeline(articles, [dummy_filter], dry_run=False, mark_read=True)
+        self.assertTrue(result["success"])
+        self.assertEqual(result["filtered_count"], 1)
+        self.assertEqual(result["remaining_count"], 1)
+        mock_feedly_mark_read.assert_not_called()
+
     @patch("rss_analyzer.backend_service.run_filter_pipeline")
     @patch("rss_analyzer.backend_service.fetch_filter_articles")
     def test_run_filter_workflow_defaults_newsflash_to_36kr(

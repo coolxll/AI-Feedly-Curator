@@ -112,6 +112,8 @@ PROJ_CONFIG = {
     },
     "relevance_threshold": 2.5,
     "auto_mark_read_threshold": 0,  # 0=disabled; articles scoring below this are auto-marked read
+    "incremental_mark": True,
+    "filter_mark_batch_size": 20,
 }
 
 TRUTHY_VALUES = {"1", "true", "yes", "on"}

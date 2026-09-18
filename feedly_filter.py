@@ -47,6 +47,19 @@ def main():
         "--stream-label", help="Optional display label for process-stream"
     )
     parser.add_argument(
+        "--no-incremental-mark",
+        dest="incremental_mark",
+        action="store_false",
+        default=PROJ_CONFIG.get("incremental_mark", True),
+        help="Disable progressive/incremental mark-as-read during scoring",
+    )
+    parser.add_argument(
+        "--mark-batch-size",
+        type=int,
+        default=int(PROJ_CONFIG.get("filter_mark_batch_size", 20)),
+        help="Batch size for progressive mark-as-read (default: 20)",
+    )
+    parser.add_argument(
         "--export-markdown",
         action="store_true",
         help="Persist process-stream overview markdown",
@@ -92,6 +105,8 @@ def main():
         dry_run=args.dry_run,
         mark_read=args.mark_read,
         stream_id=args.stream_id,
+        incremental_mark=args.incremental_mark,
+        mark_batch_size=args.mark_batch_size,
     )
     if result.get("error"):
         logger.error(result["message"])

@@ -9,8 +9,9 @@ import json
 import logging
 import os
 from datetime import datetime
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Callable
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 os.environ.setdefault("RSS_SCORES_DB", str(PROJECT_ROOT / "rss_scores.db"))
@@ -66,6 +67,7 @@ class FilterResult:
     matched: list
     remaining: list
     label: str
+    marked_ids: set[str] = field(default_factory=set)
 
 
 def _chunked(items: list[dict], size: int) -> list[list[dict]]:
@@ -791,7 +793,19 @@ def run_filter_pipeline(
             break
 
         result = filter_func(remaining)
-        mark_filter_results_as_read(result.matched, result.label, dry_run, mark_read)
+        already_marked = getattr(result, "marked_ids", set())
+        unmarked = [a for a in result.matched if a.get("id") not in already_marked]
+        if unmarked:
+            mark_filter_results_as_read(unmarked, result.label, dry_run, mark_read)
+        elif result.matched and dry_run:
+            mark_filter_results_as_read(result.matched, result.label, dry_run, mark_read)
+        elif result.matched and mark_read:
+            logger.info(
+                "All %s %s articles were marked as read progressively",
+                len(result.matched),
+                result.label,
+            )
+
         total_matched += len(result.matched)
         steps.append(
             {
@@ -860,6 +874,8 @@ def _handle_scored_filter_article(
     matched: list,
     remaining: list,
     mark_read: bool,
+    unmarked_buffer: list[str] | None = None,
+    on_matched: Callable[[], None] | None = None,
 ) -> None:
     title_str = article.get("title", "Unknown Title")
     if score < 0:
@@ -873,6 +889,10 @@ def _handle_scored_filter_article(
         else:
             logger.info("%s Score %.1f <= %.1f, mark_read disabled", prefix, score, threshold)
         matched.append({**article, "_score": score})
+        if unmarked_buffer is not None and article.get("id"):
+            unmarked_buffer.append(article["id"])
+            if on_matched:
+                on_matched()
     else:
         logger.info("%s Result: kept %s (%.1f)", prefix, title_str, score)
         remaining.append(article)
@@ -883,12 +903,51 @@ def low_score_filter(
     threshold: float = 3.0,
     dry_run: bool = False,
     mark_read: bool = True,
+    incremental_mark: bool = False,
+    mark_batch_size: int = 20,
 ) -> FilterResult:
     matched = []
     remaining = []
+    marked_ids: set[str] = set()
+    unmarked_buffer: list[str] = []
+    effective_batch_size = max(1, mark_batch_size)
     batch_scoring = PROJ_CONFIG.get("batch_scoring", False)
     batch_size = max(1, int(PROJ_CONFIG.get("batch_size", 1)))
     batch_queue = []
+
+    def flush_incremental_mark() -> None:
+        nonlocal unmarked_buffer
+        if not unmarked_buffer or not mark_read or dry_run or not incremental_mark:
+            return
+        batch_to_mark = [aid for aid in unmarked_buffer if aid]
+        if not batch_to_mark:
+            unmarked_buffer = []
+            return
+        logger.info(
+            "Progressively marking %s low-score articles as read on Feedly (%s already marked)...",
+            len(batch_to_mark),
+            len(marked_ids),
+        )
+        try:
+            if feedly_mark_read(batch_to_mark):
+                marked_ids.update(batch_to_mark)
+                logger.info(
+                    "Progressively marked %s low-score articles as read on Feedly (total marked: %s)",
+                    len(batch_to_mark),
+                    len(marked_ids),
+                )
+            else:
+                logger.error(
+                    "Feedly mark-as-read returned failure for %s articles; will retry at end of pipeline",
+                    len(batch_to_mark),
+                )
+        except Exception as exc:
+            logger.error("Exception during progressive mark-as-read: %s", exc)
+        unmarked_buffer = []
+
+    def check_and_flush_incremental() -> None:
+        if len(unmarked_buffer) >= effective_batch_size:
+            flush_incremental_mark()
 
     def flush_batch() -> None:
         nonlocal batch_queue
@@ -909,6 +968,8 @@ def low_score_filter(
                 matched,
                 remaining,
                 mark_read,
+                unmarked_buffer=unmarked_buffer if (incremental_mark and mark_read and not dry_run) else None,
+                on_matched=check_and_flush_incremental,
             )
         batch_queue = []
 
@@ -933,6 +994,8 @@ def low_score_filter(
                 matched,
                 remaining,
                 mark_read,
+                unmarked_buffer=unmarked_buffer if (incremental_mark and mark_read and not dry_run) else None,
+                on_matched=check_and_flush_incremental,
             )
             continue
 
@@ -961,17 +1024,23 @@ def low_score_filter(
                 matched,
                 remaining,
                 mark_read,
+                unmarked_buffer=unmarked_buffer if (incremental_mark and mark_read and not dry_run) else None,
+                on_matched=check_and_flush_incremental,
             )
 
     if batch_scoring and batch_queue:
         flush_batch()
 
+    if incremental_mark and mark_read and not dry_run:
+        flush_incremental_mark()
+
     logger.info(
-        "Low-score filter matched %s articles and kept %s",
+        "Low-score filter matched %s articles (progressively marked: %s) and kept %s",
         len(matched),
+        len(marked_ids),
         len(remaining),
     )
-    return FilterResult(matched, remaining, "low-score")
+    return FilterResult(matched, remaining, "low-score", marked_ids=marked_ids)
 
 
 def run_filter_workflow(
@@ -982,8 +1051,15 @@ def run_filter_workflow(
     dry_run: bool = False,
     mark_read: bool = False,
     stream_id: str | None = None,
+    incremental_mark: bool = True,
+    mark_batch_size: int | None = None,
 ) -> dict:
     target_stream = stream_id
+    batch_mark_size = (
+        mark_batch_size
+        if mark_batch_size is not None
+        else int(PROJ_CONFIG.get("filter_mark_batch_size", 20))
+    )
 
     if mode == "newsflash":
         if not target_stream:
@@ -993,13 +1069,27 @@ def run_filter_workflow(
     elif mode == "low-score":
         articles = fetch_filter_articles(limit, stream_id=target_stream)
         filters = [
-            lambda items: low_score_filter(items, threshold, dry_run, mark_read)
+            lambda items: low_score_filter(
+                items,
+                threshold=threshold,
+                dry_run=dry_run,
+                mark_read=mark_read,
+                incremental_mark=incremental_mark,
+                mark_batch_size=batch_mark_size,
+            )
         ]
     else:
         articles = fetch_filter_articles(limit, stream_id=target_stream)
         filters = [
             newsflash_filter,
-            lambda items: low_score_filter(items, threshold, dry_run, mark_read),
+            lambda items: low_score_filter(
+                items,
+                threshold=threshold,
+                dry_run=dry_run,
+                mark_read=mark_read,
+                incremental_mark=incremental_mark,
+                mark_batch_size=batch_mark_size,
+            ),
         ]
 
     if not articles:
@@ -1022,6 +1112,7 @@ def run_filter_workflow(
         "threshold": threshold,
         "dry_run": dry_run,
         "mark_read": mark_read,
+        "incremental_mark": incremental_mark,
     }
 
 
@@ -1961,14 +2052,19 @@ def _handle_generate_daily_digest(msg: dict) -> dict:
 
 
 def _handle_run_filters(msg: dict) -> dict:
-    return run_filter_workflow(
-        mode=msg.get("mode", "all"),
-        limit=int(msg.get("limit", 1000)),
-        threshold=float(msg.get("threshold", 3.0)),
-        dry_run=_coerce_bool(msg.get("dry_run"), False),
-        mark_read=_coerce_bool(msg.get("mark_read"), PROJ_CONFIG["mark_read"]),
-        stream_id=msg.get("stream_id"),
-    )
+    kwargs = {
+        "mode": msg.get("mode", "all"),
+        "limit": int(msg.get("limit", 1000)),
+        "threshold": float(msg.get("threshold", 3.0)),
+        "dry_run": _coerce_bool(msg.get("dry_run"), False),
+        "mark_read": _coerce_bool(msg.get("mark_read"), PROJ_CONFIG["mark_read"]),
+        "stream_id": msg.get("stream_id"),
+    }
+    if "incremental_mark" in msg:
+        kwargs["incremental_mark"] = _coerce_bool(msg["incremental_mark"], True)
+    if "mark_batch_size" in msg and msg["mark_batch_size"] is not None:
+        kwargs["mark_batch_size"] = int(msg["mark_batch_size"])
+    return run_filter_workflow(**kwargs)
 
 
 def _handle_process_stream(msg: dict) -> dict:
