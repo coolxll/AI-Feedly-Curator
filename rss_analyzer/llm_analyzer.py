@@ -10,8 +10,11 @@ import traceback
 
 from openai import OpenAI
 
-from .config import get_openai_task_config
-from .config import build_openai_client_kwargs
+from .config import (
+    build_chat_completion_kwargs,
+    build_openai_client_kwargs,
+    get_openai_task_config,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -158,12 +161,14 @@ Output Format: Markdown.
 """
 
         response = client.chat.completions.create(
-            model=openai_config.model,
-            messages=[
-                {"role": "system", "content": prompt},
-                {"role": "user", "content": f"Article Content:\n\n{text}"},
-            ],
-            temperature=0.5,
+            **build_chat_completion_kwargs(
+                openai_config,
+                messages=[
+                    {"role": "system", "content": prompt},
+                    {"role": "user", "content": f"Article Content:\n\n{text}"},
+                ],
+                temperature=0.5,
+            )
         )
 
         content = response.choices[0].message.content
@@ -280,10 +285,12 @@ def generate_overall_summary(analyzed_articles: list) -> str:
 
         print("正在发送请求到 OpenAI API...")
         response = client.chat.completions.create(
-            model=openai_config.model,
-            messages=[{"role": "user", "content": prompt}],
-            extra_body=extra_body,
-            temperature=temperature,
+            **build_chat_completion_kwargs(
+                openai_config,
+                messages=[{"role": "user", "content": prompt}],
+                extra_body=extra_body,
+                temperature=temperature,
+            )
         )
 
         print(f"\n{'=' * 60}")

@@ -34,6 +34,7 @@ class OpenAIConfig:
     base_url: str
     model: str
     default_headers: dict[str, str]
+    reasoning_effort: str | None = None
 
 
 @dataclass(frozen=True)
@@ -185,6 +186,11 @@ def get_openai_task_config(task: str, default_model: str) -> OpenAIConfig:
     - API key 和 base URL 统一使用全局 OPENAI_* 配置
     - 只有 model 允许按任务覆盖，例如 ANALYSIS_OPENAI_MODEL
     """
+    raw_effort = get_config("OPENAI_REASONING_EFFORT", task=task)
+    reasoning_effort = raw_effort.strip() if isinstance(raw_effort, str) else None
+    if not reasoning_effort:
+        reasoning_effort = None
+
     return OpenAIConfig(
         api_key=get_config("OPENAI_API_KEY"),
         base_url=get_config("OPENAI_BASE_URL", OPENAI_DEFAULT_BASE_URL),
@@ -198,7 +204,19 @@ def get_openai_task_config(task: str, default_model: str) -> OpenAIConfig:
             }.items()
             if value
         },
+        reasoning_effort=reasoning_effort,
     )
+
+
+def build_chat_completion_kwargs(config: OpenAIConfig, **kwargs) -> dict:
+    """构建 client.chat.completions.create 的参数字典。
+
+    如果 config.reasoning_effort 不为空且 kwargs 中未显式指定，则自动注入。
+    """
+    params = {"model": config.model, **kwargs}
+    if config.reasoning_effort and "reasoning_effort" not in params:
+        params["reasoning_effort"] = config.reasoning_effort
+    return params
 
 
 def build_openai_client_kwargs(config: OpenAIConfig) -> dict:

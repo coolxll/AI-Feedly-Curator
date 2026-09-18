@@ -12,6 +12,7 @@ from rss_analyzer.config import (
     EMBEDDING_DEFAULT_MODEL,
     OPENAI_DEFAULT_BASE_URL,
     PROJ_CONFIG,
+    build_chat_completion_kwargs,
     build_embedding_client_kwargs,
     build_openai_client_kwargs,
     get_config,
@@ -112,6 +113,44 @@ class TestConfig(unittest.TestCase):
         with patch.dict(os.environ, {"OPENAI_USER_AGENT": "CustomUA/1.0"}, clear=True):
             config = get_openai_task_config("summary", default_model="fallback-model")
             self.assertEqual(config.default_headers["User-Agent"], "CustomUA/1.0")
+
+    def test_get_openai_task_config_resolves_reasoning_effort(self):
+        # 1. Global setting
+        with patch.dict(os.environ, {"OPENAI_REASONING_EFFORT": "none"}, clear=True):
+            config = get_openai_task_config("summary", default_model="fallback-model")
+            self.assertEqual(config.reasoning_effort, "none")
+
+        # 2. Task override
+        with patch.dict(
+            os.environ,
+            {
+                "OPENAI_REASONING_EFFORT": "low",
+                "ANALYSIS_OPENAI_REASONING_EFFORT": "none",
+            },
+            clear=True,
+        ):
+            summary_cfg = get_openai_task_config("summary", default_model="fallback-model")
+            analysis_cfg = get_openai_task_config("analysis", default_model="fallback-model")
+            self.assertEqual(summary_cfg.reasoning_effort, "low")
+            self.assertEqual(analysis_cfg.reasoning_effort, "none")
+
+        # 3. Default is None
+        with patch.dict(os.environ, {}, clear=True):
+            config = get_openai_task_config("summary", default_model="fallback-model")
+            self.assertIsNone(config.reasoning_effort)
+
+    def test_build_chat_completion_kwargs_injects_reasoning_effort(self):
+        with patch.dict(os.environ, {"OPENAI_REASONING_EFFORT": "none"}, clear=True):
+            config = get_openai_task_config("summary", default_model="test-model")
+            kwargs = build_chat_completion_kwargs(config, temperature=0.2)
+            self.assertEqual(kwargs["model"], "test-model")
+            self.assertEqual(kwargs["temperature"], 0.2)
+            self.assertEqual(kwargs["reasoning_effort"], "none")
+
+        with patch.dict(os.environ, {}, clear=True):
+            config = get_openai_task_config("summary", default_model="test-model")
+            kwargs = build_chat_completion_kwargs(config, temperature=0.2)
+            self.assertNotIn("reasoning_effort", kwargs)
 
     def test_get_embedding_config_prefers_embedding_specific_settings(self):
         with patch.dict(

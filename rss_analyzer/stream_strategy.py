@@ -14,7 +14,11 @@ import logging
 
 from openai import OpenAI
 
-from rss_analyzer.config import build_openai_client_kwargs, get_openai_task_config
+from rss_analyzer.config import (
+    build_chat_completion_kwargs,
+    build_openai_client_kwargs,
+    get_openai_task_config,
+)
 from rss_analyzer.utils import is_newsflash, strip_html_tags
 
 logger = logging.getLogger(__name__)
@@ -413,10 +417,13 @@ def _llm_summarize_theme_groups(theme_groups: list[dict]) -> dict[str, str]:
             min(len(theme_groups), MAX_LLM_THEME_GROUPS),
         )
         client, model = _get_radar_client()
+        cfg = get_openai_task_config("summary", default_model=model)
         response = client.chat.completions.create(
-            model=model,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.2,
+            **build_chat_completion_kwargs(
+                cfg,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.2,
+            )
         )
         content = response.choices[0].message.content if response.choices else None
         if not content:
@@ -463,10 +470,13 @@ def _llm_interpret_candidates(items: list[dict]) -> dict[str, str]:
             min(len(items), MAX_MUST_READ_ITEMS),
         )
         client, model = _get_radar_client()
+        cfg = get_openai_task_config("summary", default_model=model)
         response = client.chat.completions.create(
-            model=model,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.2,
+            **build_chat_completion_kwargs(
+                cfg,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.2,
+            )
         )
         content = response.choices[0].message.content if response.choices else None
         if not content:

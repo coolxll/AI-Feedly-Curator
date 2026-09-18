@@ -1233,7 +1233,11 @@ def _batch_triage_articles(
     """Triage all articles with title + origin + summary, chunked for latency."""
     from openai import OpenAI
 
-    from rss_analyzer.config import build_openai_client_kwargs, get_openai_task_config
+    from rss_analyzer.config import (
+        build_chat_completion_kwargs,
+        build_openai_client_kwargs,
+        get_openai_task_config,
+    )
 
     if not articles:
         return {}
@@ -1257,10 +1261,12 @@ def _batch_triage_articles(
         try:
             llm_chunk_count += 1
             resp = client.chat.completions.create(
-                model=cfg.model,
-                messages=[{"role": "user", "content": _build_batch_triage_prompt(chunk)}],
-                temperature=0.2,
-                max_tokens=8192,
+                **build_chat_completion_kwargs(
+                    cfg,
+                    messages=[{"role": "user", "content": _build_batch_triage_prompt(chunk)}],
+                    temperature=0.2,
+                    max_tokens=8192,
+                )
             )
             raw = resp.choices[0].message.content if resp.choices else ""
             parsed = _parse_batch_triage_results(chunk, _extract_json_array(raw))

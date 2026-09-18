@@ -15,6 +15,7 @@ from openai import OpenAI, RateLimitError
 
 from .config import (
     PROJ_CONFIG,
+    build_chat_completion_kwargs,
     build_openai_client_kwargs,
     get_openai_task_config,
     log_debug,
@@ -574,10 +575,12 @@ def score_article(title: str, summary: str, content: str) -> Dict[str, Any]:
         log_debug("Scoring Prompt", prompt)
 
         response = client.chat.completions.create(
-            model=openai_config.model,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0,
-            max_tokens=16000,  # 增加 Token 上限以容纳 Analysis
+            **build_chat_completion_kwargs(
+                openai_config,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0,
+                max_tokens=16000,  # 增加 Token 上限以容纳 Analysis
+            )
         )
 
         response_text = response.choices[0].message.content
@@ -746,10 +749,12 @@ def score_articles_batch(
             logger.info(f"Batch Scoring - Using Model: {openai_config.model}")
 
             response = client.chat.completions.create(
-                model=openai_config.model,
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0,
-                max_tokens=16000,  # Explicitly set high limit for Gemini
+                **build_chat_completion_kwargs(
+                    openai_config,
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0,
+                    max_tokens=16000,  # Explicitly set high limit for Gemini
+                )
             )
 
             response_text = response.choices[0].message.content

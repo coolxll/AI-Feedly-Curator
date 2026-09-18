@@ -25,7 +25,7 @@ if _REPO_ROOT not in sys.path:
 
 from openai import OpenAI
 
-from rss_analyzer.config import get_openai_task_config
+from rss_analyzer.config import build_chat_completion_kwargs, get_openai_task_config
 
 
 # Fields that carry prose worth translating. Numeric/enum fields (score,
@@ -131,18 +131,20 @@ def parse_translation(text: str, field_order: list) -> dict:
     return result
 
 
-def translate_item(client: OpenAI, model: str, item: dict) -> dict:
+def translate_item(client: OpenAI, cfg, item: dict) -> dict:
     prompt, field_order = build_prompt(item)
     if not field_order:
         return item
     try:
         resp = client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": "你是专业中英翻译，输出严格遵循给定字段格式。"},
-                {"role": "user", "content": prompt},
-            ],
-            temperature=0.2,
+            **build_chat_completion_kwargs(
+                cfg,
+                messages=[
+                    {"role": "system", "content": "你是专业中英翻译，输出严格遵循给定字段格式。"},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.2,
+            )
         )
         text = resp.choices[0].message.content or ""
         translated = parse_translation(text, field_order)
@@ -202,7 +204,7 @@ def main() -> int:
     done = 0
     with ThreadPoolExecutor(max_workers=args.workers) as ex:
         futures = {
-            ex.submit(translate_item, client, cfg.model, item): (path, i)
+            ex.submit(translate_item, client, cfg, item): (path, i)
             for (path, i, item) in jobs
         }
         for fut in as_completed(futures):
