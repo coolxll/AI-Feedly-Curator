@@ -7,7 +7,8 @@ from __future__ import annotations
 
 import sys
 
-from rss_analyzer.backend_service import get_runtime_paths, rebuild_vector_store
+from rss_analyzer.backend_service import get_runtime_paths
+from rss_analyzer.vector_service import rebuild_vector_store
 from rss_analyzer.config import setup_logging
 
 

@@ -21,6 +21,7 @@
   - `feedly_token.py` is now a thin CLI over the shared implementation
   - removed the machine-specific hard-coded config path
 - [x] Replaced backend message and SSE routing condition chains with explicit handler registries
+- [x] Extracted vector/search handlers and vector rebuild lifecycle from `backend_service.py`
 
 ## Environment Notes
 

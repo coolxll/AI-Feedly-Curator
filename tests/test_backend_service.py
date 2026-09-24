@@ -205,7 +205,7 @@ class TestBackendService(unittest.TestCase):
         self.assertEqual(response["vector_backend"], runtime["vector_backend"])
         self.assertEqual(response["vector_http_url"], runtime["vector_http_url"])
 
-    @patch("rss_analyzer.backend_service.is_vector_store_enabled", return_value=False)
+    @patch("rss_analyzer.vector_handlers.is_vector_store_enabled", return_value=False)
     def test_semantic_search_returns_disabled_state_when_vector_store_is_off(
         self, mock_vector_enabled
     ):
@@ -216,7 +216,7 @@ class TestBackendService(unittest.TestCase):
         self.assertTrue(response["disabled"])
         mock_vector_enabled.assert_called()
 
-    @patch("rss_analyzer.backend_service.is_vector_store_enabled", return_value=False)
+    @patch("rss_analyzer.vector_service.is_vector_store_enabled", return_value=False)
     def test_rebuild_vector_store_returns_disabled_error_when_vector_store_is_off(
         self, mock_vector_enabled
     ):
@@ -838,10 +838,10 @@ class TestBackendService(unittest.TestCase):
         self.assertEqual(response["stream_id"], FEED_ID_36KR)
         mock_fetch_filter_articles.assert_called_once_with(10, stream_id=FEED_ID_36KR)
 
-    @patch("rss_analyzer.backend_service.is_vector_store_enabled", return_value=True)
-    @patch("rss_analyzer.backend_service.iter_cached_scores")
-    @patch("rss_analyzer.backend_service.build_vector_store_payload")
-    @patch("rss_analyzer.backend_service.get_vector_store")
+    @patch("rss_analyzer.vector_service.is_vector_store_enabled", return_value=True)
+    @patch("rss_analyzer.vector_service.iter_cached_scores")
+    @patch("rss_analyzer.vector_service.build_vector_store_payload")
+    @patch("rss_analyzer.vector_service.get_vector_store")
     def test_rebuild_vector_store_rebuilds_from_cached_articles(
         self,
         mock_get_vector_store,
@@ -880,11 +880,11 @@ class TestBackendService(unittest.TestCase):
         vector_store.refresh_embedding_fingerprint.assert_called_once()
         vector_store.add_articles.assert_called_once()
 
-    @patch("rss_analyzer.backend_service.is_vector_store_enabled", return_value=True)
+    @patch("rss_analyzer.vector_service.is_vector_store_enabled", return_value=True)
     @patch.dict("os.environ", {"RSS_VECTOR_REBUILD_RESUME": "true"}, clear=False)
-    @patch("rss_analyzer.backend_service.iter_cached_scores")
-    @patch("rss_analyzer.backend_service.build_vector_store_payload")
-    @patch("rss_analyzer.backend_service.get_vector_store")
+    @patch("rss_analyzer.vector_service.iter_cached_scores")
+    @patch("rss_analyzer.vector_service.build_vector_store_payload")
+    @patch("rss_analyzer.vector_service.get_vector_store")
     def test_rebuild_vector_store_skips_existing_ids_in_resume_mode(
         self,
         mock_get_vector_store,
@@ -935,8 +935,8 @@ class TestBackendService(unittest.TestCase):
         vector_store.clear_collection.assert_not_called()
         vector_store.add_articles.assert_called_once()
 
-    @patch("rss_analyzer.backend_service.is_vector_store_enabled", return_value=True)
-    @patch("rss_analyzer.backend_service.get_vector_store")
+    @patch("rss_analyzer.vector_service.is_vector_store_enabled", return_value=True)
+    @patch("rss_analyzer.vector_service.get_vector_store")
     def test_rebuild_vector_store_returns_error_when_vector_store_unavailable(
         self, mock_get_vector_store, mock_vector_enabled
     ):
