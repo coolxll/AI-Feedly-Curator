@@ -116,6 +116,7 @@ python rss_backend_service.py --host 127.0.0.1 --port 8765
 - Chrome 扩展现在只负责 UI 注入、页面内容提取和交互展示
 - AI 分析、摘要生成、缓存和向量检索统一由本地 Python 服务处理
 - 这让 Chrome 扩展和本地 GUI/TUI/Streamlit 可以共享同一后端，而不是各自直连模型或宿主进程
+- 普通调用使用 `POST /api/message`；耗时调用可使用 `POST /api/stream`，通过 SSE 在同一请求中持续接收进度和最终结果
 
 详细边界设计见 [docs/client-server-architecture.md](docs/client-server-architecture.md)。
 
@@ -276,5 +277,4 @@ python -m unittest discover tests
 ## License
 
 MIT
-
 

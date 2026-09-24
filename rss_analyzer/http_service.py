@@ -6,12 +6,16 @@ from __future__ import annotations
 
 import json
 import logging
+import queue
+import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from typing import Any
 from urllib.parse import parse_qs
 
-from rss_analyzer.backend_service import get_job_manager, handle_message
+from rss_analyzer.backend_service import handle_message, handle_stream_message
 
 logger = logging.getLogger(__name__)
+SSE_HEARTBEAT_INTERVAL_SECONDS = 15.0
 ALLOWED_EXTENSION_ORIGIN_PREFIXES = (
     "chrome-extension://",
     "moz-extension://",
@@ -52,6 +56,79 @@ class BackendHTTPRequestHandler(BaseHTTPRequestHandler):
             {"error": "forbidden_origin", "message": "Origin is not allowed"},
             include_cors=False,
         )
+
+    def _start_sse(self) -> None:
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Cache-Control", "no-cache, no-transform")
+        self.send_header("Connection", "close")
+        origin = self._get_request_origin()
+        if origin:
+            self.send_header("Access-Control-Allow-Origin", origin)
+            self.send_header("Vary", "Origin")
+        self.end_headers()
+
+    def _write_sse(self, payload: dict) -> None:
+        event = str(payload.get("event") or "message")
+        data = {key: value for key, value in payload.items() if key != "event"}
+        frame = (
+            f"event: {event}\n"
+            f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
+        ).encode("utf-8")
+        self.wfile.write(frame)
+        self.wfile.flush()
+
+    def _write_sse_heartbeat(self) -> None:
+        self.wfile.write(b": heartbeat\n\n")
+        self.wfile.flush()
+
+    def _serve_sse(self, payload: dict) -> None:
+        """Stream one request, keeping the connection alive during slow model calls."""
+        messages: queue.Queue[tuple[str, Any]] = queue.Queue()
+        client_disconnected = threading.Event()
+
+        def emit(event: dict) -> None:
+            if client_disconnected.is_set():
+                raise ConnectionResetError("SSE client disconnected")
+            messages.put(("event", event))
+
+        def run_request() -> None:
+            try:
+                messages.put(("result", handle_stream_message(payload, emit)))
+            except Exception as exc:
+                messages.put(("exception", exc))
+
+        worker = threading.Thread(target=run_request, daemon=True)
+        worker.start()
+
+        try:
+            while True:
+                try:
+                    kind, value = messages.get(timeout=SSE_HEARTBEAT_INTERVAL_SECONDS)
+                except queue.Empty:
+                    self._write_sse_heartbeat()
+                    continue
+
+                if kind == "event":
+                    self._write_sse(value)
+                    continue
+                if kind == "exception":
+                    raise value
+
+                response = value
+                if response.get("error"):
+                    self._write_sse(
+                        {
+                            "event": "error",
+                            "error": response.get("error"),
+                            "message": response.get("message", "Request failed"),
+                        }
+                    )
+                else:
+                    self._write_sse({"event": "complete", "result": response})
+                return
+        finally:
+            client_disconnected.set()
 
     def _read_json(self) -> dict:
         content_length = int(self.headers.get("Content-Length", "0"))
@@ -124,7 +201,7 @@ class BackendHTTPRequestHandler(BaseHTTPRequestHandler):
             self._reject_disallowed_origin()
             return
 
-        if self.path != "/api/message":
+        if self.path not in {"/api/message", "/api/stream"}:
             self._write_json(404, {"error": "not_found"})
             return
 
@@ -138,20 +215,35 @@ class BackendHTTPRequestHandler(BaseHTTPRequestHandler):
             self._write_json(400, {"error": "invalid_payload"})
             return
 
+        if self.path == "/api/stream":
+            self._start_sse()
+            try:
+                self._write_sse({"event": "accepted", "type": payload.get("type")})
+                self._serve_sse(payload)
+            except (BrokenPipeError, ConnectionResetError):
+                logger.info("SSE client disconnected; request processing stopped")
+            except Exception as exc:
+                logger.exception("Unhandled streaming backend exception")
+                try:
+                    self._write_sse(
+                        {"event": "error", "error": "exception", "message": str(exc)}
+                    )
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
+            finally:
+                self.close_connection = True
+            return
+
         try:
             response = handle_message(payload)
             self._write_json(200, response)
         except Exception as exc:
             logger.exception("Unhandled backend exception")
-            self._write_json(
-                500,
-                {"error": "exception", "message": str(exc)},
-            )
+            self._write_json(500, {"error": "exception", "message": str(exc)})
 
     def log_message(self, format: str, *args) -> None:
         logger.info("%s - %s", self.address_string(), format % args)
 
 
 def create_server(host: str = "127.0.0.1", port: int = 8765) -> ThreadingHTTPServer:
-    get_job_manager().start()
     return ThreadingHTTPServer((host, port), BackendHTTPRequestHandler)
