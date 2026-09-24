@@ -506,6 +506,7 @@ def _score_from_data(data: Dict[str, Any]) -> Dict[str, Any]:
         verdict += f" (含 {', '.join(red_flags)})"
 
     return {
+        "status": "success",
         "relevance_score": scores.get("relevance", 0),
         "informativeness_accuracy_score": scores.get("informativeness_accuracy", 0),
         "depth_opinion_score": scores.get("depth_opinion", 0),
@@ -550,10 +551,13 @@ def parse_score_response(response_text: str) -> Dict[str, Any]:
 
 def _default_error_result(msg: str):
     return {
-        "overall_score": 0.0,
-        "verdict": "解析错误",
+        "status": "error",
+        "score": None,
+        "overall_score": None,
+        "verdict": "分析失败",
         "reason": msg,
         "comment": msg,
+        "error": {"code": "analysis_failed", "message": msg},
         "red_flags": [],
         "detailed_scores": {},
     }
@@ -591,8 +595,8 @@ def score_article(title: str, summary: str, content: str) -> Dict[str, Any]:
 
         result = parse_score_response(response_text)
 
-        # 补全 score 字段，兼容旧的 article_analyzer 调用
-        result["score"] = result["overall_score"]
+        if result.get("status") == "success":
+            result["score"] = result["overall_score"]
         result["model"] = openai_config.model
 
         return result
@@ -605,7 +609,10 @@ def score_article(title: str, summary: str, content: str) -> Dict[str, Any]:
 def format_score_result(score_result: Dict[str, Any]) -> str:
     """格式化展示"""
     verdict = score_result.get("verdict", "未知")
-    overall = score_result.get("overall_score", 0.0)
+    overall = score_result.get("overall_score")
+
+    if score_result.get("status") == "error" or overall is None:
+        return f"⚠️ {verdict}: {score_result.get('reason', '未知错误')}"
 
     emoji = "😐"
     if overall >= 3.8:
@@ -833,7 +840,6 @@ def score_articles_batch(
 
     logger.error("All batch scoring attempts failed.")
     return None
-
 
 
 

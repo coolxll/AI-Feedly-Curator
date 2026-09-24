@@ -327,6 +327,8 @@ def analyze_articles(
     logger.info("Loaded %s articles from %s", len(articles), input_file)
 
     analyzed_articles: list[dict] = []
+    successful_article_ids: list[str] = []
+    successful_count = 0
     seen_titles: set[str] = set()
     batch_scoring = PROJ_CONFIG.get("batch_scoring", False)
     batch_size = max(1, int(PROJ_CONFIG.get("batch_size", 1)))
@@ -337,6 +339,17 @@ def analyze_articles(
     pending_futures: list[tuple[concurrent.futures.Future, list[dict]]] = []
 
     def record_analysis_result(article_item: dict, analysis_result: dict) -> None:
+        nonlocal successful_count
+        if analysis_result.get("status", "success") != "success":
+            title_str = article_item.get("title", "Unknown Title")
+            logger.warning(
+                "  Analysis failed for %s: %s",
+                title_str,
+                analysis_result.get("reason", "unknown error"),
+            )
+            analyzed_articles.append({**article_item, "analysis": analysis_result})
+            return
+
         verdict = analysis_result.get("verdict", "Unknown")
         score = analysis_result["score"]
         if (
@@ -363,6 +376,9 @@ def analyze_articles(
             )
 
         analyzed_articles.append({**article_item, "analysis": analysis_result})
+        successful_count += 1
+        if article_item.get("id"):
+            successful_article_ids.append(article_item["id"])
 
     def process_completed_futures() -> None:
         nonlocal pending_futures
@@ -378,8 +394,6 @@ def analyze_articles(
             else:
                 still_pending.append((future, batch_items))
         pending_futures = still_pending
-
-    all_article_ids = [a["id"] for a in articles[:effective_limit] if a.get("id")]
 
     try:
         for idx, article in enumerate(articles[:effective_limit], 1):
@@ -490,10 +504,10 @@ def analyze_articles(
     save_articles(analyzed_articles, LATEST_ANALYZED_FILE)
 
     marked_read_count = 0
-    if mark_read and all_article_ids:
-        logger.info("Marking %s articles as read...", len(all_article_ids))
-        if feedly_mark_read(all_article_ids):
-            marked_read_count = len(all_article_ids)
+    if mark_read and successful_article_ids:
+        logger.info("Marking %s successfully analyzed articles as read...", len(successful_article_ids))
+        if feedly_mark_read(successful_article_ids):
+            marked_read_count = len(successful_article_ids)
 
     summary_result = generate_summary_report(analyzed_articles)
     return {
@@ -503,6 +517,8 @@ def analyze_articles(
         "refreshed": refresh,
         "loaded_count": len(articles),
         "processed_count": len(analyzed_articles),
+        "successful_count": successful_count,
+        "failed_count": len(analyzed_articles) - successful_count,
         "marked_read_count": marked_read_count,
         "analyzed_file": analyzed_file,
         "latest_analyzed_file": LATEST_ANALYZED_FILE,
@@ -554,6 +570,10 @@ def _deep_analyze_digest_candidate(item: dict) -> tuple[str, dict]:
         return "skipped", enriched
 
     analysis = analyze_article_with_llm(item.get("title", ""), summary, content)
+    if analysis.get("status", "success") != "success":
+        enriched["analysis"] = analysis
+        enriched["analysis_error"] = analysis.get("error")
+        return "failed", enriched
     enriched["score"] = analysis.get("score")
     enriched["verdict"] = analysis.get("verdict")
     enriched["analysis_summary"] = analysis.get("summary")
@@ -598,6 +618,8 @@ def _deep_analyze_digest_candidates(items: list[dict]) -> list[dict]:
                 analyzed_items[index] = enriched
                 if status == "analyzed":
                     analyzed_count += 1
+                elif status == "failed":
+                    failed_count += 1
                 else:
                     skipped_count += 1
 
@@ -851,7 +873,7 @@ def _prepare_article_scoring(article: dict) -> dict:
     return {"title": title, "summary": summary, "content": content}
 
 
-def _score_article(article: dict) -> tuple[float, dict]:
+def _score_article(article: dict) -> tuple[float | None, dict]:
     payload = _prepare_article_scoring(article)
     try:
         result = analyze_article_with_llm(
@@ -859,15 +881,21 @@ def _score_article(article: dict) -> tuple[float, dict]:
             payload.get("summary", ""),
             payload.get("content", ""),
         )
-        return result.get("score", 0.0), result
+        if result.get("status", "success") != "success":
+            return None, result
+        return result.get("score"), result
     except Exception as exc:
         logger.debug("Scoring failed: %s", exc)
-        return -1.0, {}
+        return None, {
+            "status": "error",
+            "score": None,
+            "error": {"code": "analysis_failed", "message": str(exc)},
+        }
 
 
 def _handle_scored_filter_article(
     article: dict,
-    score: float,
+    score: float | None,
     prefix: str,
     threshold: float,
     dry_run: bool,
@@ -878,7 +906,7 @@ def _handle_scored_filter_article(
     on_matched: Callable[[], None] | None = None,
 ) -> None:
     title_str = article.get("title", "Unknown Title")
-    if score < 0:
+    if score is None:
         logger.info("%s Result: skipped (scoring failed)", prefix)
         remaining.append(article)
     elif score <= threshold:
@@ -957,8 +985,9 @@ def low_score_filter(
         batch_payload = [item["payload"] for item in batch_queue]
         batch_results = analyze_articles_with_llm_batch(batch_payload)
         for item, analysis in zip(batch_queue, batch_results):
-            score = analysis.get("score", 0.0)
-            save_cached_score(item["article"].get("id"), score, analysis)
+            score = analysis.get("score") if analysis.get("status", "success") == "success" else None
+            if score is not None:
+                save_cached_score(item["article"].get("id"), score, analysis)
             _handle_scored_filter_article(
                 item["article"],
                 score,
@@ -1012,7 +1041,7 @@ def low_score_filter(
                 flush_batch()
         else:
             score, analysis = _score_article(article)
-            if score >= 0:
+            if score is not None:
                 save_cached_score(article_id, score, analysis)
 
             _handle_scored_filter_article(
@@ -1705,6 +1734,24 @@ def _normalize_item(article_id: str, cached: dict | None) -> dict:
     }
 
 
+def _normalize_analysis_error(article_id: str, analysis: dict) -> dict:
+    return {
+        "id": article_id,
+        "score": None,
+        "data": analysis,
+        "updated_at": None,
+        "found": False,
+        "status": "error",
+        "error": analysis.get(
+            "error",
+            {
+                "code": "analysis_failed",
+                "message": analysis.get("reason", "Analysis failed"),
+            },
+        ),
+    }
+
+
 def _perform_analysis(
     article_id: str, title: str, url: str | None, summary: str, content: str | None
 ) -> dict | None:
@@ -1722,7 +1769,10 @@ def _perform_analysis(
 
     try:
         analysis = analyze_article_with_llm(title, summary, final_content)
-        score = analysis.get("score", 0)
+        if analysis.get("status", "success") != "success":
+            logger.warning("Analysis failed for %s: %s", article_id, analysis.get("reason"))
+            return analysis
+        score = analysis.get("score")
 
         if url:
             analysis["url"] = url
@@ -1749,6 +1799,9 @@ def _handle_get_score(msg: dict) -> dict:
             msg.get("summary", ""),
             msg.get("content"),
         )
+
+    if cached and cached.get("status") == "error":
+        return _normalize_analysis_error(article_id, cached)
 
     return _normalize_item(article_id, cached)
 
@@ -1795,7 +1848,10 @@ def _handle_get_scores(msg: dict) -> dict:
                 for idx, analyzed in enumerate(analyzed_batch):
                     item = missing_items[idx]
                     article_id = item.get("id")
-                    score = analyzed.get("score", 0)
+                    if analyzed.get("status", "success") != "success":
+                        results[article_id] = _normalize_analysis_error(article_id, analyzed)
+                        continue
+                    score = analyzed.get("score")
 
                     if item.get("url") and not analyzed.get("url"):
                         analyzed["url"] = item["url"]
@@ -1827,7 +1883,10 @@ def _handle_get_scores(msg: dict) -> dict:
                 item.get("summary", ""),
                 item.get("content"),
             )
-            results[article_id] = _normalize_item(article_id, analyzed)
+            if analyzed and analyzed.get("status") == "error":
+                results[article_id] = _normalize_analysis_error(article_id, analyzed)
+            else:
+                results[article_id] = _normalize_item(article_id, analyzed)
 
     return {"items": results}
 
@@ -1845,6 +1904,8 @@ def _handle_analyze_article(msg: dict) -> dict:
         msg.get("content"),
     )
     if result:
+        if result.get("status") == "error":
+            return result
         return _normalize_item(article_id, result)
     return {"error": "analysis_failed"}
 

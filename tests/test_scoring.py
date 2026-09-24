@@ -81,8 +81,10 @@ class TestScoring(unittest.TestCase):
         """测试解析无效响应"""
         result = parse_score_response("这不是JSON")
 
-        self.assertEqual(result["overall_score"], 0.0)
-        self.assertEqual(result["verdict"], "解析错误")
+        self.assertEqual(result["status"], "error")
+        self.assertIsNone(result["overall_score"])
+        self.assertIsNone(result["score"])
+        self.assertEqual(result["verdict"], "分析失败")
 
     def test_calibrate_score_distribution_compresses_inflated_high_scores(self):
         calibrated = calibrate_score_distribution(
@@ -144,4 +146,3 @@ class TestScoring(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
