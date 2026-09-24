@@ -118,7 +118,7 @@ persist it in a `.env` / shell profile.
 > uv venv .venv-win --python 3.13
 > uv pip install --python .venv-win/Scripts/python.exe `
 >   beautifulsoup4 chromadb "httpx[socks]" openai pandas prompt-toolkit `
->   python-dotenv questionary requests rich socksio streamlit trafilatura
+>   python-dotenv questionary requests rich socksio trafilatura
 > ```
 
 #### WSL setup (bash)
