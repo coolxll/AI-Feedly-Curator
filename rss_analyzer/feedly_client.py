@@ -3,132 +3,36 @@ Feedly API 客户端模块
 处理与 Feedly 服务的所有交互
 """
 
-import os
-import json
 import logging
-import time
 import requests
 from typing import Optional
 
-from .config import PROJ_CONFIG
+from .feedly_auth import (
+    FEEDLY_CONFIG_FILE,
+    get_feedly_headers,
+    get_feedly_proxy as _get_proxy,
+    load_feedly_config,
+    refresh_access_token,
+    refresh_feedly_config,
+    save_feedly_config,
+)
 
 
 logger = logging.getLogger(__name__)
 
-TOKEN_URL = "https://cloud.feedly.com/v3/auth/token"
-WEB_CLIENT_ID = "feedly"
-PKCE_CLIENT_ID = "feedlydev"
-PKCE_CLIENT_SECRET = "feedlydev"
-
-
-def _resolve_feedly_config_file() -> str:
-    """Resolve the Feedly config file while preserving the old cwd default."""
-    candidates = [
-        os.getenv("FEEDLY_CONFIG_PATH"),
-        os.path.join(os.getcwd(), "feedly_config.json"),
-        os.path.join(os.path.dirname(os.path.dirname(__file__)), "feedly_config.json"),
-    ]
-    for candidate in candidates:
-        if candidate and os.path.exists(candidate):
-            return candidate
-    return candidates[1]
-
-
-FEEDLY_CONFIG_FILE = _resolve_feedly_config_file()
-
-
-def load_feedly_config() -> dict | None:
-    """加载 Feedly 配置"""
-    if os.path.exists(FEEDLY_CONFIG_FILE):
-        with open(FEEDLY_CONFIG_FILE, "r") as f:
-            return json.load(f)
-    return None
-
-
-def save_feedly_config(config: dict) -> None:
-    """保存 Feedly 配置"""
-    with open(FEEDLY_CONFIG_FILE, "w") as f:
-        json.dump(config, f, indent=2, ensure_ascii=False)
-
-
-def get_feedly_headers(token: str) -> dict:
-    """获取 Feedly API 请求头"""
-    return {"Authorization": f"OAuth {token}"}
-
-
-def _get_proxy() -> dict | None:
-    """获取代理配置"""
-    proxy = (
-        os.getenv("FEEDLY_PROXY_URL")
-        or os.getenv("HTTP_PROXY")
-        or os.getenv("HTTPS_PROXY")
-        or PROJ_CONFIG.get("proxy")
-    )
-    if proxy and "://" not in proxy:
-        proxy = f"http://{proxy}"
-    return {"http": proxy, "https": proxy} if proxy else None
-
-
-def refresh_access_token(refresh_token: str) -> dict:
-    """Refresh Feedly access_token using web-session first, then PKCE fallback."""
-    proxy = _get_proxy()
-    try:
-        response = requests.post(
-            TOKEN_URL,
-            data={
-                "client_id": WEB_CLIENT_ID,
-                "grant_type": "refresh_token",
-                "refresh_token": refresh_token,
-            },
-            proxies=proxy,
-            timeout=15,
-        )
-        if response.status_code == 200:
-            return response.json()
-    except requests.RequestException:
-        logger.debug(
-            "Feedly web-session token refresh failed; trying PKCE fallback",
-            exc_info=True,
-        )
-
-    response = requests.post(
-        TOKEN_URL,
-        data={
-            "client_id": PKCE_CLIENT_ID,
-            "client_secret": PKCE_CLIENT_SECRET,
-            "grant_type": "refresh_token",
-            "refresh_token": refresh_token,
-        },
-        proxies=proxy,
-        timeout=15,
-    )
-    response.raise_for_status()
-    return response.json()
-
-
-def refresh_feedly_config(config: dict) -> dict | None:
-    """Refresh token and persist the updated Feedly config."""
-    refresh_token = config.get("refresh_token")
-    if not refresh_token:
-        logger.error("Feedly token expired and no refresh_token is configured")
-        return None
-
-    try:
-        token_data = refresh_access_token(refresh_token)
-    except requests.RequestException as exc:
-        logger.error("Feedly token refresh failed: %s", exc)
-        return None
-
-    config["token"] = token_data["access_token"]
-    config["user_id"] = token_data.get("id", config.get("user_id", ""))
-    config["refresh_token"] = token_data.get("refresh_token") or refresh_token
-    expires_in = token_data.get("expires_in", 604800)
-    config["token_expires_in"] = expires_in
-    config["token_expires_at"] = int(time.time()) + expires_in
-    save_feedly_config(config)
-    logger.info("Feedly access_token refreshed successfully")
-    return config
-
+__all__ = [
+    "FEEDLY_CONFIG_FILE",
+    "feedly_fetch_unread",
+    "feedly_get_categories",
+    "feedly_get_subscriptions",
+    "feedly_get_unread_counts",
+    "feedly_mark_read",
+    "get_feedly_headers",
+    "load_feedly_config",
+    "refresh_access_token",
+    "refresh_feedly_config",
+    "save_feedly_config",
+]
 
 def _request_with_token_refresh(
     method: str, url: str, config: dict, **kwargs

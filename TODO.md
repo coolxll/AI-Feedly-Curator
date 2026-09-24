@@ -1,10 +1,5 @@
 # TODO
 
-## Current Branch
-
-- `feature/extension-client-server`
-- Branch status: synced with `origin/feature/extension-client-server`
-
 ## Done
 
 - [x] Chrome extension switched from Native Messaging to local HTTP service
@@ -22,6 +17,9 @@
   - prefer `uv run python ...` or project `.venv`
   - avoid relying on polluted global Python packages
 - [x] Moved `COVERAGE.md` under `docs/`
+- [x] Unified Feedly config, proxy, token refresh, and PKCE logic under `rss_analyzer/feedly_auth.py`
+  - `feedly_token.py` is now a thin CLI over the shared implementation
+  - removed the machine-specific hard-coded config path
 
 ## Environment Notes
 

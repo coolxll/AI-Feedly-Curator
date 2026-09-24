@@ -17,7 +17,7 @@
 - SQLite 缓存
 - Chroma 向量检索
 - Feedly 相关数据处理
-- Feedly token refresh 与配置解析
+- Feedly token refresh、PKCE 与配置解析（统一位于 `rss_analyzer/feedly_auth.py`）
 
 ### 2. Service
 
