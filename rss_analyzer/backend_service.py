@@ -25,14 +25,12 @@ from rss_analyzer.analysis_service import ArticleAnalysisService, PreparedArticl
 from rss_analyzer.cache import (
     get_app_cache,
     get_cached_score,
-    iter_cached_scores,
     get_vector_index_queue_stats,
     set_app_cache,
     save_cached_score,
 )
 from rss_analyzer.config import (
     LATEST_ANALYZED_FILE,
-    LATEST_SUMMARY_FILE,
     LATEST_UNREAD_FILE,
     PROJ_CONFIG,
     get_vector_store_config,
@@ -42,7 +40,14 @@ from rss_analyzer.feedly_client import feedly_fetch_unread, feedly_mark_read
 from rss_analyzer.llm_analyzer import (
     analyze_article_with_llm,
     analyze_articles_with_llm_batch,
-    generate_overall_summary,
+)
+from rss_analyzer.report_handlers import REPORT_MESSAGE_HANDLERS, REPORT_STREAM_HANDLERS
+from rss_analyzer.report_service import (
+    build_monthly_output_path as _build_monthly_output_path,
+    export_articles,
+    generate_daily_digest,
+    generate_summary_report,
+    regenerate_summary,
 )
 from rss_analyzer.readflow_triage import (
     article_summary_snippet,
@@ -124,176 +129,6 @@ def get_runtime_paths() -> dict[str, str | bool]:
         "vector_db_dir": vector_config.persist_dir,
         "vector_state_dir": vector_config.state_dir,
         "vector_http_url": vector_config.http_url,
-    }
-
-
-def _build_monthly_output_path(prefix: str, suffix: str) -> str:
-    now = datetime.now()
-    output_dir = Path("output") / now.strftime("%Y-%m")
-    output_dir.mkdir(parents=True, exist_ok=True)
-    return str(output_dir / f"{prefix}_{now.strftime('%Y%m%d_%H%M%S')}.{suffix}")
-
-
-def generate_summary_report(articles: list[dict]) -> dict:
-    logger.info("Generating overall summary for %s articles", len(articles))
-    overall_summary = generate_overall_summary(articles)
-    summary_file = _build_monthly_output_path("summary", "md")
-
-    with open(summary_file, "w", encoding="utf-8") as f:
-        f.write(overall_summary)
-    with open(LATEST_SUMMARY_FILE, "w", encoding="utf-8") as f:
-        f.write(overall_summary)
-
-    return {
-        "success": True,
-        "article_count": len(articles),
-        "summary": overall_summary,
-        "summary_file": summary_file,
-        "latest_summary_file": LATEST_SUMMARY_FILE,
-    }
-
-
-def generate_daily_digest(
-    *,
-    stream_id: str | None = None,
-    stream_label: str | None = None,
-    hours: int = 24,
-    top_n: int = 10,
-    progress_callback: ProgressCallback | None = None,
-) -> dict:
-    """Generate a daily digest from recently scored articles.
-
-    Pulls articles from the score cache, filters by time window,
-    and produces a structured Markdown report with must_read / skim tiers.
-    """
-    from datetime import timedelta, timezone
-
-    _emit_progress(progress_callback, "phase", phase="loading_cache")
-    cutoff = datetime.now() - timedelta(hours=hours)
-    cached = iter_cached_scores()
-
-    recent = []
-    for item in cached:
-        updated = item.get("updated_at")
-        if not updated:
-            continue
-        try:
-            ts = datetime.fromisoformat(updated) if isinstance(updated, str) else updated
-            if ts >= cutoff:
-                recent.append(item)
-        except (ValueError, TypeError):
-            continue
-
-    if not recent:
-        result = {
-            "success": True,
-            "article_count": 0,
-            "summary": f"最近 {hours} 小时内没有已评分的文章。",
-            "markdown": "",
-        }
-        _emit_progress(progress_callback, "progress", phase="completed", current=0, total=0)
-        return result
-
-    recent.sort(key=lambda x: x.get("score", 0), reverse=True)
-
-    must_read = [item for item in recent if item.get("score", 0) >= 3.8][:top_n]
-    skim = [item for item in recent if 2.5 <= item.get("score", 0) < 3.8][:top_n]
-    low = [item for item in recent if item.get("score", 0) < 2.5]
-
-    lines = [
-        "# RSS Daily Digest",
-        "",
-        f"- 时间窗口: 最近 {hours} 小时",
-        f"- 已评分文章: {len(recent)} 篇",
-        f"- Must Read: {len(must_read)} 篇",
-        f"- Skim: {len(skim)} 篇",
-        f"- Low Priority: {len(low)} 篇",
-        "",
-        "## Must Read",
-    ]
-
-    for item in must_read:
-        data = item.get("data") or {}
-        title = data.get("title", item.get("article_id", "Unknown"))
-        url = data.get("url", "")
-        score = item.get("score", 0)
-        summary = (data.get("summary") or data.get("comment", ""))[:200]
-        if url:
-            lines.append(f"- [{title}]({url}) (score: {score:.1f})")
-        else:
-            lines.append(f"- {title} (score: {score:.1f})")
-        if summary:
-            lines.append(f"  - {summary}")
-
-    lines.extend(["", "## Skim"])
-    for item in skim:
-        data = item.get("data") or {}
-        title = data.get("title", item.get("article_id", "Unknown"))
-        url = data.get("url", "")
-        score = item.get("score", 0)
-        if url:
-            lines.append(f"- [{title}]({url}) (score: {score:.1f})")
-        else:
-            lines.append(f"- {title} (score: {score:.1f})")
-
-    markdown = "\n".join(lines) + "\n"
-
-    output_file = save_stream_overview_markdown(
-        markdown,
-        stream_label=stream_label or "daily-digest",
-        strategy="daily_digest",
-    )
-
-    result = {
-        "success": True,
-        "article_count": len(recent),
-        "must_read_count": len(must_read),
-        "skim_count": len(skim),
-        "low_count": len(low),
-        "hours": hours,
-        "summary": f"最近 {hours} 小时 {len(recent)} 篇文章，{len(must_read)} 篇必读",
-        "markdown": markdown,
-        "output_file": output_file,
-    }
-    _emit_progress(
-        progress_callback,
-        "progress",
-        phase="completed",
-        current=len(recent),
-        total=len(recent),
-    )
-    return result
-
-
-def regenerate_summary(input_file: str = LATEST_ANALYZED_FILE) -> dict:
-    if not os.path.exists(input_file):
-        return {
-            "error": "input_not_found",
-            "message": f"Could not find analyzed articles file: {input_file}",
-        }
-
-    articles = load_articles(input_file)
-    result = generate_summary_report(articles)
-    result["input_file"] = input_file
-    return result
-
-
-def export_articles(limit: int, output_file: str, stream_id: str | None = None) -> dict:
-    logger.info("Exporting up to %s unread articles to %s", limit, output_file)
-    articles = feedly_fetch_unread(limit=limit, stream_id=stream_id)
-    if articles is None:
-        return {
-            "error": "fetch_failed",
-            "message": "Failed to fetch unread articles from Feedly.",
-        }
-
-    save_articles(articles, output_file)
-    return {
-        "success": True,
-        "stream_id": stream_id,
-        "limit": limit,
-        "article_count": len(articles),
-        "output_file": output_file,
     }
 
 
@@ -1863,18 +1698,6 @@ def mark_stream_low_priority_read(article_ids: list[str], *, dry_run: bool = Fal
     }
 
 
-def _handle_export_articles(msg: dict) -> dict:
-    output_file = msg.get("output_file")
-    if not output_file:
-        return {"error": "no_output_file", "message": "Output file is required"}
-
-    return export_articles(
-        limit=int(msg.get("limit", PROJ_CONFIG["limit"])),
-        output_file=output_file,
-        stream_id=msg.get("stream_id"),
-    )
-
-
 def _handle_run_analysis(msg: dict) -> dict:
     return analyze_articles(
         input_file=msg.get("input_file", PROJ_CONFIG["input_file"]),
@@ -1883,24 +1706,6 @@ def _handle_run_analysis(msg: dict) -> dict:
         refresh=_coerce_bool(msg.get("refresh"), PROJ_CONFIG["refresh"]),
         stream_id=msg.get("stream_id"),
         threads=msg.get("threads"),
-    )
-
-
-def _handle_generate_summary(msg: dict) -> dict:
-    articles = msg.get("articles")
-    if articles is not None:
-        return generate_summary_report(articles)
-
-    input_file = msg.get("input_file", LATEST_ANALYZED_FILE)
-    return regenerate_summary(input_file=input_file)
-
-
-def _handle_generate_daily_digest(msg: dict) -> dict:
-    return generate_daily_digest(
-        stream_id=msg.get("stream_id"),
-        stream_label=msg.get("stream_label"),
-        hours=int(msg.get("hours", 24)),
-        top_n=int(msg.get("top_n", 10)),
     )
 
 
@@ -1960,19 +1765,6 @@ def _stream_run_analysis(msg: dict, progress_callback: ProgressCallback) -> dict
     )
 
 
-def _stream_generate_daily_digest(
-    msg: dict,
-    progress_callback: ProgressCallback,
-) -> dict:
-    return generate_daily_digest(
-        stream_id=msg.get("stream_id"),
-        stream_label=msg.get("stream_label"),
-        hours=int(msg.get("hours", 24)),
-        top_n=int(msg.get("top_n", 10)),
-        progress_callback=progress_callback,
-    )
-
-
 def _stream_process_stream(msg: dict, progress_callback: ProgressCallback) -> dict:
     return process_stream(
         stream_id=msg.get("stream_id"),
@@ -1987,11 +1779,9 @@ def _stream_process_stream(msg: dict, progress_callback: ProgressCallback) -> di
 
 MESSAGE_HANDLERS: dict[str, MessageHandler] = {
     **ANALYSIS_MESSAGE_HANDLERS,
+    **REPORT_MESSAGE_HANDLERS,
     **VECTOR_MESSAGE_HANDLERS,
-    "export_articles": _handle_export_articles,
     "run_analysis": _handle_run_analysis,
-    "generate_summary": _handle_generate_summary,
-    "generate_daily_digest": _handle_generate_daily_digest,
     "run_filters": _handle_run_filters,
     "process_stream": _handle_process_stream,
     "mark_stream_low_priority_read": _handle_mark_stream_low_priority_read,
@@ -1999,9 +1789,9 @@ MESSAGE_HANDLERS: dict[str, MessageHandler] = {
 }
 
 STREAM_HANDLERS: dict[str, StreamHandler] = {
+    **REPORT_STREAM_HANDLERS,
     **VECTOR_STREAM_HANDLERS,
     "run_analysis": _stream_run_analysis,
-    "generate_daily_digest": _stream_generate_daily_digest,
     "process_stream": _stream_process_stream,
 }
 

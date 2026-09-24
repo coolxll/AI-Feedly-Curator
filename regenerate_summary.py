@@ -5,7 +5,7 @@ Regenerate the overall summary from analyzed articles.
 
 import logging
 
-from rss_analyzer.backend_service import generate_summary_report, regenerate_summary
+from rss_analyzer.report_service import generate_summary_report, regenerate_summary
 from rss_analyzer.config import setup_logging
 
 logger = logging.getLogger(__name__)
