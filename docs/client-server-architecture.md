@@ -26,6 +26,8 @@
 - 当前入口：`rss_backend_service.py`
 - HTTP 封装：`rss_analyzer/http_service.py`
 - 共享消息分发：`rss_analyzer/backend_service.py`
+- Vector/search handlers：`rss_analyzer/vector_handlers.py`
+- Vector 生命周期与重建：`rss_analyzer/vector_service.py`
 
 这层是唯一允许直接访问模型配置、数据库和向量库的地方。
 
