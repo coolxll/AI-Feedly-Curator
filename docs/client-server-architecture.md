@@ -50,6 +50,7 @@
 客户端不应该各自保存 AI 逻辑，不应该各自直连模型，不应该各自维护缓存副本。
 
 TUI 的共享配置解析、路径和数据筛选 helper 位于 `rss_analyzer/tui/support.py`；
+Feedly stream 选择交互位于 `rss_analyzer/tui/stream_selection.py`；
 根目录的 `feedly_tui.py` 保留可执行入口与交互编排。
 
 ### 4. Agent Skills
