@@ -9,8 +9,8 @@ from rss_analyzer.feedly_workflows import (
     analyze_articles,
     mark_stream_low_priority_read,
     process_stream,
-    run_filter_workflow,
 )
+from rss_analyzer.filter_workflows import run_filter_workflow
 
 
 ProgressCallback = Callable[[dict], None]

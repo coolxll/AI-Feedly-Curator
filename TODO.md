@@ -28,6 +28,8 @@
   - `feedly_workflows.py` owns the domain workflows
   - `feedly_handlers.py` owns message/SSE transport adapters
   - `backend_service.py` is now the stable compatibility facade and dispatcher
+- [x] Extracted unread filtering and mark-as-read orchestration from `feedly_workflows.py`
+  - `filter_workflows.py` owns filter scoring, progressive marking, and filter pipelines
 
 ## Environment Notes
 
