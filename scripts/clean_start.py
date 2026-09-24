@@ -25,7 +25,7 @@ sys.path.insert(0, project_root)
 load_dotenv(os.path.join(project_root, ".env"))
 
 # Need to set up path before importing local modules
-from rss_analyzer.cache import DB_PATH  # noqa: E402
+from rss_analyzer.cache import DB_PATH, init_db  # noqa: E402
 from rss_analyzer.vector_store import vector_store  # noqa: E402
 
 
@@ -36,6 +36,7 @@ def clean_start():
     # 1. Clear SQLite database
     print("\n🗑️  Clearing SQLite database...")
     try:
+        init_db()
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
 
@@ -44,24 +45,13 @@ def clean_start():
         count = cursor.fetchone()[0]
         print(f"   Found {count} records in SQLite")
 
-        # Drop and recreate the table to ensure clean schema
-        cursor.execute("DROP TABLE IF EXISTS article_scores")
-
-        # Recreate with new schema (title and url columns)
-        cursor.execute("""
-            CREATE TABLE article_scores (
-                article_id TEXT PRIMARY KEY,
-                score REAL,
-                data TEXT,
-                title TEXT,
-                url TEXT,
-                updated_at TIMESTAMP
-            )
-        """)
+        cursor.execute("DELETE FROM article_scores")
+        cursor.execute("DELETE FROM app_cache")
+        cursor.execute("DELETE FROM vector_index_outbox")
 
         conn.commit()
         conn.close()
-        print("   ✅ SQLite database cleared and recreated with new schema")
+        print("   ✅ SQLite database cleared and tables re-initialized")
     except Exception as e:
         print(f"   ❌ Error clearing SQLite: {e}")
         return False

@@ -5,8 +5,9 @@
 **AI-Feedly-Curator** is an AI-powered tool designed to streamline RSS feed consumption. It integrates with Feedly to fetch unread articles, uses Large Language Models (LLMs) to analyze, score, and summarize content, and generates comprehensive Markdown reports.
 
 **Key Features:**
-*   **Feedly Integration:** Automatically fetches unread articles with unified authentication and token management (`rss_analyzer/feedly_auth.py`).
+*   **Feedly Integration:** Automatically fetches unread articles with unified authentication, token management (`rss_analyzer/feedly_auth.py`), 429 exponential backoff with `Retry-After`, and explicit HTTP timeout safeguards.
 *   **AI Analysis & Versioned Cache:** Scores articles based on relevance, informativeness, depth, etc., using customizable personas and cached fingerprints.
+*   **Concurrent Web Fetching:** Parallelizes article body extraction via thread pool prefetch prior to LLM scoring queues.
 *   **Task-Scoped Model Config:** Share one provider config and switch models per task for analysis and overall summary, while keeping embedding config independent.
 *   **Reporting:** Generates daily/monthly Markdown summaries and archives analyzed data.
 *   **Pre-filtering & Readflow:** Filters out low-quality or irrelevant content (ads, short posts) and supports multi-stage triage before LLM processing.
@@ -188,7 +189,7 @@ auto-pick a bare `.venv/` — that is what causes the Windows/WSL mix-up.
     *   Use environment variables (via `.env`) for shared chat provider settings, task-scoped model settings, and independent embedding settings.
     *   Recommended pattern: global `OPENAI_API_KEY` / `OPENAI_BASE_URL`, task model overrides via `ANALYSIS_OPENAI_MODEL` and `SUMMARY_OPENAI_MODEL`, plus independent `EMBEDDING_*`.
 *   **Logging:** Uses standard Python `logging`. Debug mode can be enabled via `--debug` flag or `DEBUG` env var.
-*   **Testing:** `pytest` test suite with 170+ unit and integration tests in `tests/`.
+*   **Testing:** `pytest` test suite with 185+ unit and integration tests in `tests/`.
     *   Run all tests: `uv run pytest tests/`
 *   **Output:** Analyzed data is saved as JSON, summaries as Markdown in `output/` organized by month.
 *   **Architecture:** Treat this repo as one product with multiple deployable clients. Shared logic belongs in `rss_analyzer/`; UI clients should stay thin and call the local service or handlers rather than duplicating AI logic.
