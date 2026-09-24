@@ -11,7 +11,7 @@ import logging
 import os
 import sys
 
-from rss_analyzer.feedly_workflows import (
+from rss_analyzer.filter_workflows import (
     FEED_ID_36KR,
     fetch_filter_articles as fetch_articles,
     low_score_filter,

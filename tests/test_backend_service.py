@@ -687,8 +687,8 @@ class TestBackendService(unittest.TestCase):
         self.assertNotIn("score", result[0])
         mock_logger.warning.assert_called()
 
-    @patch("rss_analyzer.feedly_workflows.feedly_mark_read")
-    @patch("rss_analyzer.feedly_workflows.get_cached_score")
+    @patch("rss_analyzer.filter_workflows.feedly_mark_read")
+    @patch("rss_analyzer.filter_workflows.get_cached_score")
     def test_low_score_filter_does_not_mark_read_inline(
         self, mock_get_cached_score, mock_feedly_mark_read
     ):
@@ -709,9 +709,9 @@ class TestBackendService(unittest.TestCase):
         self.assertEqual(result.label, "low-score")
         mock_feedly_mark_read.assert_not_called()
 
-    @patch("rss_analyzer.feedly_workflows.feedly_mark_read")
-    @patch("rss_analyzer.feedly_workflows.get_cached_score", return_value=None)
-    @patch("rss_analyzer.feedly_workflows._score_article")
+    @patch("rss_analyzer.filter_workflows.feedly_mark_read")
+    @patch("rss_analyzer.filter_workflows.get_cached_score", return_value=None)
+    @patch("rss_analyzer.filter_workflows._score_article")
     def test_low_score_filter_keeps_failed_analysis(
         self, mock_score_article, mock_get_cached_score, mock_feedly_mark_read
     ):
@@ -739,8 +739,8 @@ class TestBackendService(unittest.TestCase):
         self.assertEqual([item["id"] for item in result.remaining], ["article-1"])
         mock_feedly_mark_read.assert_not_called()
 
-    @patch("rss_analyzer.feedly_workflows.feedly_mark_read", return_value=True)
-    @patch("rss_analyzer.feedly_workflows.get_cached_score")
+    @patch("rss_analyzer.filter_workflows.feedly_mark_read", return_value=True)
+    @patch("rss_analyzer.filter_workflows.get_cached_score")
     def test_low_score_filter_incremental_mark_batches(
         self, mock_get_cached_score, mock_feedly_mark_read
     ):
@@ -769,8 +769,8 @@ class TestBackendService(unittest.TestCase):
         mock_feedly_mark_read.assert_any_call(["article-3", "article-4"])
         mock_feedly_mark_read.assert_any_call(["article-5"])
 
-    @patch("rss_analyzer.feedly_workflows.feedly_mark_read")
-    @patch("rss_analyzer.feedly_workflows.get_cached_score")
+    @patch("rss_analyzer.filter_workflows.feedly_mark_read")
+    @patch("rss_analyzer.filter_workflows.get_cached_score")
     def test_low_score_filter_incremental_mark_dry_run(
         self, mock_get_cached_score, mock_feedly_mark_read
     ):
@@ -795,7 +795,7 @@ class TestBackendService(unittest.TestCase):
         self.assertEqual(len(result.marked_ids), 0)
         mock_feedly_mark_read.assert_not_called()
 
-    @patch("rss_analyzer.feedly_workflows.feedly_mark_read")
+    @patch("rss_analyzer.filter_workflows.feedly_mark_read")
     def test_run_filter_pipeline_skips_already_marked(self, mock_feedly_mark_read):
         from rss_analyzer.backend_service import FilterResult, run_filter_pipeline
 
@@ -816,8 +816,8 @@ class TestBackendService(unittest.TestCase):
         self.assertEqual(result["remaining_count"], 1)
         mock_feedly_mark_read.assert_not_called()
 
-    @patch("rss_analyzer.feedly_workflows.run_filter_pipeline")
-    @patch("rss_analyzer.feedly_workflows.fetch_filter_articles")
+    @patch("rss_analyzer.filter_workflows.run_filter_pipeline")
+    @patch("rss_analyzer.filter_workflows.fetch_filter_articles")
     def test_run_filter_workflow_defaults_newsflash_to_36kr(
         self, mock_fetch_filter_articles, mock_run_filter_pipeline
     ):
