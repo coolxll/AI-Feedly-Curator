@@ -227,9 +227,6 @@ def generate_overall_summary(analyzed_articles: list) -> str:
         Markdown 格式的总体摘要
     """
     try:
-        openai_config = get_openai_task_config("summary", default_model="gpt-4o-mini")
-        client = OpenAI(**build_openai_client_kwargs(openai_config))
-
         articles_info = []
         skipped_count = 0
 
@@ -272,6 +269,9 @@ def generate_overall_summary(analyzed_articles: list) -> str:
 
         if not articles_info:
             return "没有值得总结的高质量文章。"
+
+        openai_config = get_openai_task_config("summary", default_model="gpt-4o-mini")
+        client = OpenAI(**build_openai_client_kwargs(openai_config))
 
         prompt = f"""你是一位专业的内容编辑，请基于以下已筛选的高质量文章列表（已过滤掉低分和垃圾内容），生成一份详细的阅读推荐报告。
 
