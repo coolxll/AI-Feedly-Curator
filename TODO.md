@@ -20,6 +20,7 @@
 - [x] Unified Feedly config, proxy, token refresh, and PKCE logic under `rss_analyzer/feedly_auth.py`
   - `feedly_token.py` is now a thin CLI over the shared implementation
   - removed the machine-specific hard-coded config path
+- [x] Replaced backend message and SSE routing condition chains with explicit handler registries
 
 ## Environment Notes
 

@@ -70,11 +70,13 @@ Hermes/Codex/Claude skills 也按客户端处理，而不是新的业务边界�
   - `POST /api/message`
 - Chrome 扩展已改为通过本地 HTTP 服务调用后端
 - 扩展内原先那套“直接配置 OpenAI API Key/Model/Prompt”的逻辑已移除
+- 普通消息和 SSE 特殊操作已使用显式 handler registry，新增操作不再扩展条件分支链
 
 ## 后续建议
 
 1. 把本地 GUI/Streamlit 中直接访问底层模块的地方，逐步收敛到同一套 service API。
-2. 若后端接口继续增长，把消息分发从 `type`-switch 进一步整理成显式路由表。
+2. 按 vector/search、analysis/report、Feedly workflow 逐步拆分后端 handlers；registry
+   保持为稳定的统一入口。
 3. Agent skills 继续作为薄客户端维护；若某个 skill 里的脚本变成通用能力，应迁回 `rss_analyzer/` 或项目 CLI。
 4. 当确认没有人再使用 native host 后，可将 `native_host/` 降级为 legacy 或直接删除。
 

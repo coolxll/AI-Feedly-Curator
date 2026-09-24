@@ -3,6 +3,8 @@ from unittest.mock import Mock, patch
 
 from rss_analyzer.backend_service import (
     BATCH_READ_FETCH_LIMIT,
+    MESSAGE_HANDLERS,
+    STREAM_HANDLERS,
     _build_batch_triage_prompt,
     _deep_analyze_digest_candidates,
     _deep_analysis_log_step,
@@ -16,6 +18,47 @@ from rss_analyzer.config import PROJ_CONFIG
 
 
 class TestBackendService(unittest.TestCase):
+    def test_message_handler_registry_contains_all_public_operations(self):
+        self.assertEqual(
+            set(MESSAGE_HANDLERS),
+            {
+                "get_vector_index_queue",
+                "retry_vector_indexing",
+                "get_score",
+                "get_scores",
+                "export_articles",
+                "run_analysis",
+                "generate_summary",
+                "generate_daily_digest",
+                "run_filters",
+                "process_stream",
+                "analyze_article",
+                "summarize_article",
+                "mark_stream_low_priority_read",
+                "semantic_search",
+                "get_article_tags",
+                "discover_trending_topics",
+                "delete_article",
+                "clear_vector_store",
+                "get_vector_store_stats",
+                "rebuild_vector_store",
+                "cleanup_invalid_entries",
+                "health",
+            },
+        )
+
+    def test_stream_handler_registry_is_an_explicit_message_subset(self):
+        self.assertEqual(
+            set(STREAM_HANDLERS),
+            {
+                "run_analysis",
+                "generate_daily_digest",
+                "process_stream",
+                "rebuild_vector_store",
+            },
+        )
+        self.assertLessEqual(set(STREAM_HANDLERS), set(MESSAGE_HANDLERS))
+
     def test_batch_triage_prompt_uses_feedly_summary(self):
         prompt = _build_batch_triage_prompt(
             [
@@ -298,6 +341,10 @@ class TestBackendService(unittest.TestCase):
 
     def test_unknown_message_type(self):
         response = handle_message({"type": "does_not_exist"})
+        self.assertEqual(response, {"error": "unknown_type"})
+
+    def test_unhashable_message_type_remains_an_unknown_type(self):
+        response = handle_message({"type": ["not", "valid"]})
         self.assertEqual(response, {"error": "unknown_type"})
 
     @patch("rss_analyzer.backend_service.save_articles")

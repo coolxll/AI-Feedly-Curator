@@ -65,6 +65,8 @@ FEED_ID_36KR = "feed/http://www.36kr.com/feed"
 BATCH_TRIAGE_CACHE_VERSION = 1
 BATCH_READ_FETCH_LIMIT = 9999
 ProgressCallback = Callable[[dict], None]
+MessageHandler = Callable[[dict], dict]
+StreamHandler = Callable[[dict, ProgressCallback], dict]
 
 
 def _emit_progress(
@@ -2489,39 +2491,93 @@ def _handle_retry_vector_indexing(msg: dict) -> dict:
     return retry_result
 
 
+def _handle_get_vector_index_queue(_: dict) -> dict:
+    return get_vector_index_queue_stats()
+
+
+def _stream_run_analysis(msg: dict, progress_callback: ProgressCallback) -> dict:
+    return analyze_articles(
+        input_file=msg.get("input_file", PROJ_CONFIG["input_file"]),
+        limit=int(msg.get("limit", PROJ_CONFIG["limit"])),
+        mark_read=_coerce_bool(msg.get("mark_read"), PROJ_CONFIG["mark_read"]),
+        refresh=_coerce_bool(msg.get("refresh"), PROJ_CONFIG["refresh"]),
+        stream_id=msg.get("stream_id"),
+        threads=msg.get("threads"),
+        progress_callback=progress_callback,
+    )
+
+
+def _stream_generate_daily_digest(
+    msg: dict,
+    progress_callback: ProgressCallback,
+) -> dict:
+    return generate_daily_digest(
+        stream_id=msg.get("stream_id"),
+        stream_label=msg.get("stream_label"),
+        hours=int(msg.get("hours", 24)),
+        top_n=int(msg.get("top_n", 10)),
+        progress_callback=progress_callback,
+    )
+
+
+def _stream_process_stream(msg: dict, progress_callback: ProgressCallback) -> dict:
+    return process_stream(
+        stream_id=msg.get("stream_id"),
+        stream_label=msg.get("stream_label"),
+        days=int(msg.get("days", 3)),
+        limit=int(msg.get("limit", 500)),
+        strategy=msg.get("strategy"),
+        export_markdown=_coerce_bool(msg.get("export_markdown"), False),
+        progress_callback=progress_callback,
+    )
+
+
+def _stream_rebuild_vector_store(
+    _: dict,
+    progress_callback: ProgressCallback,
+) -> dict:
+    return rebuild_vector_store(progress_callback=progress_callback)
+
+
+MESSAGE_HANDLERS: dict[str, MessageHandler] = {
+    "get_vector_index_queue": _handle_get_vector_index_queue,
+    "retry_vector_indexing": _handle_retry_vector_indexing,
+    "get_score": _handle_get_score,
+    "get_scores": _handle_get_scores,
+    "export_articles": _handle_export_articles,
+    "run_analysis": _handle_run_analysis,
+    "generate_summary": _handle_generate_summary,
+    "generate_daily_digest": _handle_generate_daily_digest,
+    "run_filters": _handle_run_filters,
+    "process_stream": _handle_process_stream,
+    "analyze_article": _handle_analyze_article,
+    "summarize_article": _handle_summarize_article,
+    "mark_stream_low_priority_read": _handle_mark_stream_low_priority_read,
+    "semantic_search": _handle_semantic_search,
+    "get_article_tags": _handle_get_article_tags,
+    "discover_trending_topics": _handle_discover_trending_topics,
+    "delete_article": _handle_delete_article,
+    "clear_vector_store": _handle_clear_vector_store,
+    "get_vector_store_stats": _handle_get_vector_store_stats,
+    "rebuild_vector_store": _handle_rebuild_vector_store,
+    "cleanup_invalid_entries": _handle_cleanup_invalid_entries,
+    "health": _handle_health,
+}
+
+STREAM_HANDLERS: dict[str, StreamHandler] = {
+    "run_analysis": _stream_run_analysis,
+    "generate_daily_digest": _stream_generate_daily_digest,
+    "process_stream": _stream_process_stream,
+    "rebuild_vector_store": _stream_rebuild_vector_store,
+}
+
+
 def handle_stream_message(msg: dict, progress_callback: ProgressCallback) -> dict:
     """Run a request in the current connection while emitting progress events."""
     msg_type = msg.get("type")
-    if msg_type == "run_analysis":
-        return analyze_articles(
-            input_file=msg.get("input_file", PROJ_CONFIG["input_file"]),
-            limit=int(msg.get("limit", PROJ_CONFIG["limit"])),
-            mark_read=_coerce_bool(msg.get("mark_read"), PROJ_CONFIG["mark_read"]),
-            refresh=_coerce_bool(msg.get("refresh"), PROJ_CONFIG["refresh"]),
-            stream_id=msg.get("stream_id"),
-            threads=msg.get("threads"),
-            progress_callback=progress_callback,
-        )
-    if msg_type == "generate_daily_digest":
-        return generate_daily_digest(
-            stream_id=msg.get("stream_id"),
-            stream_label=msg.get("stream_label"),
-            hours=int(msg.get("hours", 24)),
-            top_n=int(msg.get("top_n", 10)),
-            progress_callback=progress_callback,
-        )
-    if msg_type == "process_stream":
-        return process_stream(
-            stream_id=msg.get("stream_id"),
-            stream_label=msg.get("stream_label"),
-            days=int(msg.get("days", 3)),
-            limit=int(msg.get("limit", 500)),
-            strategy=msg.get("strategy"),
-            export_markdown=_coerce_bool(msg.get("export_markdown"), False),
-            progress_callback=progress_callback,
-        )
-    if msg_type == "rebuild_vector_store":
-        return rebuild_vector_store(progress_callback=progress_callback)
+    handler = STREAM_HANDLERS.get(msg_type) if isinstance(msg_type, str) else None
+    if handler:
+        return handler(msg, progress_callback)
 
     _emit_progress(progress_callback, "phase", phase="executing")
     return handle_message(msg)
@@ -2529,48 +2585,5 @@ def handle_stream_message(msg: dict, progress_callback: ProgressCallback) -> dic
 
 def handle_message(msg: dict) -> dict:
     msg_type = msg.get("type")
-    if msg_type == "get_vector_index_queue":
-        return get_vector_index_queue_stats()
-    if msg_type == "retry_vector_indexing":
-        return _handle_retry_vector_indexing(msg)
-    if msg_type == "get_score":
-        return _handle_get_score(msg)
-    if msg_type == "get_scores":
-        return _handle_get_scores(msg)
-    if msg_type == "export_articles":
-        return _handle_export_articles(msg)
-    if msg_type == "run_analysis":
-        return _handle_run_analysis(msg)
-    if msg_type == "generate_summary":
-        return _handle_generate_summary(msg)
-    if msg_type == "generate_daily_digest":
-        return _handle_generate_daily_digest(msg)
-    if msg_type == "run_filters":
-        return _handle_run_filters(msg)
-    if msg_type == "process_stream":
-        return _handle_process_stream(msg)
-    if msg_type == "analyze_article":
-        return _handle_analyze_article(msg)
-    if msg_type == "summarize_article":
-        return _handle_summarize_article(msg)
-    if msg_type == "mark_stream_low_priority_read":
-        return _handle_mark_stream_low_priority_read(msg)
-    if msg_type == "semantic_search":
-        return _handle_semantic_search(msg)
-    if msg_type == "get_article_tags":
-        return _handle_get_article_tags(msg)
-    if msg_type == "discover_trending_topics":
-        return _handle_discover_trending_topics(msg)
-    if msg_type == "delete_article":
-        return _handle_delete_article(msg)
-    if msg_type == "clear_vector_store":
-        return _handle_clear_vector_store(msg)
-    if msg_type == "get_vector_store_stats":
-        return _handle_get_vector_store_stats(msg)
-    if msg_type == "rebuild_vector_store":
-        return _handle_rebuild_vector_store(msg)
-    if msg_type == "cleanup_invalid_entries":
-        return _handle_cleanup_invalid_entries(msg)
-    if msg_type == "health":
-        return _handle_health(msg)
-    return {"error": "unknown_type"}
+    handler = MESSAGE_HANDLERS.get(msg_type) if isinstance(msg_type, str) else None
+    return handler(msg) if handler else {"error": "unknown_type"}
