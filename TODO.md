@@ -32,6 +32,9 @@
   - `filter_workflows.py` owns filter scoring, progressive marking, and filter pipelines
 - [x] Extracted stream overview and batch-reading orchestration from `feedly_workflows.py`
   - `readflow_workflows.py` owns digest reranking, batch triage, P2 deep reads, and batch mark-as-read
+- [x] Extracted Feedly fetch-and-analyze orchestration from `feedly_workflows.py`
+  - `feed_analysis_workflow.py` owns refresh, scoring, report generation, and successful-result mark-as-read
+  - `feedly_workflows.py` is now a compatibility-only domain facade
 
 ## Environment Notes
 
