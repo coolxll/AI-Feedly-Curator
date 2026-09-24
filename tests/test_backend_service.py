@@ -102,9 +102,9 @@ class TestBackendService(unittest.TestCase):
         self.assertEqual(result["p2-1"]["decision"], "must_read")
         self.assertTrue(result["p2-1"]["needs_deep_read"])
 
-    @patch("rss_analyzer.feedly_workflows._deep_analyze_digest_candidates")
-    @patch("rss_analyzer.feedly_workflows._batch_triage_articles")
-    @patch("rss_analyzer.feedly_workflows.fetch_filter_articles")
+    @patch("rss_analyzer.readflow_workflows._deep_analyze_digest_candidates")
+    @patch("rss_analyzer.readflow_workflows._batch_triage_articles")
+    @patch("rss_analyzer.readflow_workflows.fetch_filter_articles")
     def test_process_batch_builds_p2_briefing_without_fetch_limit_from_chunk_size(
         self,
         mock_fetch_filter_articles,
@@ -561,10 +561,10 @@ class TestBackendService(unittest.TestCase):
         self.assertTrue(response["success"])
         mock_mark_low.assert_called_once_with(["a", "b"], dry_run=False)
 
-    @patch("rss_analyzer.feedly_workflows.render_stream_overview_markdown")
-    @patch("rss_analyzer.feedly_workflows.analyze_article_with_llm")
-    @patch("rss_analyzer.feedly_workflows.fetch_filter_articles")
-    @patch("rss_analyzer.feedly_workflows.generate_stream_overview")
+    @patch("rss_analyzer.readflow_workflows.render_stream_overview_markdown")
+    @patch("rss_analyzer.readflow_workflows.analyze_article_with_llm")
+    @patch("rss_analyzer.readflow_workflows.fetch_filter_articles")
+    @patch("rss_analyzer.readflow_workflows.generate_stream_overview")
     def test_process_stream_demotes_low_score_must_read_after_analysis(
         self,
         mock_generate_stream_overview,
@@ -613,8 +613,8 @@ class TestBackendService(unittest.TestCase):
         mock_render_markdown.return_value = "digest markdown"
 
         with (
-            patch("rss_analyzer.feedly_workflows.get_cached_score", return_value=None),
-            patch("rss_analyzer.feedly_workflows.save_cached_score"),
+            patch("rss_analyzer.readflow_workflows.get_cached_score", return_value=None),
+            patch("rss_analyzer.readflow_workflows.save_cached_score"),
         ):
             result = process_stream(stream_id="feed/v2ex", stream_label="Feed: V2EX")
 
@@ -622,9 +622,9 @@ class TestBackendService(unittest.TestCase):
         self.assertEqual(len(result["digest"]["clear_items"]), 1)
         self.assertEqual(result["mark_read_candidates"], ["1"])
 
-    @patch("rss_analyzer.feedly_workflows.logger")
-    @patch("rss_analyzer.feedly_workflows.analyze_article_with_llm")
-    @patch("rss_analyzer.feedly_workflows._prepare_article_analysis_inputs")
+    @patch("rss_analyzer.readflow_workflows.logger")
+    @patch("rss_analyzer.readflow_workflows.analyze_article_with_llm")
+    @patch("rss_analyzer.readflow_workflows._prepare_article_analysis_inputs")
     def test_deep_analyze_digest_candidates_logs_progress_and_preserves_order(
         self,
         mock_prepare_inputs,
@@ -642,8 +642,8 @@ class TestBackendService(unittest.TestCase):
         ]
 
         with (
-            patch("rss_analyzer.feedly_workflows.get_cached_score", return_value=None),
-            patch("rss_analyzer.feedly_workflows.save_cached_score"),
+            patch("rss_analyzer.readflow_workflows.get_cached_score", return_value=None),
+            patch("rss_analyzer.readflow_workflows.save_cached_score"),
         ):
             result = _deep_analyze_digest_candidates(items)
 
@@ -664,13 +664,13 @@ class TestBackendService(unittest.TestCase):
             info_messages,
         )
 
-    @patch("rss_analyzer.feedly_workflows.logger")
+    @patch("rss_analyzer.readflow_workflows.logger")
     @patch(
-        "rss_analyzer.feedly_workflows.analyze_article_with_llm",
+        "rss_analyzer.readflow_workflows.analyze_article_with_llm",
         side_effect=Exception("boom"),
     )
     @patch(
-        "rss_analyzer.feedly_workflows._prepare_article_analysis_inputs",
+        "rss_analyzer.readflow_workflows._prepare_article_analysis_inputs",
         return_value=("summary", "Long enough content" * 20),
     )
     def test_deep_analyze_digest_candidates_keeps_batch_running_on_single_failure(
