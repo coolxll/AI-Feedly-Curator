@@ -25,7 +25,9 @@
 
 - 当前入口：`rss_backend_service.py`
 - HTTP 封装：`rss_analyzer/http_service.py`
-- 共享消息分发：`rss_analyzer/backend_service.py`
+- 稳定 facade 与共享消息分发：`rss_analyzer/backend_service.py`
+- Feedly 分析、过滤、stream 与批量阅读工作流：`rss_analyzer/feedly_workflows.py`
+- Feedly 消息与 SSE adapters：`rss_analyzer/feedly_handlers.py`
 - 文章级评分与摘要 handlers：`rss_analyzer/analysis_handlers.py`
 - 报告、日报与导出：`rss_analyzer/report_service.py`、`rss_analyzer/report_handlers.py`
 - Vector/search handlers：`rss_analyzer/vector_handlers.py`
@@ -75,14 +77,13 @@ Hermes/Codex/Claude skills 也按客户端处理，而不是新的业务边界�
 - Chrome 扩展已改为通过本地 HTTP 服务调用后端
 - 扩展内原先那套“直接配置 OpenAI API Key/Model/Prompt”的逻辑已移除
 - 普通消息和 SSE 特殊操作已使用显式 handler registry，新增操作不再扩展条件分支链
+- `backend_service.py` 已收敛为稳定 facade/dispatcher；Feedly、分析、报告和向量领域逻辑分别位于各自的 service/workflow 与 handler 模块
 
 ## 后续建议
 
 1. 把本地 GUI/Streamlit 中直接访问底层模块的地方，逐步收敛到同一套 service API。
-2. 按 Feedly/filter workflows 继续拆分后端；registry
-   保持为稳定的统一入口。
-3. Agent skills 继续作为薄客户端维护；若某个 skill 里的脚本变成通用能力，应迁回 `rss_analyzer/` 或项目 CLI。
-4. 当确认没有人再使用 native host 后，可将 `native_host/` 降级为 legacy 或直接删除。
+2. Agent skills 继续作为薄客户端维护；若某个 skill 里的脚本变成通用能力，应迁回 `rss_analyzer/` 或项目 CLI。
+3. 当确认没有人再使用 native host 后，可将 `native_host/` 降级为 legacy 或直接删除。
 
 ## SSE 流式请求
 
