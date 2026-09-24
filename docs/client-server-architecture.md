@@ -26,8 +26,9 @@
 - 当前入口：`rss_backend_service.py`
 - HTTP 封装：`rss_analyzer/http_service.py`
 - 稳定 facade 与共享消息分发：`rss_analyzer/backend_service.py`
-- Feedly 分析、过滤、stream 与批量阅读工作流：`rss_analyzer/feedly_workflows.py`
+- Feedly 抓取与分析工作流：`rss_analyzer/feedly_workflows.py`
 - Feedly 未读过滤与 mark-as-read 工作流：`rss_analyzer/filter_workflows.py`
+- Stream overview、batch triage 与 P2 深读工作流：`rss_analyzer/readflow_workflows.py`
 - Feedly 消息与 SSE adapters：`rss_analyzer/feedly_handlers.py`
 - 文章级评分与摘要 handlers：`rss_analyzer/analysis_handlers.py`
 - 报告、日报与导出：`rss_analyzer/report_service.py`、`rss_analyzer/report_handlers.py`

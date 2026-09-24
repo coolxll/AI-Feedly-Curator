@@ -30,6 +30,8 @@
   - `backend_service.py` is now the stable compatibility facade and dispatcher
 - [x] Extracted unread filtering and mark-as-read orchestration from `feedly_workflows.py`
   - `filter_workflows.py` owns filter scoring, progressive marking, and filter pipelines
+- [x] Extracted stream overview and batch-reading orchestration from `feedly_workflows.py`
+  - `readflow_workflows.py` owns digest reranking, batch triage, P2 deep reads, and batch mark-as-read
 
 ## Environment Notes
 
