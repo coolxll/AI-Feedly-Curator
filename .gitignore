@@ -58,6 +58,8 @@ native_host/logs/
 # DB
 rss_scores.db
 
+.coverage
+.coverage.*
 htmlcov/
 
 .gemini/
