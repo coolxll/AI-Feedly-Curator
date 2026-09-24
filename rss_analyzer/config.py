@@ -65,6 +65,7 @@ PROJ_CONFIG = {
     "batch_scoring": True,
     "batch_size": 10,
     "max_workers": 3,
+    "fetch_workers": 5,
     "enable_vector_store": True,
     "scoring_persona": """
 你是一名关注广泛的资深程序员。

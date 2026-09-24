@@ -12,7 +12,10 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 os.environ.setdefault("RSS_SCORES_DB", str(PROJECT_ROOT / "rss_scores.db"))
 os.environ.setdefault("RSS_VECTOR_DB_DIR", str(PROJECT_ROOT / "chroma_db"))
 
-from rss_analyzer.article_fetcher import fetch_article_content
+from rss_analyzer.article_fetcher import (
+    fetch_article_content,
+    fetch_articles_content_concurrently,
+)
 from rss_analyzer.analysis_service import ArticleAnalysisService, PreparedArticle
 from rss_analyzer.cache import get_cached_score, save_cached_score
 from rss_analyzer.config import (
@@ -47,10 +50,12 @@ def _emit_progress(
         callback({"event": event, **payload})
 
 
-def get_analysis_service() -> ArticleAnalysisService:
+def get_analysis_service(
+    fetch_content_func: Callable[[str], str] | None = None,
+) -> ArticleAnalysisService:
     """Compatibility factory for backend workflows and dependency injection."""
     return ArticleAnalysisService(
-        fetch_content=fetch_article_content,
+        fetch_content=fetch_content_func or fetch_article_content,
         analyze_one=analyze_article_with_llm,
         analyze_batch=analyze_articles_with_llm_batch,
         cache_get=get_cached_score,
@@ -80,6 +85,7 @@ def analyze_articles(
     stream_id: str | None = None,
     threads: int | None = None,
     progress_callback: ProgressCallback | None = None,
+    fetch_content: Callable[[str], str] | None = None,
 ) -> dict:
     effective_limit = limit or int(PROJ_CONFIG["limit"])
     _emit_progress(progress_callback, "phase", phase="fetching")
@@ -133,6 +139,62 @@ def analyze_articles(
     batch_scoring = PROJ_CONFIG.get("batch_scoring", False)
     batch_size = max(1, int(PROJ_CONFIG.get("batch_size", 1)))
     batch_queue: list[dict] = []
+
+    worker_fetch_func = fetch_content or fetch_article_content
+    analysis_service = get_analysis_service(fetch_content_func=worker_fetch_func)
+
+    # Concurrently prefetch web content for articles requiring extraction
+    prefetch_seen: set[str] = set()
+    filter_keywords = PROJ_CONFIG.get("filter_keywords", [])
+    filter_url_patterns = PROJ_CONFIG.get("filter_url_patterns", [])
+
+    def _should_fetch_content(art: dict) -> bool:
+        c = art.get("content", "") or ""
+        s = art.get("summary", "") or ""
+        if c and len(c) > 200:
+            return False
+        if s and len(s) > 500:
+            return False
+        return bool(art.get("link"))
+
+    def _is_prefiltered(art: dict, seen: set[str]) -> bool:
+        title = art.get("title", "")
+        if any(kw in title for kw in filter_keywords):
+            return True
+        article_url = art.get("link", "") or art.get("originId", "")
+        if any(pattern in article_url for pattern in filter_url_patterns):
+            return True
+        norm_title = "".join(filter(str.isalnum, title.lower()))
+        if len(norm_title) > 5:
+            if norm_title in seen:
+                return True
+            seen.add(norm_title)
+        if is_newsflash(art):
+            return True
+        return False
+
+    urls_to_prefetch: list[str] = []
+    for art in articles[:effective_limit]:
+        if _is_prefiltered(art, prefetch_seen):
+            continue
+        if _should_fetch_content(art):
+            link = (art.get("link") or "").strip()
+            if link:
+                urls_to_prefetch.append(link)
+
+    fetch_workers = threads or int(PROJ_CONFIG.get("fetch_workers", 5))
+    prefetched_contents: dict[str, str] = {}
+    if urls_to_prefetch:
+        logger.info(
+            "Concurrently prefetching web content for %s articles with %s workers...",
+            len(urls_to_prefetch),
+            fetch_workers,
+        )
+        prefetched_contents = fetch_articles_content_concurrently(
+            urls_to_prefetch,
+            max_workers=fetch_workers,
+            fetch_one=worker_fetch_func,
+        )
 
     max_workers = threads or int(PROJ_CONFIG.get("max_workers", 3))
     executor = concurrent.futures.ThreadPoolExecutor(max_workers=max_workers)
@@ -311,11 +373,16 @@ def analyze_articles(
                 logger.info("  Summary is long enough (%s chars); skipping fetch", len(summary))
                 content = summary
             else:
-                logger.info("  Fetching article content...")
-                fetched_content = fetch_article_content(article["link"])
+                link = (article.get("link") or "").strip()
+                if link and link in prefetched_contents:
+                    fetched_content = prefetched_contents[link]
+                    logger.info("  Using prefetched content (%s chars)", len(fetched_content))
+                else:
+                    logger.info("  Fetching article content...")
+                    fetched_content = worker_fetch_func(link) if link else ""
+                    logger.info("  Fetch complete: %s chars", len(fetched_content))
                 if fetched_content:
                     content = fetched_content
-                logger.info("  Fetch complete: %s chars", len(content))
 
             min_length = PROJ_CONFIG.get("filter_min_length", 100)
             if len(content) < min_length:
@@ -353,7 +420,7 @@ def analyze_articles(
                     ]
                     logger.info("  Submitting batch scoring task (size=%s)", len(batch_payload))
                     future = executor.submit(
-                        get_analysis_service().analyze_many_prepared,
+                        analysis_service.analyze_many_prepared,
                         batch_payload,
                     )
                     pending_futures.append((future, list(batch_queue)))
@@ -361,7 +428,7 @@ def analyze_articles(
 
                 process_completed_futures()
             else:
-                analysis = get_analysis_service().analyze_prepared(
+                analysis = analysis_service.analyze_prepared(
                     PreparedArticle(
                         article_id=str(article.get("id") or ""),
                         title=article["title"],
@@ -385,7 +452,7 @@ def analyze_articles(
             ]
             logger.info("  Submitting final batch scoring task (size=%s)", len(batch_payload))
             future = executor.submit(
-                get_analysis_service().analyze_many_prepared,
+                analysis_service.analyze_many_prepared,
                 batch_payload,
             )
             pending_futures.append((future, list(batch_queue)))

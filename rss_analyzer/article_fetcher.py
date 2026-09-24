@@ -1,15 +1,60 @@
-"""
-文章内容抓取模块
-负责从网页中提取文章正文
-"""
+from __future__ import annotations
 
-import os
+import concurrent.futures
 import logging
+import os
+from typing import Callable
+
 import requests
 
 from .config import PROJ_CONFIG
 
 logger = logging.getLogger(__name__)
+
+__all__ = [
+    "fetch_article_content",
+    "fetch_articles_content_concurrently",
+]
+
+
+def fetch_articles_content_concurrently(
+    urls: list[str],
+    max_workers: int = 5,
+    fetch_one: Callable[[str], str] | None = None,
+) -> dict[str, str]:
+    """
+    并发抓取多篇文章内容
+
+    Args:
+        urls: 文章 URL 列表
+        max_workers: 并发抓取线程数（默认 5）
+        fetch_one: 单篇抓取函数（默认为 fetch_article_content）
+
+    Returns:
+        字典映射：{url: content}
+    """
+    if not urls:
+        return {}
+
+    worker = fetch_one or fetch_article_content
+    unique_urls = [u for u in dict.fromkeys(urls) if u]
+    if not unique_urls:
+        return {}
+
+    actual_workers = max(1, min(max_workers, len(unique_urls)))
+    results: dict[str, str] = {}
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=actual_workers) as executor:
+        future_to_url = {executor.submit(worker, url): url for url in unique_urls}
+        for future in concurrent.futures.as_completed(future_to_url):
+            url = future_to_url[future]
+            try:
+                results[url] = future.result()
+            except Exception as e:
+                logger.warning("Error fetching %s concurrently: %s", url, e)
+                results[url] = f"处理异常: {str(e)}"
+
+    return results
 
 
 def fetch_article_content(url: str) -> str:
