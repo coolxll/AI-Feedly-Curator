@@ -2,6 +2,7 @@ import sqlite3
 import json
 import os
 import logging
+import threading
 from datetime import datetime
 from typing import Any
 
@@ -35,6 +36,19 @@ def init_db():
                 expires_at TIMESTAMP
             )
         """)
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS vector_index_outbox (
+                article_id TEXT PRIMARY KEY,
+                payload TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'pending',
+                attempts INTEGER NOT NULL DEFAULT 0,
+                last_error TEXT,
+                updated_at TEXT NOT NULL
+            )
+        """)
+        c.execute(
+            "UPDATE vector_index_outbox SET status = 'pending' WHERE status = 'processing'"
+        )
         conn.commit()
         conn.close()
     except Exception as e:
@@ -231,54 +245,187 @@ def save_cached_score(article_id: str, score: float, data: dict):
     if not article_id:
         return
     try:
-        # 1. Save to SQLite
-        conn = sqlite3.connect(DB_PATH)
-        c = conn.cursor()
-        # Include title and url in the INSERT/UPDATE
+        vector_enabled = is_vector_store_enabled()
+        updated_at = datetime.now().isoformat()
+        vector_payload = (
+            build_vector_store_payload(article_id, score, data, updated_at)
+            if vector_enabled
+            else None
+        )
         title = data.get("title", "")
         url = data.get("url", "")
-        c.execute(
-            """
-            INSERT OR REPLACE INTO article_scores (article_id, score, data, title, url, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?)
-        """,
-            (
-                article_id,
-                score,
-                json.dumps(data, ensure_ascii=False),
-                title,
-                url,
-                datetime.now(),
-            ),
-        )
-        conn.commit()
-        conn.close()
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO article_scores (article_id, score, data, title, url, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    article_id,
+                    score,
+                    json.dumps(data, ensure_ascii=False),
+                    title,
+                    url,
+                    updated_at,
+                ),
+            )
+            if vector_payload:
+                conn.execute(
+                    """
+                    INSERT INTO vector_index_outbox (
+                        article_id, payload, status, attempts, last_error, updated_at
+                    ) VALUES (?, ?, 'pending', 0, NULL, ?)
+                    ON CONFLICT(article_id) DO UPDATE SET
+                        payload = excluded.payload,
+                        status = 'pending',
+                        attempts = 0,
+                        last_error = NULL,
+                        updated_at = excluded.updated_at
+                    """,
+                    (
+                        article_id,
+                        json.dumps(vector_payload, ensure_ascii=False),
+                        updated_at,
+                    ),
+                )
 
-        if not is_vector_store_enabled():
+        if not vector_enabled:
             logger.debug("Vector store disabled; skipped embedding persistence for %s", article_id)
             return
-
-        # 2. Save to Vector Store (ChromaDB)
-        try:
-            # Local import to avoid circular dependency if cache is imported early
-            from rss_analyzer.vector_store import vector_store
-            payload = build_vector_store_payload(article_id, score, data)
-            if payload:
-                # Async-like: don't let vector store failure block main flow
-                vector_store.add_article(
-                    payload["article_id"],
-                    payload["document_text"],
-                    payload["metadata"],
-                )
-                logger.debug(f"Saved vector embedding for {article_id}")
-
-        except Exception as ve:
-            # Log but don't fail the whole operation
-            logger.warning(f"Failed to save vector embedding: {ve}")
+        if vector_payload:
+            start_vector_index_worker()
+            _VECTOR_WORKER_EVENT.set()
 
     except Exception as e:
         logger.error(f"Cache write error: {e}")
 
 
+def get_vector_index_queue_stats() -> dict[str, int]:
+    try:
+        with sqlite3.connect(DB_PATH) as connection:
+            rows = connection.execute(
+                "SELECT status, COUNT(*) FROM vector_index_outbox GROUP BY status"
+            ).fetchall()
+        stats = {"pending": 0, "processing": 0, "failed": 0}
+        stats.update({status: count for status, count in rows})
+        stats["total"] = sum(rows_count for _, rows_count in rows)
+        return stats
+    except Exception as exc:
+        logger.error("Failed to read vector index queue stats: %s", exc)
+        return {"pending": 0, "processing": 0, "failed": 0, "total": 0}
+
+
+def process_vector_index_queue(limit: int = 20) -> dict[str, int]:
+    processed = 0
+    failed = 0
+    for _ in range(max(1, limit)):
+        connection = sqlite3.connect(DB_PATH, timeout=30)
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                """
+                SELECT article_id, payload FROM vector_index_outbox
+                WHERE status = 'pending' ORDER BY updated_at ASC LIMIT 1
+                """
+            ).fetchone()
+            if not row:
+                connection.commit()
+                break
+            article_id, payload_json = row
+            connection.execute(
+                """
+                UPDATE vector_index_outbox
+                SET status = 'processing', attempts = attempts + 1, updated_at = ?
+                WHERE article_id = ?
+                """,
+                (datetime.now().isoformat(), article_id),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        try:
+            from rss_analyzer.vector_store import vector_store
+
+            payload = json.loads(payload_json)
+            if not vector_store.add_article(
+                payload["article_id"],
+                payload["document_text"],
+                payload["metadata"],
+            ):
+                raise RuntimeError("Vector store rejected article")
+            with sqlite3.connect(DB_PATH) as connection:
+                connection.execute(
+                    """
+                    DELETE FROM vector_index_outbox
+                    WHERE article_id = ? AND status = 'processing' AND payload = ?
+                    """,
+                    (article_id, payload_json),
+                )
+            processed += 1
+        except Exception as exc:
+            failed += 1
+            logger.warning("Vector indexing failed for %s: %s", article_id, exc)
+            with sqlite3.connect(DB_PATH) as connection:
+                connection.execute(
+                    """
+                    UPDATE vector_index_outbox
+                    SET status = 'failed', last_error = ?, updated_at = ?
+                    WHERE article_id = ? AND status = 'processing' AND payload = ?
+                    """,
+                    (str(exc), datetime.now().isoformat(), article_id, payload_json),
+                )
+    return {"processed": processed, "failed": failed, **get_vector_index_queue_stats()}
+
+
+def retry_vector_index_queue(*, wake_worker: bool = True) -> dict[str, int]:
+    with sqlite3.connect(DB_PATH) as connection:
+        cursor = connection.execute(
+            """
+            UPDATE vector_index_outbox
+            SET status = 'pending', last_error = NULL, updated_at = ?
+            WHERE status = 'failed'
+            """,
+            (datetime.now().isoformat(),),
+        )
+    if wake_worker:
+        start_vector_index_worker()
+        _VECTOR_WORKER_EVENT.set()
+    return {"retried": cursor.rowcount, **get_vector_index_queue_stats()}
+
+
+_VECTOR_WORKER_EVENT = threading.Event()
+_VECTOR_WORKER_LOCK = threading.Lock()
+_VECTOR_WORKER_STARTED = False
+
+
+def _vector_worker() -> None:
+    while True:
+        _VECTOR_WORKER_EVENT.wait(timeout=5)
+        _VECTOR_WORKER_EVENT.clear()
+        if not is_vector_store_enabled():
+            continue
+        result = process_vector_index_queue(limit=20)
+        if result["pending"]:
+            _VECTOR_WORKER_EVENT.set()
+
+
+def start_vector_index_worker() -> None:
+    global _VECTOR_WORKER_STARTED
+    with _VECTOR_WORKER_LOCK:
+        if _VECTOR_WORKER_STARTED:
+            return
+        thread = threading.Thread(
+            target=_vector_worker,
+            name="rss-vector-index-worker",
+            daemon=True,
+        )
+        thread.start()
+        _VECTOR_WORKER_STARTED = True
+
+
 # Initialize on module load
 init_db()
+if is_vector_store_enabled() and get_vector_index_queue_stats()["pending"]:
+    start_vector_index_worker()
+    _VECTOR_WORKER_EVENT.set()

@@ -9,7 +9,7 @@ import logging
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs
 
-from rss_analyzer.backend_service import handle_message
+from rss_analyzer.backend_service import get_job_manager, handle_message
 
 logger = logging.getLogger(__name__)
 ALLOWED_EXTENSION_ORIGIN_PREFIXES = (
@@ -153,4 +153,5 @@ class BackendHTTPRequestHandler(BaseHTTPRequestHandler):
 
 
 def create_server(host: str = "127.0.0.1", port: int = 8765) -> ThreadingHTTPServer:
+    get_job_manager().start()
     return ThreadingHTTPServer((host, port), BackendHTTPRequestHandler)

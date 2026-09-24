@@ -5,6 +5,7 @@ Shared backend message handlers for browser/native/local clients.
 from __future__ import annotations
 
 import concurrent.futures
+import hashlib
 import json
 import logging
 import os
@@ -24,6 +25,9 @@ from rss_analyzer.cache import (
     get_app_cache,
     get_cached_score,
     iter_cached_scores,
+    get_vector_index_queue_stats,
+    process_vector_index_queue,
+    retry_vector_index_queue,
     set_app_cache,
     save_cached_score,
 )
@@ -42,6 +46,7 @@ from rss_analyzer.llm_analyzer import (
     generate_overall_summary,
     summarize_single_article,
 )
+from rss_analyzer.jobs import JobManager
 from rss_analyzer.readflow_triage import (
     article_summary_snippet,
     build_readflow_triage_prompt,
@@ -61,6 +66,14 @@ _VECTOR_STORE = None
 FEED_ID_36KR = "feed/http://www.36kr.com/feed"
 BATCH_TRIAGE_CACHE_VERSION = 1
 BATCH_READ_FETCH_LIMIT = 9999
+ASYNC_JOB_OPERATIONS = {
+    "run_analysis",
+    "generate_daily_digest",
+    "process_stream",
+    "rebuild_vector_store",
+    "retry_vector_indexing",
+}
+_JOB_MANAGER: JobManager | None = None
 
 
 def get_analysis_service() -> ArticleAnalysisService:
@@ -72,6 +85,32 @@ def get_analysis_service() -> ArticleAnalysisService:
         cache_get=get_cached_score,
         cache_save=save_cached_score,
     )
+
+
+def _execute_background_job(operation: str, payload: dict) -> dict:
+    if operation == "run_analysis":
+        return _handle_run_analysis(payload)
+    if operation == "generate_daily_digest":
+        return _handle_generate_daily_digest(payload)
+    if operation == "process_stream":
+        return _handle_process_stream(payload)
+    if operation == "rebuild_vector_store":
+        return rebuild_vector_store()
+    if operation == "retry_vector_indexing":
+        retry_vector_index_queue(wake_worker=False)
+        return process_vector_index_queue(limit=int(payload.get("limit", 100)))
+    raise ValueError(f"Unsupported background operation: {operation}")
+
+
+def get_job_manager() -> JobManager:
+    global _JOB_MANAGER
+    if _JOB_MANAGER is None:
+        _JOB_MANAGER = JobManager(
+            _execute_background_job,
+            worker_count=max(1, int(PROJ_CONFIG.get("max_workers", 3))),
+        )
+        _JOB_MANAGER.start()
+    return _JOB_MANAGER
 
 
 @dataclass
@@ -2286,12 +2325,91 @@ def _handle_health(_: dict) -> dict:
         "ok": True,
         "transport": "http",
         "service": "rss-backend",
+        "vector_index_queue": get_vector_index_queue_stats(),
         **get_runtime_paths(),
     }
 
 
+def _handle_submit_job(msg: dict) -> dict:
+    operation = msg.get("operation")
+    payload = msg.get("payload") or {}
+    if operation not in ASYNC_JOB_OPERATIONS:
+        return {
+            "error": "unsupported_job_operation",
+            "message": f"Unsupported background operation: {operation}",
+        }
+    if not isinstance(payload, dict):
+        return {"error": "invalid_payload", "message": "Job payload must be an object."}
+
+    dedupe_key = msg.get("dedupe_key")
+    if dedupe_key is None and not _coerce_bool(msg.get("force"), False):
+        serialized = json.dumps(
+            {"operation": operation, "payload": payload},
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        dedupe_key = hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+    job = get_job_manager().submit(
+        operation,
+        payload,
+        dedupe_key=dedupe_key,
+        max_attempts=int(msg.get("max_attempts", 3)),
+    )
+    return {"job": job}
+
+
+def _handle_get_job(msg: dict) -> dict:
+    job_id = msg.get("job_id")
+    job = get_job_manager().store.get(job_id) if job_id else None
+    if not job:
+        return {"error": "job_not_found", "message": f"Unknown job: {job_id}"}
+    return {"job": job}
+
+
+def _handle_retry_job(msg: dict) -> dict:
+    job_id = msg.get("job_id")
+    job = get_job_manager().retry(job_id) if job_id else None
+    if not job:
+        return {"error": "job_not_found", "message": f"Unknown job: {job_id}"}
+    return {"job": job}
+
+
+def _handle_retry_vector_indexing(msg: dict) -> dict:
+    wait = _coerce_bool(msg.get("wait"), False)
+    retry_result = retry_vector_index_queue(wake_worker=not wait)
+    if wait:
+        return {**retry_result, **process_vector_index_queue(limit=int(msg.get("limit", 100)))}
+    return retry_result
+
+
 def handle_message(msg: dict) -> dict:
     msg_type = msg.get("type")
+    if msg_type in ASYNC_JOB_OPERATIONS and _coerce_bool(msg.get("async"), False):
+        return _handle_submit_job(
+            {
+                "operation": msg_type,
+                "payload": {
+                    key: value
+                    for key, value in msg.items()
+                    if key not in {"type", "async", "dedupe_key", "force", "max_attempts"}
+                },
+                "dedupe_key": msg.get("dedupe_key"),
+                "force": msg.get("force"),
+                "max_attempts": msg.get("max_attempts", 3),
+            }
+        )
+    if msg_type == "submit_job":
+        return _handle_submit_job(msg)
+    if msg_type == "get_job":
+        return _handle_get_job(msg)
+    if msg_type == "retry_job":
+        return _handle_retry_job(msg)
+    if msg_type == "get_vector_index_queue":
+        return get_vector_index_queue_stats()
+    if msg_type == "retry_vector_indexing":
+        return _handle_retry_vector_indexing(msg)
     if msg_type == "get_score":
         return _handle_get_score(msg)
     if msg_type == "get_scores":

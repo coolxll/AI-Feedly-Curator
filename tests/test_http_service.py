@@ -10,6 +10,8 @@ from rss_analyzer.http_service import create_server
 
 class TestHTTPService(unittest.TestCase):
     def setUp(self):
+        self.job_manager_patcher = patch("rss_analyzer.http_service.get_job_manager")
+        self.mock_job_manager = self.job_manager_patcher.start()
         self.server = create_server("127.0.0.1", 0)
         self.port = self.server.server_address[1]
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
@@ -19,6 +21,7 @@ class TestHTTPService(unittest.TestCase):
         self.server.shutdown()
         self.server.server_close()
         self.thread.join(timeout=2)
+        self.job_manager_patcher.stop()
 
     def test_health_endpoint(self):
         with urlopen(f"http://127.0.0.1:{self.port}/health") as response:

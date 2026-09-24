@@ -1,7 +1,9 @@
 import tempfile
 import unittest
+import sys
+from types import SimpleNamespace
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from rss_analyzer import cache
 from rss_analyzer.cache import build_vector_store_payload
@@ -79,6 +81,37 @@ class TestVersionedScoreCache(unittest.TestCase):
                         content_hash="content-b",
                     )
                 )
+
+    def test_vector_outbox_retries_failed_index_write(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = str(Path(temp_dir) / "scores.db")
+            fake_vector_store = Mock()
+            fake_vector_store.add_article.side_effect = [False, True]
+            fake_module = SimpleNamespace(vector_store=fake_vector_store)
+            with (
+                patch.object(cache, "DB_PATH", db_path),
+                patch.object(cache, "is_vector_store_enabled", return_value=True),
+                patch.object(cache, "start_vector_index_worker"),
+                patch.object(cache._VECTOR_WORKER_EVENT, "set"),
+                patch.dict(sys.modules, {"rss_analyzer.vector_store": fake_module}),
+            ):
+                cache.init_db()
+                cache.save_cached_score(
+                    "article-1",
+                    4.0,
+                    {"title": "Title", "summary": "Body"},
+                )
+                self.assertEqual(cache.get_vector_index_queue_stats()["pending"], 1)
+
+                first = cache.process_vector_index_queue(limit=1)
+                self.assertEqual(first["failed"], 1)
+                self.assertEqual(first["total"], 1)
+
+                retry = cache.retry_vector_index_queue()
+                self.assertEqual(retry["retried"], 1)
+                second = cache.process_vector_index_queue(limit=1)
+                self.assertEqual(second["processed"], 1)
+                self.assertEqual(second["total"], 0)
 
 
 if __name__ == "__main__":
