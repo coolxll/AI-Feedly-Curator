@@ -4,8 +4,10 @@ Feedly API 客户端模块
 """
 
 import logging
-import requests
+import time
 from typing import Optional
+
+import requests
 
 from .feedly_auth import (
     FEEDLY_CONFIG_FILE,
@@ -34,23 +36,68 @@ __all__ = [
     "save_feedly_config",
 ]
 
+
+def _calculate_backoff_delay(
+    response: requests.Response,
+    attempt: int,
+    base_delay: float = 2.0,
+    max_delay: float = 60.0,
+) -> float:
+    """Calculate delay for 429 rate limit backoff using Retry-After header or exponential backoff."""
+    retry_after = response.headers.get("Retry-After")
+    if retry_after:
+        try:
+            val = float(retry_after)
+            return min(max(val, 0.5), max_delay)
+        except (ValueError, TypeError):
+            pass
+    return min(base_delay * (2 ** attempt), max_delay)
+
+
 def _request_with_token_refresh(
-    method: str, url: str, config: dict, **kwargs
+    method: str,
+    url: str,
+    config: dict,
+    max_rate_limit_retries: int = 3,
+    base_backoff: float = 2.0,
+    **kwargs,
 ) -> requests.Response:
-    """Perform one Feedly request and retry once after refreshing on 401."""
+    """
+    Perform a Feedly request with:
+    1. Automatic token refresh and single retry on 401 Unauthorized.
+    2. Exponential backoff and Retry-After retry on 429 Too Many Requests.
+    """
     request_func = getattr(requests, method.lower())
     kwargs["headers"] = get_feedly_headers(config["token"])
     kwargs.setdefault("proxies", _get_proxy())
-    response = request_func(url, **kwargs)
-    if response.status_code != 401:
-        return response
 
-    refreshed = refresh_feedly_config(config)
-    if not refreshed:
-        return response
+    attempt = 0
+    refreshed = False
 
-    kwargs["headers"] = get_feedly_headers(refreshed["token"])
-    return request_func(url, **kwargs)
+    while True:
+        response = request_func(url, **kwargs)
+
+        if response.status_code == 401 and not refreshed:
+            refreshed_config = refresh_feedly_config(config)
+            if refreshed_config:
+                refreshed = True
+                config.update(refreshed_config)
+                kwargs["headers"] = get_feedly_headers(refreshed_config["token"])
+                continue
+
+        if response.status_code == 429 and attempt < max_rate_limit_retries:
+            delay = _calculate_backoff_delay(response, attempt, base_delay=base_backoff)
+            logger.warning(
+                "Feedly API rate limited (429). Retrying in %.1fs (attempt %d/%d)...",
+                delay,
+                attempt + 1,
+                max_rate_limit_retries,
+            )
+            time.sleep(delay)
+            attempt += 1
+            continue
+
+        return response
 
 
 def feedly_fetch_unread(

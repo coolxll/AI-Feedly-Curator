@@ -130,5 +130,69 @@ class TestFeedlyFetchUnread(unittest.TestCase):
         self.assertEqual(mock_request.call_count, 2)
 
 
+class TestFeedlyRateLimitAndBackoff(unittest.TestCase):
+    """测试 429 限流重试与退避机制"""
+
+    def test_calculate_backoff_delay_retry_after(self):
+        from rss_analyzer.feedly_client import _calculate_backoff_delay
+
+        resp = MagicMock()
+        resp.headers = {"Retry-After": "5"}
+        delay = _calculate_backoff_delay(resp, attempt=0)
+        self.assertEqual(delay, 5.0)
+
+    def test_calculate_backoff_delay_invalid_retry_after(self):
+        from rss_analyzer.feedly_client import _calculate_backoff_delay
+
+        resp = MagicMock()
+        resp.headers = {"Retry-After": "not-a-number"}
+        delay0 = _calculate_backoff_delay(resp, attempt=0, base_delay=2.0)
+        delay1 = _calculate_backoff_delay(resp, attempt=1, base_delay=2.0)
+        self.assertEqual(delay0, 2.0)
+        self.assertEqual(delay1, 4.0)
+
+    def test_calculate_backoff_delay_capped_at_max(self):
+        from rss_analyzer.feedly_client import _calculate_backoff_delay
+
+        resp = MagicMock()
+        resp.headers = {}
+        delay = _calculate_backoff_delay(resp, attempt=10, base_delay=2.0, max_delay=30.0)
+        self.assertEqual(delay, 30.0)
+
+    @patch("rss_analyzer.feedly_client.time.sleep")
+    @patch("rss_analyzer.feedly_client.requests.get")
+    def test_request_retries_on_429_then_succeeds(self, mock_get, mock_sleep):
+        from rss_analyzer.feedly_client import _request_with_token_refresh
+
+        resp_429 = MagicMock(status_code=429, headers={"Retry-After": "3"})
+        resp_200 = MagicMock(status_code=200)
+        mock_get.side_effect = [resp_429, resp_200]
+
+        config = {"token": "test_token"}
+        resp = _request_with_token_refresh("GET", "https://example.com/api", config)
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(mock_get.call_count, 2)
+        mock_sleep.assert_called_once_with(3.0)
+
+    @patch("rss_analyzer.feedly_client.time.sleep")
+    @patch("rss_analyzer.feedly_client.requests.get")
+    def test_request_stops_after_max_retries_on_429(self, mock_get, mock_sleep):
+        from rss_analyzer.feedly_client import _request_with_token_refresh
+
+        resp_429 = MagicMock(status_code=429, headers={})
+        mock_get.return_value = resp_429
+
+        config = {"token": "test_token"}
+        resp = _request_with_token_refresh(
+            "GET", "https://example.com/api", config, max_rate_limit_retries=2, base_backoff=1.0
+        )
+
+        self.assertEqual(resp.status_code, 429)
+        # initial + 2 retries = 3 calls
+        self.assertEqual(mock_get.call_count, 3)
+        self.assertEqual(mock_sleep.call_count, 2)
+
+
 if __name__ == "__main__":
     unittest.main()
