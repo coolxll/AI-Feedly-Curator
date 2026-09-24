@@ -225,8 +225,8 @@ class TestBackendService(unittest.TestCase):
         self.assertEqual(response["error"], "vector_store_disabled")
         mock_vector_enabled.assert_called()
 
-    @patch("rss_analyzer.backend_service.get_cached_score")
-    @patch("rss_analyzer.backend_service.analyze_articles_with_llm_batch")
+    @patch("rss_analyzer.analysis_handlers.get_cached_score")
+    @patch("rss_analyzer.analysis_handlers.analyze_articles_with_llm_batch")
     def test_get_scores_prefers_cached_results(self, mock_batch, mock_cached_score):
         mock_cached_score.return_value = {
             "score": 4.2,
@@ -251,9 +251,9 @@ class TestBackendService(unittest.TestCase):
         self.assertEqual(response["items"]["article-1"]["score"], 4.2)
         mock_batch.assert_not_called()
 
-    @patch("rss_analyzer.backend_service.save_cached_score")
-    @patch("rss_analyzer.backend_service.analyze_articles_with_llm_batch")
-    @patch("rss_analyzer.backend_service.get_cached_score", return_value=None)
+    @patch("rss_analyzer.analysis_handlers.save_cached_score")
+    @patch("rss_analyzer.analysis_handlers.analyze_articles_with_llm_batch")
+    @patch("rss_analyzer.analysis_handlers.get_cached_score", return_value=None)
     def test_get_scores_does_not_cache_failed_analysis(
         self, mock_cached_score, mock_batch, mock_save
     ):
@@ -285,9 +285,9 @@ class TestBackendService(unittest.TestCase):
         self.assertFalse(response["items"]["article-1"]["found"])
         mock_save.assert_not_called()
 
-    @patch("rss_analyzer.backend_service.get_cached_score")
-    @patch("rss_analyzer.backend_service.save_cached_score")
-    @patch("rss_analyzer.backend_service.summarize_single_article")
+    @patch("rss_analyzer.analysis_handlers.get_cached_score")
+    @patch("rss_analyzer.analysis_handlers.save_cached_score")
+    @patch("rss_analyzer.analysis_handlers.summarize_single_article")
     def test_summarize_article_updates_cache(self, mock_summarize, mock_save, mock_cached):
         mock_summarize.return_value = "summary body"
         mock_cached.return_value = {
@@ -313,9 +313,9 @@ class TestBackendService(unittest.TestCase):
         self.assertEqual(saved_data["summary"], "summary body")
         self.assertEqual(saved_data["url"], "https://example.com/article")
 
-    @patch("rss_analyzer.backend_service.get_cached_score")
-    @patch("rss_analyzer.backend_service.save_cached_score")
-    @patch("rss_analyzer.backend_service.summarize_single_article")
+    @patch("rss_analyzer.analysis_handlers.get_cached_score")
+    @patch("rss_analyzer.analysis_handlers.save_cached_score")
+    @patch("rss_analyzer.analysis_handlers.summarize_single_article")
     def test_summarize_article_returns_error_without_caching_on_failure(
         self, mock_summarize, mock_save, mock_cached
     ):

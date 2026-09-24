@@ -22,6 +22,7 @@
   - removed the machine-specific hard-coded config path
 - [x] Replaced backend message and SSE routing condition chains with explicit handler registries
 - [x] Extracted vector/search handlers and vector rebuild lifecycle from `backend_service.py`
+- [x] Extracted article-level scoring, analysis, and summary handlers from `backend_service.py`
 
 ## Environment Notes
 
