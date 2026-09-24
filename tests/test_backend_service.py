@@ -18,6 +18,26 @@ from rss_analyzer.config import PROJ_CONFIG
 
 
 class TestBackendService(unittest.TestCase):
+    def test_facade_keeps_public_workflow_exports(self):
+        from rss_analyzer import backend_service
+
+        expected_exports = {
+            "analyze_articles",
+            "export_articles",
+            "generate_summary_report",
+            "regenerate_summary",
+            "process_stream",
+            "process_batch",
+            "run_filter_workflow",
+            "mark_articles_read",
+            "mark_stream_low_priority_read",
+            "save_stream_overview_markdown",
+        }
+
+        self.assertTrue(
+            all(callable(getattr(backend_service, name, None)) for name in expected_exports)
+        )
+
     def test_message_handler_registry_contains_all_public_operations(self):
         self.assertEqual(
             set(MESSAGE_HANDLERS),
@@ -422,14 +442,14 @@ class TestBackendService(unittest.TestCase):
             threads=4,
         )
 
-    @patch("rss_analyzer.feedly_workflows.generate_summary_report", return_value={})
-    @patch("rss_analyzer.feedly_workflows.feedly_mark_read", return_value=True)
-    @patch("rss_analyzer.feedly_workflows.save_cached_score")
-    @patch("rss_analyzer.feedly_workflows.get_cached_score", return_value=None)
-    @patch("rss_analyzer.feedly_workflows.analyze_article_with_llm")
-    @patch("rss_analyzer.feedly_workflows.save_articles")
-    @patch("rss_analyzer.feedly_workflows.load_articles")
-    @patch("rss_analyzer.feedly_workflows.os.path.exists", return_value=True)
+    @patch("rss_analyzer.feed_analysis_workflow.generate_summary_report", return_value={})
+    @patch("rss_analyzer.feed_analysis_workflow.feedly_mark_read", return_value=True)
+    @patch("rss_analyzer.feed_analysis_workflow.save_cached_score")
+    @patch("rss_analyzer.feed_analysis_workflow.get_cached_score", return_value=None)
+    @patch("rss_analyzer.feed_analysis_workflow.analyze_article_with_llm")
+    @patch("rss_analyzer.feed_analysis_workflow.save_articles")
+    @patch("rss_analyzer.feed_analysis_workflow.load_articles")
+    @patch("rss_analyzer.feed_analysis_workflow.os.path.exists", return_value=True)
     def test_analyze_articles_marks_only_successful_results_read(
         self,
         mock_exists,

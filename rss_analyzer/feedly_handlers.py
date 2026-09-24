@@ -5,9 +5,7 @@ from __future__ import annotations
 from typing import Callable
 
 from rss_analyzer.config import PROJ_CONFIG
-from rss_analyzer.feedly_workflows import (
-    analyze_articles,
-)
+from rss_analyzer.feed_analysis_workflow import analyze_articles
 from rss_analyzer.filter_workflows import run_filter_workflow
 from rss_analyzer.readflow_workflows import (
     mark_stream_low_priority_read,
