@@ -75,13 +75,6 @@ scripts/backtest_scoring.local.json
 
 
 node_modules/
-arena-app/src-tauri/target/
-arena/scoring/configs/targets.json
-arena/scoring/runs/
-arena-app/arena.exe
-
-arena-web/data/runs
-arena-web/data/config/targets.json
 
 # Reference repos (local only)
 _ref_repos/
