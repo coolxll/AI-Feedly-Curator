@@ -52,6 +52,7 @@
 TUI 的共享配置解析、路径和数据筛选 helper 位于 `rss_analyzer/tui/support.py`；
 Feedly stream 选择交互位于 `rss_analyzer/tui/stream_selection.py`；
 stream overview 与 batch reading 交互位于 `rss_analyzer/tui/review.py`；
+导出、重新汇总与深度分析交互位于 `rss_analyzer/tui/reports.py`；
 根目录的 `feedly_tui.py` 保留可执行入口与交互编排。
 
 ### 4. Agent Skills
