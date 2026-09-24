@@ -5,7 +5,10 @@
 import unittest
 from unittest.mock import patch, Mock
 
-from rss_analyzer.article_fetcher import fetch_article_content
+from rss_analyzer.article_fetcher import (
+    fetch_article_content,
+    fetch_articles_content_concurrently,
+)
 
 
 class TestArticleFetcher(unittest.TestCase):
@@ -47,6 +50,40 @@ class TestArticleFetcher(unittest.TestCase):
 
         self.assertIn("获取失败", result)
         self.assertIn("404", result)
+
+    def test_concurrent_fetch_empty_and_falsy(self):
+        """测试空列表或空字符串并发抓取"""
+        self.assertEqual(fetch_articles_content_concurrently([]), {})
+        self.assertEqual(fetch_articles_content_concurrently(["", ""]), {})
+
+    def test_concurrent_fetch_success_and_deduplication(self):
+        """测试并发抓取成功及 URL 去重"""
+        mock_fetch = Mock(side_effect=lambda u: f"Content for {u}")
+        urls = [
+            "https://example.com/1",
+            "https://example.com/2",
+            "https://example.com/1",
+        ]
+        results = fetch_articles_content_concurrently(urls, max_workers=2, fetch_one=mock_fetch)
+
+        self.assertEqual(len(results), 2)
+        self.assertEqual(results["https://example.com/1"], "Content for https://example.com/1")
+        self.assertEqual(results["https://example.com/2"], "Content for https://example.com/2")
+        self.assertEqual(mock_fetch.call_count, 2)
+
+    def test_concurrent_fetch_exception_handling(self):
+        """测试并发抓取中单个任务异常不影响整体"""
+        def faulty_fetch(url: str) -> str:
+            if "fail" in url:
+                raise RuntimeError("Network boom")
+            return "Good content"
+
+        urls = ["https://example.com/ok", "https://example.com/fail"]
+        results = fetch_articles_content_concurrently(urls, max_workers=2, fetch_one=faulty_fetch)
+
+        self.assertEqual(results["https://example.com/ok"], "Good content")
+        self.assertIn("处理异常", results["https://example.com/fail"])
+        self.assertIn("Network boom", results["https://example.com/fail"])
 
 
 if __name__ == "__main__":
