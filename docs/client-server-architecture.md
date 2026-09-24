@@ -92,9 +92,8 @@ Hermes/Codex/Claude skills 也按客户端处理，而不是新的业务边界�
 
 ## 后续建议
 
-1. 把本地 GUI/Streamlit 中直接访问底层模块的地方，逐步收敛到同一套 service API。
-2. Agent skills 继续作为薄客户端维护；若某个 skill 里的脚本变成通用能力，应迁回 `rss_analyzer/` 或项目 CLI。
-3. 当确认没有人再使用 native host 后，可将 `native_host/` 降级为 legacy 或直接删除。
+1. Agent skills 继续作为薄客户端维护；若某个 skill 里的脚本变成通用能力，应迁回 `rss_analyzer/` 或项目 CLI。
+2. 历史 `native_host/` 与实验性质的 Streamlit 组件已彻底清理下线。
 
 ## SSE 流式请求
 

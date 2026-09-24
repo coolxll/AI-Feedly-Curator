@@ -78,9 +78,6 @@ uv run python article_analyzer.py --input output/unread_news.json
 # 限制处理数量并标记已读（默认不标记，需显式开启）
 uv run python article_analyzer.py --refresh --limit 50 --mark-read
 
-# 重新生成总体摘要（基于已分析的文章，不重新调用 API 评分）
-uv run python regenerate_summary.py
-
 # 从 SQLite 缓存重建活跃向量库
 uv run python rebuild_vector_store.py
 ```
@@ -249,7 +246,6 @@ AI-Feedly-Curator/
 ├── feedly_filter.py        # 未读文章过滤与渐进式标已读 CLI
 ├── feedly_token.py         # Feedly OAuth / PKCE 认证管理 CLI
 ├── rebuild_vector_store.py # 向量库重建与迁移 CLI
-├── regenerate_summary.py   # 基于缓存重新生成总体报告 CLI
 ├── rss_analyzer/           # 核心领域模型与服务
 │   ├── analysis_service.py # 统一文章分析与版本化缓存
 │   ├── feedly_auth.py      # 统一 Feedly 认证逻辑

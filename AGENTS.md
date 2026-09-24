@@ -23,7 +23,6 @@
     *   `feedly_filter.py`: CLI for unread article filtering, score evaluation, and progressive mark-as-read.
     *   `feedly_token.py`: Thin CLI for Feedly OAuth token checking, manual refresh, and PKCE initialization.
     *   `rebuild_vector_store.py`: Vector store rebuild and migration CLI (from SQLite cache to Chroma collection).
-    *   `regenerate_summary.py`: Standalone CLI to regenerate overall summary reports from cached article analysis.
 *   **`rss_analyzer/`**: Core package directory.
     *   `config.py`: Configuration management. Handles task-scoped chat model settings, independent embedding settings, environment variables, and scoring weights.
     *   `feedly_auth.py`: Centralized Feedly OAuth, token refresh, PKCE authorization, proxy handling, and config resolution.
@@ -44,7 +43,6 @@
     *   `tui/`: Modular TUI components (`support.py`, `stream_selection.py`, `review.py`, `reports.py`, `cleanup.py`, `menus.py`).
 *   **`extension/`**: Chrome extension that injects scores/summaries into Feedly and talks to the local HTTP/SSE service.
 *   **`skills/feedly-readflow/`**: Agent skill for multi-agent RSS triage, packets preparation, and reading reports.
-*   **`native_host/`**: Legacy native host adapter (deprecated; superseded by local HTTP/SSE backend service).
 *   **`pyproject.toml` / `uv.lock`**: Project dependencies, packaging, and tool configurations (Python >=3.13).
 *   **`.env`**: (User-created) Stores API keys and secrets.
 *   **`output/`**: Directory where analyzed JSON data and Markdown summaries are saved, organized by month.
@@ -171,11 +169,6 @@ auto-pick a bare `.venv/` — that is what causes the Windows/WSL mix-up.
 *   **Refresh Only (Dry Run/Limit):**
     ```bash
     uv run python article_analyzer.py --refresh --limit 50
-    ```
-
-*   **Regenerate Summary Only:**
-    ```bash
-    uv run python regenerate_summary.py
     ```
 
 *   **Run Local Backend Service (HTTP + SSE):**

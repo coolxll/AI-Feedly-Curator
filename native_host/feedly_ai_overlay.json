@@ -1,9 +1,0 @@
-{
-  "name": "feedly.ai.overlay",
-  "description": "Feedly AI overlay native messaging host",
-  "path": "REPLACE_WITH_ABSOLUTE_PATH_TO_WRAPPER_BAT",
-  "type": "stdio",
-  "allowed_origins": [
-    "chrome-extension://cjigmgmabfalakmdgjfjdjhekplnfpmc/"
-  ]
-}

@@ -85,7 +85,7 @@
   - Existing `rebuild_vector_store.py` now doubles as the migration command from SQLite cache to Docker Chroma
 
 - [x] Removed abandoned Streamlit dashboard (`rss_analyzer/streamlit_app.py`, `scripts/vector_viewer.py`) and removed `streamlit` dependency (pruning 16 transitive packages)
-- [ ] Retire and remove legacy `native_host/` adapter and scripts since Chrome extension now connects exclusively via HTTP/SSE
+- [x] Removed legacy `native_host/` adapter, `install_native_host.ps1`, `regenerate_summary.py` (integrated into TUI), and early migration scripts (`scripts/migrate_to_vector_store*.py`, `repair_vector_metadata.py`)
 - [ ] Prune merged local and remote git branches (`refactor/*`, `feat/*`)
 - [ ] Revisit larger repo layout only if needed later (`apps/`, `clients/`, etc.)
 
