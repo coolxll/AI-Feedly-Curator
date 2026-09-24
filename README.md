@@ -4,8 +4,9 @@ AI 驱动的 RSS 文章分析器，自动从 Feedly 获取未读文章，使用 
 
 ## 功能特性
 
-- 📥 **Feedly 集成** - 自动从 Feedly 获取未读文章，统一 OAuth/PKCE 鉴权与自动刷新
+- 📥 **Feedly 集成** - 自动从 Feedly 获取未读文章，统一 OAuth/PKCE 鉴权、自动刷新、429 退避重试与超时保护
 - 🤖 **AI 多维度评分** - 基于相关性、信息量、深度等维度进行 1-5 分量化评分与版本化缓存
+- ⚡ **并发网页预取** - 线程池并行提取网页正文，彻底消除串行网络 I/O 阻塞
 - 🖥️ **全功能交互 TUI** - 交互式分类选择、文章审查（Review）、未读清理与报表导出
 - 🚩 **负面特征检测** - 自动识别软文、标题党、AI 生成及过时信息
 - 📊 **总体报告** - 生成包含趋势分析和高质量推荐的 Markdown 报告
@@ -13,7 +14,7 @@ AI 驱动的 RSS 文章分析器，自动从 Feedly 获取未读文章，使用 
 - 🧠 **Embedding 独立配置** - 向量检索可单独指定 provider / model，支持本地与 Docker HTTP 模式
 - ⚡ **单请求 SSE 流式** - 本地服务支持 `/api/stream`，实时推送处理进度与事件
 - 📦 **向量同步 Outbox** - SQLite 事务级写入 Outbox，断网与重试保障 Chroma 最终一致性
-- ✅ **可选标记已读** - 默认不自动标记，支持渐进式与批量标记已读
+- ✅ **可选标记已读** - 默认不自动标记，支持渐进式与安全分批（100篇/批）标记已读
 
 ## 快速开始
 
@@ -100,7 +101,7 @@ python rss_backend_service.py --host 127.0.0.1 --port 8765
 
 服务默认共享仓库根目录下的：
 - `rss_scores.db`
-- `chroma_db/`
+- `vector_store_state/` (Docker HTTP 模式) 或 `chroma_db/` (嵌入式模式)
 
 如需覆盖路径，可设置环境变量：
 - `RSS_SCORES_DB`
@@ -128,7 +129,7 @@ python rss_backend_service.py --host 127.0.0.1 --port 8765
 
 - Chrome 扩展现在只负责 UI 注入、页面内容提取和交互展示
 - AI 分析、摘要生成、缓存和向量检索统一由本地 Python 服务处理
-- 这让 Chrome 扩展和本地 GUI/TUI/Streamlit 可以共享同一后端，而不是各自直连模型或宿主进程
+- 这让 Chrome 扩展和本地 GUI/TUI 可以共享同一后端，而不是各自直连模型或宿主进程
 - 普通调用使用 `POST /api/message`；耗时调用可使用 `POST /api/stream`，通过 SSE 在同一请求中持续接收进度和最终结果
 
 详细边界设计见 [docs/client-server-architecture.md](docs/client-server-architecture.md)。
@@ -173,7 +174,7 @@ EMBEDDING_MODEL=text-embedding-v3
 - 向量检索不再回退到 `OPENAI_BASE_URL`，避免聊天 provider 变更误伤 embedding
 - 推荐显式配置 `EMBEDDING_API_KEY` / `EMBEDDING_BASE_URL` / `EMBEDDING_MODEL`
 - 若未显式配置，embedding 仍会兼容已有 DashScope / Aliyun 环境变量，并默认使用 `text-embedding-v3`
-- `chroma_db/` 下会记录 embedding 指纹；若你改了 embedding base URL 或 model，服务会警告需要重建向量库
+- `vector_store_state/`（或本地 `chroma_db/`）下会记录 embedding 指纹；若你改了 embedding base URL 或 model，服务会警告需要重建向量库
 
 ### Vector Store 后端
 
@@ -264,12 +265,12 @@ AI-Feedly-Curator/
 ├── skills/feedly-readflow/ # 面向 Agent 的智能多代理阅读工作流
 ├── output/                 # 数据与摘要输出目录（按月归档）
 ├── docs/                   # 架构设计与覆盖率文档
-└── tests/                  # 单元与集成测试套件 (170+ 测试)
+└── tests/                  # 单元与集成测试套件 (185+ 测试)
 ```
 
 ## 测试
 
-运行全量测试套件（170+ 测试）：
+运行全量测试套件（185+ 测试）：
 
 ```bash
 uv run pytest tests/
