@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "DEFAULT_MARK_READ_BATCH_SIZE",
+    "DEFAULT_REQUEST_TIMEOUT",
     "FEEDLY_CONFIG_FILE",
     "feedly_fetch_unread",
     "feedly_get_categories",
@@ -36,6 +37,9 @@ __all__ = [
     "refresh_feedly_config",
     "save_feedly_config",
 ]
+
+
+DEFAULT_REQUEST_TIMEOUT: tuple[float, float] = (10.0, 30.0)
 
 
 def _calculate_backoff_delay(
@@ -67,10 +71,12 @@ def _request_with_token_refresh(
     Perform a Feedly request with:
     1. Automatic token refresh and single retry on 401 Unauthorized.
     2. Exponential backoff and Retry-After retry on 429 Too Many Requests.
+    3. Explicit timeout safeguard (connect 10s, read 30s) by default.
     """
     request_func = getattr(requests, method.lower())
     kwargs["headers"] = get_feedly_headers(config["token"])
     kwargs.setdefault("proxies", _get_proxy())
+    kwargs.setdefault("timeout", DEFAULT_REQUEST_TIMEOUT)
 
     attempt = 0
     refreshed = False

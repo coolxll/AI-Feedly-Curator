@@ -226,5 +226,31 @@ class TestFeedlyRateLimitAndBackoff(unittest.TestCase):
         self.assertEqual(mock_sleep.call_count, 2)
 
 
+class TestFeedlyRequestTimeout(unittest.TestCase):
+    """测试请求超时默认配置与自定义传递"""
+
+    @patch("rss_analyzer.feedly_client.requests.get")
+    def test_default_timeout_injected(self, mock_get):
+        from rss_analyzer.feedly_client import DEFAULT_REQUEST_TIMEOUT, _request_with_token_refresh
+
+        mock_get.return_value = MagicMock(status_code=200)
+        config = {"token": "test_token"}
+
+        _request_with_token_refresh("GET", "https://example.com/api", config)
+
+        self.assertEqual(mock_get.call_args.kwargs["timeout"], DEFAULT_REQUEST_TIMEOUT)
+
+    @patch("rss_analyzer.feedly_client.requests.get")
+    def test_custom_timeout_preserved(self, mock_get):
+        from rss_analyzer.feedly_client import _request_with_token_refresh
+
+        mock_get.return_value = MagicMock(status_code=200)
+        config = {"token": "test_token"}
+
+        _request_with_token_refresh("GET", "https://example.com/api", config, timeout=45)
+
+        self.assertEqual(mock_get.call_args.kwargs["timeout"], 45)
+
+
 if __name__ == "__main__":
     unittest.main()
