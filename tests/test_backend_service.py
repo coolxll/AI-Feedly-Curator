@@ -187,7 +187,12 @@ class TestBackendService(unittest.TestCase):
     def test_get_scores_prefers_cached_results(self, mock_batch, mock_cached_score):
         mock_cached_score.return_value = {
             "score": 4.2,
-            "data": {"title": "Cached title", "summary": "Cached summary"},
+            "data": {
+                "status": "success",
+                "score": 4.2,
+                "title": "Cached title",
+                "summary": "Cached summary",
+            },
             "updated_at": "2026-03-26T10:00:00",
         }
 
@@ -372,6 +377,8 @@ class TestBackendService(unittest.TestCase):
 
     @patch("rss_analyzer.backend_service.generate_summary_report", return_value={})
     @patch("rss_analyzer.backend_service.feedly_mark_read", return_value=True)
+    @patch("rss_analyzer.backend_service.save_cached_score")
+    @patch("rss_analyzer.backend_service.get_cached_score", return_value=None)
     @patch("rss_analyzer.backend_service.analyze_article_with_llm")
     @patch("rss_analyzer.backend_service.save_articles")
     @patch("rss_analyzer.backend_service.load_articles")
@@ -382,6 +389,8 @@ class TestBackendService(unittest.TestCase):
         mock_load_articles,
         mock_save_articles,
         mock_analyze,
+        mock_get_cached_score,
+        mock_save_cached_score,
         mock_mark_read,
         mock_summary,
     ):
@@ -531,7 +540,11 @@ class TestBackendService(unittest.TestCase):
         }
         mock_render_markdown.return_value = "digest markdown"
 
-        result = process_stream(stream_id="feed/v2ex", stream_label="Feed: V2EX")
+        with (
+            patch("rss_analyzer.backend_service.get_cached_score", return_value=None),
+            patch("rss_analyzer.backend_service.save_cached_score"),
+        ):
+            result = process_stream(stream_id="feed/v2ex", stream_label="Feed: V2EX")
 
         self.assertEqual(result["digest"]["deep_analyzed_reads"], [])
         self.assertEqual(len(result["digest"]["clear_items"]), 1)
@@ -556,7 +569,11 @@ class TestBackendService(unittest.TestCase):
             {"score": 3.9, "verdict": "可选", "summary": "second", "reason": "r2"},
         ]
 
-        result = _deep_analyze_digest_candidates(items)
+        with (
+            patch("rss_analyzer.backend_service.get_cached_score", return_value=None),
+            patch("rss_analyzer.backend_service.save_cached_score"),
+        ):
+            result = _deep_analyze_digest_candidates(items)
 
         self.assertEqual([item["id"] for item in result], ["1", "2"])
         self.assertEqual(result[0]["score"], 4.2)
@@ -605,7 +622,10 @@ class TestBackendService(unittest.TestCase):
     ):
         from rss_analyzer.backend_service import low_score_filter
 
-        mock_get_cached_score.return_value = {"score": 2.1}
+        mock_get_cached_score.return_value = {
+            "score": 2.1,
+            "data": {"status": "success", "score": 2.1},
+        }
         result = low_score_filter(
             [{"id": "article-1", "title": "Low score article"}],
             threshold=3.0,
@@ -655,11 +675,8 @@ class TestBackendService(unittest.TestCase):
         from rss_analyzer.backend_service import low_score_filter
 
         mock_get_cached_score.side_effect = [
-            {"score": 1.5},
-            {"score": 2.0},
-            {"score": 1.8},
-            {"score": 2.2},
-            {"score": 1.0},
+            {"score": score, "data": {"status": "success", "score": score}}
+            for score in (1.5, 2.0, 1.8, 2.2, 1.0)
         ]
         articles = [{"id": f"article-{i}", "title": f"Article {i}"} for i in range(1, 6)]
 
@@ -687,7 +704,10 @@ class TestBackendService(unittest.TestCase):
     ):
         from rss_analyzer.backend_service import low_score_filter
 
-        mock_get_cached_score.return_value = {"score": 2.0}
+        mock_get_cached_score.return_value = {
+            "score": 2.0,
+            "data": {"status": "success", "score": 2.0},
+        }
         articles = [{"id": "article-1", "title": "Article 1"}]
 
         result = low_score_filter(

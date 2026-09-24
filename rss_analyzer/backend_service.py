@@ -18,6 +18,7 @@ os.environ.setdefault("RSS_SCORES_DB", str(PROJECT_ROOT / "rss_scores.db"))
 os.environ.setdefault("RSS_VECTOR_DB_DIR", str(PROJECT_ROOT / "chroma_db"))
 
 from rss_analyzer.article_fetcher import fetch_article_content
+from rss_analyzer.analysis_service import ArticleAnalysisService, PreparedArticle
 from rss_analyzer.cache import (
     build_vector_store_payload,
     get_app_cache,
@@ -60,6 +61,17 @@ _VECTOR_STORE = None
 FEED_ID_36KR = "feed/http://www.36kr.com/feed"
 BATCH_TRIAGE_CACHE_VERSION = 1
 BATCH_READ_FETCH_LIMIT = 9999
+
+
+def get_analysis_service() -> ArticleAnalysisService:
+    """Build the stateless service with patchable infrastructure dependencies."""
+    return ArticleAnalysisService(
+        fetch_content=fetch_article_content,
+        analyze_one=analyze_article_with_llm,
+        analyze_batch=analyze_articles_with_llm_batch,
+        cache_get=get_cached_score,
+        cache_save=save_cached_score,
+    )
 
 
 @dataclass
@@ -457,34 +469,52 @@ def analyze_articles(
                 )
                 if len(batch_queue) >= batch_size:
                     batch_payload = [
-                        {
-                            "title": item["title"],
-                            "summary": item["summary"],
-                            "content": item["content"],
-                        }
+                        PreparedArticle(
+                            article_id=str(item["article"].get("id") or ""),
+                            title=item["title"],
+                            url=item["article"].get("link", ""),
+                            summary=item["summary"],
+                            content=item["content"],
+                        )
                         for item in batch_queue
                     ]
                     logger.info("  Submitting batch scoring task (size=%s)", len(batch_payload))
-                    future = executor.submit(analyze_articles_with_llm_batch, batch_payload)
+                    future = executor.submit(
+                        get_analysis_service().analyze_many_prepared,
+                        batch_payload,
+                    )
                     pending_futures.append((future, list(batch_queue)))
                     batch_queue = []
 
                 process_completed_futures()
             else:
-                analysis = analyze_article_with_llm(article["title"], summary, content)
+                analysis = get_analysis_service().analyze_prepared(
+                    PreparedArticle(
+                        article_id=str(article.get("id") or ""),
+                        title=article["title"],
+                        url=article.get("link", ""),
+                        summary=summary,
+                        content=content,
+                    )
+                )
                 record_analysis_result(article, analysis)
 
         if batch_scoring and batch_queue:
             batch_payload = [
-                {
-                    "title": item["title"],
-                    "summary": item["summary"],
-                    "content": item["content"],
-                }
+                PreparedArticle(
+                    article_id=str(item["article"].get("id") or ""),
+                    title=item["title"],
+                    url=item["article"].get("link", ""),
+                    summary=item["summary"],
+                    content=item["content"],
+                )
                 for item in batch_queue
             ]
             logger.info("  Submitting final batch scoring task (size=%s)", len(batch_payload))
-            future = executor.submit(analyze_articles_with_llm_batch, batch_payload)
+            future = executor.submit(
+                get_analysis_service().analyze_many_prepared,
+                batch_payload,
+            )
             pending_futures.append((future, list(batch_queue)))
 
         if batch_scoring:
@@ -569,7 +599,15 @@ def _deep_analyze_digest_candidate(item: dict) -> tuple[str, dict]:
     if not content and not summary:
         return "skipped", enriched
 
-    analysis = analyze_article_with_llm(item.get("title", ""), summary, content)
+    analysis = get_analysis_service().analyze_prepared(
+        PreparedArticle(
+            article_id=str(item.get("id") or ""),
+            title=item.get("title", ""),
+            url=item.get("link", ""),
+            summary=summary,
+            content=content,
+        )
+    )
     if analysis.get("status", "success") != "success":
         enriched["analysis"] = analysis
         enriched["analysis_error"] = analysis.get("error")
@@ -855,32 +893,20 @@ def newsflash_filter(articles: list) -> FilterResult:
     return FilterResult(matched, remaining, "newsflash")
 
 
-def _fetch_content(article: dict) -> str:
-    link = article.get("canonicalUrl") or article.get("alternate", [{}])[0].get(
-        "href", ""
-    )
-    return fetch_article_content(link) if link else ""
-
-
 def _prepare_article_scoring(article: dict) -> dict:
-    title = article.get("title", "")
-    summary = article.get("summary", "")
-    content = article.get("content", "")
-
-    if not (content and len(content) > 200):
-        content = summary if len(summary) > 500 else _fetch_content(article) or summary
-
-    return {"title": title, "summary": summary, "content": content}
+    prepared = get_analysis_service().prepare(article)
+    return {
+        "article_id": prepared.article_id,
+        "title": prepared.title,
+        "url": prepared.url,
+        "summary": prepared.summary,
+        "content": prepared.content,
+    }
 
 
 def _score_article(article: dict) -> tuple[float | None, dict]:
-    payload = _prepare_article_scoring(article)
     try:
-        result = analyze_article_with_llm(
-            payload.get("title", ""),
-            payload.get("summary", ""),
-            payload.get("content", ""),
-        )
+        result = get_analysis_service().analyze(article)
         if result.get("status", "success") != "success":
             return None, result
         return result.get("score"), result
@@ -982,12 +1008,13 @@ def low_score_filter(
         if not batch_queue:
             return
 
-        batch_payload = [item["payload"] for item in batch_queue]
-        batch_results = analyze_articles_with_llm_batch(batch_payload)
+        batch_payload = [
+            PreparedArticle(**item["payload"])
+            for item in batch_queue
+        ]
+        batch_results = get_analysis_service().analyze_many_prepared(batch_payload)
         for item, analysis in zip(batch_queue, batch_results):
             score = analysis.get("score") if analysis.get("status", "success") == "success" else None
-            if score is not None:
-                save_cached_score(item["article"].get("id"), score, analysis)
             _handle_scored_filter_article(
                 item["article"],
                 score,
@@ -1005,29 +1032,6 @@ def low_score_filter(
     for idx, article in enumerate(articles, 1):
         title = article.get("title", "")[:50]
         prefix = f"[{idx}/{len(articles)}]"
-        article_id = article.get("id")
-
-        cached = get_cached_score(article_id)
-        if cached:
-            if batch_scoring and batch_queue:
-                flush_batch()
-
-            score = cached["score"]
-            logger.info("%s Using cached score for %s", prefix, title)
-            _handle_scored_filter_article(
-                article,
-                score,
-                prefix,
-                threshold,
-                dry_run,
-                matched,
-                remaining,
-                mark_read,
-                unmarked_buffer=unmarked_buffer if (incremental_mark and mark_read and not dry_run) else None,
-                on_matched=check_and_flush_incremental,
-            )
-            continue
-
         logger.info("%s Scoring %s...", prefix, title)
         if batch_scoring:
             batch_queue.append(
@@ -1040,9 +1044,7 @@ def low_score_filter(
             if len(batch_queue) >= batch_size:
                 flush_batch()
         else:
-            score, analysis = _score_article(article)
-            if score is not None:
-                save_cached_score(article_id, score, analysis)
+            score, _analysis = _score_article(article)
 
             _handle_scored_filter_article(
                 article,
@@ -1757,29 +1759,20 @@ def _perform_analysis(
 ) -> dict | None:
     logger.info("Performing real-time analysis for %s: %s", article_id, title)
 
-    final_content = content or summary
-    if url and (not final_content or len(final_content) < 200):
-        logger.info("Fetching content from %s", url)
-        fetched = fetch_article_content(url)
-        if fetched and len(fetched) > 100:
-            final_content = fetched
-            logger.info("Fetched %s chars", len(fetched))
-        else:
-            logger.warning("Fetch failed or too short, using summary fallback")
-
     try:
-        analysis = analyze_article_with_llm(title, summary, final_content)
+        analysis = get_analysis_service().analyze(
+            {
+                "id": article_id,
+                "title": title,
+                "url": url or "",
+                "summary": summary,
+                "content": content or "",
+            }
+        )
         if analysis.get("status", "success") != "success":
             logger.warning("Analysis failed for %s: %s", article_id, analysis.get("reason"))
             return analysis
         score = analysis.get("score")
-
-        if url:
-            analysis["url"] = url
-        if title and not analysis.get("title"):
-            analysis["title"] = title
-
-        save_cached_score(article_id, score, analysis)
         logger.info("Analysis complete. Score: %s", score)
         return {"score": score, "data": analysis, "updated_at": None}
     except Exception as exc:
@@ -1789,21 +1782,21 @@ def _perform_analysis(
 
 def _handle_get_score(msg: dict) -> dict:
     article_id = msg.get("id")
-    cached = get_cached_score(article_id)
-
-    if not cached and msg.get("title"):
-        cached = _perform_analysis(
+    if msg.get("title"):
+        result = _perform_analysis(
             article_id,
             msg.get("title"),
             msg.get("url"),
             msg.get("summary", ""),
             msg.get("content"),
         )
+    else:
+        result = get_cached_score(article_id)
 
-    if cached and cached.get("status") == "error":
-        return _normalize_analysis_error(article_id, cached)
+    if result and result.get("status") == "error":
+        return _normalize_analysis_error(article_id, result)
 
-    return _normalize_item(article_id, cached)
+    return _normalize_item(article_id, result)
 
 
 def _handle_get_scores(msg: dict) -> dict:
@@ -1830,10 +1823,10 @@ def _handle_get_scores(msg: dict) -> dict:
         if not article_id:
             continue
 
-        cached = get_cached_score(article_id)
-        if not cached and item.get("title"):
+        if item.get("title"):
             missing_items.append(item)
         else:
+            cached = get_cached_score(article_id)
             results[article_id] = _normalize_item(article_id, cached)
 
     if not missing_items:
@@ -1843,7 +1836,9 @@ def _handle_get_scores(msg: dict) -> dict:
 
     if len(missing_items) > 10:
         try:
-            analyzed_batch = analyze_articles_with_llm_batch(missing_items)
+            service = get_analysis_service()
+            prepared_items = [service.prepare(item) for item in missing_items]
+            analyzed_batch = service.analyze_many_prepared(prepared_items)
             if analyzed_batch and len(analyzed_batch) == len(missing_items):
                 for idx, analyzed in enumerate(analyzed_batch):
                     item = missing_items[idx]
@@ -1853,12 +1848,6 @@ def _handle_get_scores(msg: dict) -> dict:
                         continue
                     score = analyzed.get("score")
 
-                    if item.get("url") and not analyzed.get("url"):
-                        analyzed["url"] = item["url"]
-                    if item.get("title") and not analyzed.get("title"):
-                        analyzed["title"] = item["title"]
-
-                    save_cached_score(article_id, score, analyzed)
                     results[article_id] = _normalize_item(
                         article_id,
                         {"score": score, "data": analyzed, "updated_at": None},

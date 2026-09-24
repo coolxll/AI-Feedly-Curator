@@ -98,7 +98,12 @@ def delete_app_cache(key: str):
         logger.error(f"App cache delete error: {e}")
 
 
-def get_cached_score(article_id: str) -> dict | None:
+def get_cached_score(
+    article_id: str,
+    *,
+    analysis_fingerprint: str | None = None,
+    content_hash: str | None = None,
+) -> dict | None:
     if not article_id:
         return None
     try:
@@ -117,6 +122,13 @@ def get_cached_score(article_id: str) -> dict | None:
                 data = json.loads(row[1])
             except Exception:
                 data = {}
+
+            if analysis_fingerprint is not None and data.get(
+                "analysis_fingerprint"
+            ) != analysis_fingerprint:
+                return None
+            if content_hash is not None and data.get("content_hash") != content_hash:
+                return None
 
             # Enhance data with title and url from separate columns if not in data
             if not data.get("title") and row[2]:  # title column
