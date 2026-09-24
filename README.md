@@ -4,28 +4,33 @@ AI 驱动的 RSS 文章分析器，自动从 Feedly 获取未读文章，使用 
 
 ## 功能特性
 
-- 📥 **Feedly 集成** - 自动从 Feedly 获取未读文章
-- 🤖 **AI 多维度评分** - 基于相关性、信息量、深度等维度进行 1-5 分量化评分
+- 📥 **Feedly 集成** - 自动从 Feedly 获取未读文章，统一 OAuth/PKCE 鉴权与自动刷新
+- 🤖 **AI 多维度评分** - 基于相关性、信息量、深度等维度进行 1-5 分量化评分与版本化缓存
+- 🖥️ **全功能交互 TUI** - 交互式分类选择、文章审查（Review）、未读清理与报表导出
 - 🚩 **负面特征检测** - 自动识别软文、标题党、AI 生成及过时信息
 - 📊 **总体报告** - 生成包含趋势分析和高质量推荐的 Markdown 报告
 - 🔄 **按任务切模型** - 共用一套 API Key / Base URL，按分析和总结切换不同模型
-- 🧠 **Embedding 独立配置** - 向量检索可单独指定 provider / model，并对变更给出重建提示
-- ✅ **可选标记已读** - 默认不自动标记，需显式开启
+- 🧠 **Embedding 独立配置** - 向量检索可单独指定 provider / model，支持本地与 Docker HTTP 模式
+- ⚡ **单请求 SSE 流式** - 本地服务支持 `/api/stream`，实时推送处理进度与事件
+- 📦 **向量同步 Outbox** - SQLite 事务级写入 Outbox，断网与重试保障 Chroma 最终一致性
+- ✅ **可选标记已读** - 默认不自动标记，支持渐进式与批量标记已读
 
 ## 快速开始
 
 ### 1. 安装依赖
 
-推荐使用 [uv](https://github.com/astral-sh/uv) 进行极速安装：
+项目使用 [uv](https://github.com/astral-sh/uv) 进行依赖管理，要求 **Python 3.13+**。
+
+建议为 WSL/Linux 与 Windows 分别配置独立的虚拟环境避免冲突：
 
 ```bash
-# 使用 uv (推荐)
-uv pip install -r requirements.txt
-uv pip install rich questionary prompt-toolkit
+# WSL / Linux (bash):
+export UV_PROJECT_ENVIRONMENT=.venv-wsl
+uv sync
 
-# 或者使用标准 pip
-pip install -r requirements.txt
-pip install rich questionary prompt-toolkit
+# Windows (PowerShell):
+$env:UV_PROJECT_ENVIRONMENT=".venv-win"
+uv sync
 ```
 
 ### 2. 配置环境变量
@@ -39,9 +44,9 @@ cp .env.example .env
 Feedly 凭据保存在 `feedly_config.json`。首次授权、检查和手动刷新统一使用：
 
 ```bash
-python feedly_token.py init
-python feedly_token.py check
-python feedly_token.py refresh
+uv run python feedly_token.py init
+uv run python feedly_token.py check
+uv run python feedly_token.py refresh
 ```
 
 如需把凭据放在其他位置，设置 `FEEDLY_CONFIG_PATH`；如需代理，设置
@@ -54,31 +59,30 @@ python feedly_token.py refresh
 项目提供了一个全功能的交互式终端界面，支持选择分类、过滤模式和分析配置：
 
 ```bash
-# 使用 uv 运行
 uv run feedly_tui.py
-
-# 或者直接运行
-python feedly_tui.py
 ```
 
 #### 命令行模式
-你也可以直接调用各组件脚本：
+你也可以直接调用各组件独立命令：
 
 ```bash
 # 从 Feedly 获取文章并分析
-python article_analyzer.py --refresh
+uv run python article_analyzer.py --refresh
 
-# 分析已有的文章
-python article_analyzer.py --input output/unread_news.json
+# 过滤低分未读文章并渐进式标为已读
+uv run python feedly_filter.py --threshold 2.5
+
+# 分析已有的文章 JSON
+uv run python article_analyzer.py --input output/unread_news.json
 
 # 限制处理数量并标记已读（默认不标记，需显式开启）
-python article_analyzer.py --refresh --limit 50 --mark-read
+uv run python article_analyzer.py --refresh --limit 50 --mark-read
 
 # 重新生成总体摘要（基于已分析的文章，不重新调用 API 评分）
-python regenerate_summary.py
+uv run python regenerate_summary.py
 
-# 从 SQLite 缓存重建本地向量库
-python rebuild_vector_store.py
+# 从 SQLite 缓存重建活跃向量库
+uv run python rebuild_vector_store.py
 ```
 
 ### 4. Feedly Web UI AI 覆盖（Chrome 扩展 + 本地 HTTP 服务）
@@ -239,21 +243,32 @@ uv run python rebuild_vector_store.py
 
 ```
 AI-Feedly-Curator/
-├── article_analyzer.py   # 主程序入口
-├── regenerate_summary.py # 重新生成摘要脚本
-├── rss_analyzer/         # 核心代码
-│   ├── config.py         # 配置文件
-│   ├── scoring.py        # 评分逻辑
-│   ├── llm_analyzer.py   # LLM 交互
-│   └── ...
-├── output/               # 输出目录
-│   ├── 2026-01/          # 按月份归档
-│   │   ├── analyzed_articles_20260103_120000.json
-│   │   └── summary_20260103_120000.md
-│   ├── unread_news.json
-│   ├── analyzed_articles_latest.json
-│   └── summary_latest.md
-└── tests/                # 单元测试
+├── feedly_tui.py           # 交互式 TUI 终端入口
+├── article_analyzer.py     # 抓取、评分、分析 CLI 入口
+├── rss_backend_service.py  # 本地 HTTP + SSE 服务入口
+├── feedly_filter.py        # 未读文章过滤与渐进式标已读 CLI
+├── feedly_token.py         # Feedly OAuth / PKCE 认证管理 CLI
+├── rebuild_vector_store.py # 向量库重建与迁移 CLI
+├── regenerate_summary.py   # 基于缓存重新生成总体报告 CLI
+├── rss_analyzer/           # 核心领域模型与服务
+│   ├── analysis_service.py # 统一文章分析与版本化缓存
+│   ├── feedly_auth.py      # 统一 Feedly 认证逻辑
+│   ├── feedly_client.py    # Feedly API 客户端
+│   ├── vector_service.py   # 向量库生命周期与重建编排
+│   ├── vector_store.py     # Chroma 读写适配（嵌入式 / HTTP）
+│   ├── report_service.py   # 汇总报告与导出工作流
+│   ├── feed_analysis_workflow.py # Feedly 刷新与分析工作流
+│   ├── filter_workflows.py # 过滤与渐进式标已读工作流
+│   ├── readflow_workflows.py # 分批分类与深度阅读工作流
+│   ├── backend_service.py  # 共享调度 facade 与处理器注册
+│   ├── http_service.py     # 本地 HTTP 与 SSE 服务封装
+│   ├── *_handlers.py       # 传输层 Handler 注册表
+│   └── tui/                # 终端界面拆分模块 (menus, review, reports...)
+├── extension/              # Chrome Feedly 页面覆盖插件 (Manifest V3)
+├── skills/feedly-readflow/ # 面向 Agent 的智能多代理阅读工作流
+├── output/                 # 数据与摘要输出目录（按月归档）
+├── docs/                   # 架构设计与覆盖率文档
+└── tests/                  # 单元与集成测试套件 (170+ 测试)
 ```
 
 ## Streamlit 可视化界面
@@ -265,25 +280,21 @@ AI-Feedly-Curator/
 ```bash
 # 使用 uv 运行 (推荐)
 uv run streamlit run rss_analyzer/streamlit_app.py
-
-# 或者直接运行
-streamlit run rss_analyzer/streamlit_app.py
 ```
 
 ### 功能特性
 
 - 📈 **数据概览** - 显示文章总数、评分分布、时间趋势等统计信息
 - 🔍 **交互式搜索** - 支持按标题、内容、评分范围等条件搜索文章
-- 📊 **可视化图表** - 评分分布直方图、时间趋势图、标签词云等
+- 📊 **可视化图表** - 评分分布直方图、时间趋势图等
 - 📋 **文章列表** - 分页显示文章列表，支持排序和筛选
-- 🎯 **个性化推荐** - 基于评分和标签的智能推荐
 
 ## 测试
 
-运行所有测试：
+运行全量测试套件（170+ 测试）：
 
 ```bash
-python -m unittest discover tests
+uv run pytest tests/
 ```
 
 ## License

@@ -48,6 +48,10 @@
 - [x] Completed the TUI split by extracting main and fallback menu routing
   - `rss_analyzer/tui/menus.py` owns menu presentation and routing
   - `feedly_tui.py` is now the runtime bootstrap and compatibility entry point
+- [x] Modernized GitHub Actions CI workflow to Node 24 runtime:
+  - Upgraded `actions/setup-python` and `astral-sh/setup-uv` to `v7`
+  - Added repository labels `dependencies` and `ci`
+  - Closed superseded Dependabot PRs #6 and #7
 
 ## Environment Notes
 
@@ -80,6 +84,10 @@
   - `RSS_VECTOR_BACKEND=http` switches the app to Chroma HTTP client mode
   - Existing `rebuild_vector_store.py` now doubles as the migration command from SQLite cache to Docker Chroma
 
+- [ ] Add `plotly` dependency to `pyproject.toml` so `streamlit_app.py` runs out-of-the-box without missing module errors
+- [ ] Converge Streamlit GUI (`rss_analyzer/streamlit_app.py`, `scripts/vector_viewer.py`) to call backend service API rather than directly connecting to SQLite/Chroma
+- [ ] Retire and remove legacy `native_host/` adapter and scripts since Chrome extension now connects exclusively via HTTP/SSE
+- [ ] Prune merged local and remote git branches (`refactor/*`, `feat/*`)
 - [ ] Revisit larger repo layout only if needed later (`apps/`, `clients/`, etc.)
 
 ## Operational Notes
