@@ -85,6 +85,91 @@ async function sendBackendMessage(payload) {
   }
 }
 
+async function sendBackendStream(payload, onEvent = () => {}) {
+  const settings = await getSettings();
+  const baseUrl = (settings.serverBaseUrl || DEFAULT_SETTINGS.serverBaseUrl).replace(/\/$/, '');
+
+  try {
+    const response = await fetch(`${baseUrl}/api/stream`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'text/event-stream'
+      },
+      body: JSON.stringify(payload)
+    });
+
+    if (!response.ok || !response.body) {
+      const errorText = await response.text();
+      return {
+        error: `Backend stream failed: ${response.status}`,
+        message: errorText.substring(0, 300)
+      };
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let finalResult = null;
+
+    const consumeFrame = (frame) => {
+      let event = 'message';
+      const dataLines = [];
+      frame.split('\n').forEach((line) => {
+        if (line.startsWith('event:')) {
+          event = line.slice(6).trim();
+        } else if (line.startsWith('data:')) {
+          dataLines.push(line.slice(5).trimStart());
+        }
+      });
+      if (dataLines.length === 0) {
+        return;
+      }
+
+      const data = JSON.parse(dataLines.join('\n'));
+      onEvent(event, data);
+      if (event === 'complete') {
+        finalResult = data.result || {};
+      } else if (event === 'error') {
+        finalResult = {
+          error: data.error || 'Backend stream failed',
+          message: data.message || 'Streaming request failed'
+        };
+      }
+    };
+
+    while (true) {
+      const { value, done } = await reader.read();
+      buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
+      buffer = buffer.replace(/\r\n/g, '\n');
+
+      let boundary = buffer.indexOf('\n\n');
+      while (boundary !== -1) {
+        const frame = buffer.slice(0, boundary);
+        buffer = buffer.slice(boundary + 2);
+        if (frame.trim()) {
+          consumeFrame(frame);
+        }
+        boundary = buffer.indexOf('\n\n');
+      }
+
+      if (done) {
+        if (buffer.trim()) {
+          consumeFrame(buffer);
+        }
+        break;
+      }
+    }
+
+    return finalResult || { error: 'Backend stream ended without a result' };
+  } catch (err) {
+    return {
+      error: 'Backend stream failed',
+      message: err?.message || String(err)
+    };
+  }
+}
+
 async function fetchFromFeedlyAPI(entryId) {
   try {
     const encodedId = encodeURIComponent(entryId);
@@ -256,7 +341,7 @@ registerAsyncHandler('get_scores', async (msg) => {
   }
 
   const missingItems = missing.map((id) => itemsMap.get(id) || { id });
-  const resp = await sendBackendMessage({ type: 'get_scores', items: missingItems });
+  const resp = await sendBackendStream({ type: 'get_scores', items: missingItems });
   const fetched = resp?.items || {};
   mergeCache(fetched);
   return { items: { ...items, ...fetched } };
@@ -280,7 +365,7 @@ registerAsyncHandler('analyze_article', async (msg) => {
     return result;
   }
 
-  const resp = await sendBackendMessage(msg);
+  const resp = await sendBackendStream(msg);
   if (resp && !resp.error) {
     mergeCache({ [msg.id]: resp });
   }
@@ -335,7 +420,7 @@ registerAsyncHandler('summarize_article', async (msg, sender) => {
     status: 'loading'
   });
 
-  const resp = await sendBackendMessage({
+  const resp = await sendBackendStream({
     ...msg,
     content
   });

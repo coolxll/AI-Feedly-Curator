@@ -5,7 +5,6 @@ Shared backend message handlers for browser/native/local clients.
 from __future__ import annotations
 
 import concurrent.futures
-import hashlib
 import json
 import logging
 import os
@@ -46,7 +45,6 @@ from rss_analyzer.llm_analyzer import (
     generate_overall_summary,
     summarize_single_article,
 )
-from rss_analyzer.jobs import JobManager
 from rss_analyzer.readflow_triage import (
     article_summary_snippet,
     build_readflow_triage_prompt,
@@ -66,14 +64,16 @@ _VECTOR_STORE = None
 FEED_ID_36KR = "feed/http://www.36kr.com/feed"
 BATCH_TRIAGE_CACHE_VERSION = 1
 BATCH_READ_FETCH_LIMIT = 9999
-ASYNC_JOB_OPERATIONS = {
-    "run_analysis",
-    "generate_daily_digest",
-    "process_stream",
-    "rebuild_vector_store",
-    "retry_vector_indexing",
-}
-_JOB_MANAGER: JobManager | None = None
+ProgressCallback = Callable[[dict], None]
+
+
+def _emit_progress(
+    callback: ProgressCallback | None,
+    event: str,
+    **payload,
+) -> None:
+    if callback:
+        callback({"event": event, **payload})
 
 
 def get_analysis_service() -> ArticleAnalysisService:
@@ -85,32 +85,6 @@ def get_analysis_service() -> ArticleAnalysisService:
         cache_get=get_cached_score,
         cache_save=save_cached_score,
     )
-
-
-def _execute_background_job(operation: str, payload: dict) -> dict:
-    if operation == "run_analysis":
-        return _handle_run_analysis(payload)
-    if operation == "generate_daily_digest":
-        return _handle_generate_daily_digest(payload)
-    if operation == "process_stream":
-        return _handle_process_stream(payload)
-    if operation == "rebuild_vector_store":
-        return rebuild_vector_store()
-    if operation == "retry_vector_indexing":
-        retry_vector_index_queue(wake_worker=False)
-        return process_vector_index_queue(limit=int(payload.get("limit", 100)))
-    raise ValueError(f"Unsupported background operation: {operation}")
-
-
-def get_job_manager() -> JobManager:
-    global _JOB_MANAGER
-    if _JOB_MANAGER is None:
-        _JOB_MANAGER = JobManager(
-            _execute_background_job,
-            worker_count=max(1, int(PROJ_CONFIG.get("max_workers", 3))),
-        )
-        _JOB_MANAGER.start()
-    return _JOB_MANAGER
 
 
 @dataclass
@@ -207,6 +181,7 @@ def generate_daily_digest(
     stream_label: str | None = None,
     hours: int = 24,
     top_n: int = 10,
+    progress_callback: ProgressCallback | None = None,
 ) -> dict:
     """Generate a daily digest from recently scored articles.
 
@@ -215,6 +190,7 @@ def generate_daily_digest(
     """
     from datetime import timedelta, timezone
 
+    _emit_progress(progress_callback, "phase", phase="loading_cache")
     cutoff = datetime.now() - timedelta(hours=hours)
     cached = iter_cached_scores()
 
@@ -231,12 +207,14 @@ def generate_daily_digest(
             continue
 
     if not recent:
-        return {
+        result = {
             "success": True,
             "article_count": 0,
             "summary": f"最近 {hours} 小时内没有已评分的文章。",
             "markdown": "",
         }
+        _emit_progress(progress_callback, "progress", phase="completed", current=0, total=0)
+        return result
 
     recent.sort(key=lambda x: x.get("score", 0), reverse=True)
 
@@ -288,7 +266,7 @@ def generate_daily_digest(
         strategy="daily_digest",
     )
 
-    return {
+    result = {
         "success": True,
         "article_count": len(recent),
         "must_read_count": len(must_read),
@@ -299,6 +277,14 @@ def generate_daily_digest(
         "markdown": markdown,
         "output_file": output_file,
     }
+    _emit_progress(
+        progress_callback,
+        "progress",
+        phase="completed",
+        current=len(recent),
+        total=len(recent),
+    )
+    return result
 
 
 def regenerate_summary(input_file: str = LATEST_ANALYZED_FILE) -> dict:
@@ -341,8 +327,10 @@ def analyze_articles(
     refresh: bool = True,
     stream_id: str | None = None,
     threads: int | None = None,
+    progress_callback: ProgressCallback | None = None,
 ) -> dict:
     effective_limit = limit or int(PROJ_CONFIG["limit"])
+    _emit_progress(progress_callback, "phase", phase="fetching")
 
     if refresh:
         logger.info("=" * 60)
@@ -376,10 +364,19 @@ def analyze_articles(
 
     articles = load_articles(input_file)
     logger.info("Loaded %s articles from %s", len(articles), input_file)
+    total_articles = min(effective_limit, len(articles))
+    _emit_progress(
+        progress_callback,
+        "progress",
+        phase="analyzing",
+        current=0,
+        total=total_articles,
+    )
 
     analyzed_articles: list[dict] = []
     successful_article_ids: list[str] = []
     successful_count = 0
+    completed_count = 0
     seen_titles: set[str] = set()
     batch_scoring = PROJ_CONFIG.get("batch_scoring", False)
     batch_size = max(1, int(PROJ_CONFIG.get("batch_size", 1)))
@@ -390,7 +387,8 @@ def analyze_articles(
     pending_futures: list[tuple[concurrent.futures.Future, list[dict]]] = []
 
     def record_analysis_result(article_item: dict, analysis_result: dict) -> None:
-        nonlocal successful_count
+        nonlocal completed_count, successful_count
+        completed_count += 1
         if analysis_result.get("status", "success") != "success":
             title_str = article_item.get("title", "Unknown Title")
             logger.warning(
@@ -399,6 +397,15 @@ def analyze_articles(
                 analysis_result.get("reason", "unknown error"),
             )
             analyzed_articles.append({**article_item, "analysis": analysis_result})
+            _emit_progress(
+                progress_callback,
+                "article_failed",
+                id=article_item.get("id"),
+                title=title_str,
+                current=completed_count,
+                total=total_articles,
+                error=analysis_result.get("error") or analysis_result.get("reason"),
+            )
             return
 
         verdict = analysis_result.get("verdict", "Unknown")
@@ -430,6 +437,15 @@ def analyze_articles(
         successful_count += 1
         if article_item.get("id"):
             successful_article_ids.append(article_item["id"])
+        _emit_progress(
+            progress_callback,
+            "article_completed",
+            id=article_item.get("id"),
+            title=title_str,
+            score=score,
+            current=completed_count,
+            total=total_articles,
+        )
 
     def process_completed_futures() -> None:
         nonlocal pending_futures
@@ -442,6 +458,19 @@ def analyze_articles(
                         record_analysis_result(item["article"], analysis)
                 except Exception as exc:
                     logger.error("Batch processing failed: %s", exc)
+                    for item in batch_items:
+                        record_analysis_result(
+                            item["article"],
+                            {
+                                "status": "error",
+                                "score": None,
+                                "reason": str(exc),
+                                "error": {
+                                    "code": "batch_analysis_failed",
+                                    "message": str(exc),
+                                },
+                            },
+                        )
             else:
                 still_pending.append((future, batch_items))
         pending_futures = still_pending
@@ -454,27 +483,71 @@ def analyze_articles(
                 min(effective_limit, len(articles)),
                 article["title"],
             )
+            _emit_progress(
+                progress_callback,
+                "article_started",
+                id=article.get("id"),
+                title=article.get("title", "Unknown Title"),
+                current=idx,
+                total=total_articles,
+            )
 
             filter_keywords = PROJ_CONFIG.get("filter_keywords", [])
             if any(kw in article["title"] for kw in filter_keywords):
                 logger.info("  Skipped: title matched filter keyword")
+                _emit_progress(
+                    progress_callback,
+                    "article_skipped",
+                    id=article.get("id"),
+                    title=article.get("title"),
+                    reason="filter_keyword",
+                    current=idx,
+                    total=total_articles,
+                )
                 continue
 
             filter_url_patterns = PROJ_CONFIG.get("filter_url_patterns", [])
             article_url = article.get("link", "") or article.get("originId", "")
             if any(pattern in article_url for pattern in filter_url_patterns):
                 logger.info("  Skipped: URL matched filter pattern (%s)", article_url)
+                _emit_progress(
+                    progress_callback,
+                    "article_skipped",
+                    id=article.get("id"),
+                    title=article.get("title"),
+                    reason="filter_url",
+                    current=idx,
+                    total=total_articles,
+                )
                 continue
 
             norm_title = "".join(filter(str.isalnum, article["title"].lower()))
             if len(norm_title) > 5:
                 if norm_title in seen_titles:
                     logger.info("  Skipped: duplicate title")
+                    _emit_progress(
+                        progress_callback,
+                        "article_skipped",
+                        id=article.get("id"),
+                        title=article.get("title"),
+                        reason="duplicate_title",
+                        current=idx,
+                        total=total_articles,
+                    )
                     continue
                 seen_titles.add(norm_title)
 
             if is_newsflash(article):
                 logger.info("  Skipped: detected as newsflash")
+                _emit_progress(
+                    progress_callback,
+                    "article_skipped",
+                    id=article.get("id"),
+                    title=article.get("title"),
+                    reason="newsflash",
+                    current=idx,
+                    total=total_articles,
+                )
                 continue
 
             content = article.get("content", "")
@@ -495,6 +568,15 @@ def analyze_articles(
             min_length = PROJ_CONFIG.get("filter_min_length", 100)
             if len(content) < min_length:
                 logger.info("  Skipped: content too short (%s < %s)", len(content), min_length)
+                _emit_progress(
+                    progress_callback,
+                    "article_skipped",
+                    id=article.get("id"),
+                    title=article.get("title"),
+                    reason="content_too_short",
+                    current=idx,
+                    total=total_articles,
+                )
                 continue
 
             if batch_scoring:
@@ -565,6 +647,19 @@ def analyze_articles(
                         record_analysis_result(item["article"], analysis)
                 except Exception as exc:
                     logger.error("Batch processing failed: %s", exc)
+                    for item in batch_items:
+                        record_analysis_result(
+                            item["article"],
+                            {
+                                "status": "error",
+                                "score": None,
+                                "reason": str(exc),
+                                "error": {
+                                    "code": "batch_analysis_failed",
+                                    "message": str(exc),
+                                },
+                            },
+                        )
     finally:
         executor.shutdown(wait=True)
 
@@ -578,8 +673,9 @@ def analyze_articles(
         if feedly_mark_read(successful_article_ids):
             marked_read_count = len(successful_article_ids)
 
+    _emit_progress(progress_callback, "phase", phase="summarizing")
     summary_result = generate_summary_report(analyzed_articles)
-    return {
+    result = {
         "success": True,
         "input_file": input_file,
         "stream_id": stream_id,
@@ -594,6 +690,14 @@ def analyze_articles(
         "articles": analyzed_articles,
         **summary_result,
     }
+    _emit_progress(
+        progress_callback,
+        "progress",
+        phase="completed",
+        current=total_articles,
+        total=total_articles,
+    )
+    return result
 
 
 def _prepare_article_analysis_inputs(article: dict) -> tuple[str, str]:
@@ -1194,9 +1298,18 @@ def process_stream(
     limit: int = 500,
     strategy: str | None = None,
     export_markdown: bool = False,
+    progress_callback: ProgressCallback | None = None,
 ) -> dict:
+    _emit_progress(progress_callback, "phase", phase="fetching")
     articles = fetch_filter_articles(limit, stream_id=stream_id)
     resolved_strategy = strategy or determine_stream_strategy(stream_id, stream_label)
+    _emit_progress(
+        progress_callback,
+        "progress",
+        phase="building_overview",
+        current=0,
+        total=len(articles),
+    )
     result = generate_stream_overview(
         articles,
         stream_id=stream_id,
@@ -1212,8 +1325,16 @@ def process_stream(
     )
     digest["skim_items"] = _mark_digest_openable(digest.get("skim_items", []))
     digest["clear_items"] = _mark_digest_openable(digest.get("clear_items", []))
+    deep_candidates = digest.get("must_read_candidates", [])
+    _emit_progress(
+        progress_callback,
+        "progress",
+        phase="deep_analysis",
+        current=0,
+        total=len(deep_candidates),
+    )
     digest["deep_analyzed_reads"] = _deep_analyze_digest_candidates(
-        digest.get("must_read_candidates", [])
+        deep_candidates
     )
     digest = _rerank_digest_after_analysis(digest)
     result["digest"] = digest
@@ -1243,6 +1364,13 @@ def process_stream(
             strategy=result["strategy"],
         )
 
+    _emit_progress(
+        progress_callback,
+        "progress",
+        phase="completed",
+        current=len(articles),
+        total=len(articles),
+    )
     return result
 
 
@@ -2174,7 +2302,10 @@ def _handle_mark_stream_low_priority_read(msg: dict) -> dict:
     )
 
 
-def rebuild_vector_store() -> dict:
+def rebuild_vector_store(
+    progress_callback: ProgressCallback | None = None,
+) -> dict:
+    _emit_progress(progress_callback, "phase", phase="preparing")
     if not is_vector_store_enabled():
         return _vector_store_disabled_error("rebuild the vector store")
 
@@ -2242,13 +2373,25 @@ def rebuild_vector_store() -> dict:
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=concurrency) as executor:
         futures = [executor.submit(vector_store.add_articles, batch) for batch in batches]
-        for future in concurrent.futures.as_completed(futures):
+        for completed_batches, future in enumerate(
+            concurrent.futures.as_completed(futures),
+            1,
+        ):
             result = future.result()
             rebuilt_count += result.get("success_count", 0)
             failed_ids.extend(result.get("failed_ids", []))
+            _emit_progress(
+                progress_callback,
+                "progress",
+                phase="indexing",
+                current=completed_batches,
+                total=len(batches),
+                rebuilt_count=rebuilt_count,
+                failed_count=len(failed_ids),
+            )
 
     remaining_count = vector_store.get_article_count()
-    return {
+    result = {
         "success": len(failed_ids) == 0,
         "cached_count": len(cached_items),
         "rebuilt_count": rebuilt_count,
@@ -2264,6 +2407,14 @@ def rebuild_vector_store() -> dict:
             f"batch_size={batch_size}, concurrency={concurrency}, resume={resume_enabled}."
         ),
     }
+    _emit_progress(
+        progress_callback,
+        "progress",
+        phase="completed",
+        current=len(batches),
+        total=len(batches),
+    )
+    return result
 
 
 def _handle_get_vector_store_stats(_: dict) -> dict:
@@ -2330,52 +2481,6 @@ def _handle_health(_: dict) -> dict:
     }
 
 
-def _handle_submit_job(msg: dict) -> dict:
-    operation = msg.get("operation")
-    payload = msg.get("payload") or {}
-    if operation not in ASYNC_JOB_OPERATIONS:
-        return {
-            "error": "unsupported_job_operation",
-            "message": f"Unsupported background operation: {operation}",
-        }
-    if not isinstance(payload, dict):
-        return {"error": "invalid_payload", "message": "Job payload must be an object."}
-
-    dedupe_key = msg.get("dedupe_key")
-    if dedupe_key is None and not _coerce_bool(msg.get("force"), False):
-        serialized = json.dumps(
-            {"operation": operation, "payload": payload},
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-        )
-        dedupe_key = hashlib.sha256(serialized.encode("utf-8")).hexdigest()
-
-    job = get_job_manager().submit(
-        operation,
-        payload,
-        dedupe_key=dedupe_key,
-        max_attempts=int(msg.get("max_attempts", 3)),
-    )
-    return {"job": job}
-
-
-def _handle_get_job(msg: dict) -> dict:
-    job_id = msg.get("job_id")
-    job = get_job_manager().store.get(job_id) if job_id else None
-    if not job:
-        return {"error": "job_not_found", "message": f"Unknown job: {job_id}"}
-    return {"job": job}
-
-
-def _handle_retry_job(msg: dict) -> dict:
-    job_id = msg.get("job_id")
-    job = get_job_manager().retry(job_id) if job_id else None
-    if not job:
-        return {"error": "job_not_found", "message": f"Unknown job: {job_id}"}
-    return {"job": job}
-
-
 def _handle_retry_vector_indexing(msg: dict) -> dict:
     wait = _coerce_bool(msg.get("wait"), False)
     retry_result = retry_vector_index_queue(wake_worker=not wait)
@@ -2384,28 +2489,46 @@ def _handle_retry_vector_indexing(msg: dict) -> dict:
     return retry_result
 
 
+def handle_stream_message(msg: dict, progress_callback: ProgressCallback) -> dict:
+    """Run a request in the current connection while emitting progress events."""
+    msg_type = msg.get("type")
+    if msg_type == "run_analysis":
+        return analyze_articles(
+            input_file=msg.get("input_file", PROJ_CONFIG["input_file"]),
+            limit=int(msg.get("limit", PROJ_CONFIG["limit"])),
+            mark_read=_coerce_bool(msg.get("mark_read"), PROJ_CONFIG["mark_read"]),
+            refresh=_coerce_bool(msg.get("refresh"), PROJ_CONFIG["refresh"]),
+            stream_id=msg.get("stream_id"),
+            threads=msg.get("threads"),
+            progress_callback=progress_callback,
+        )
+    if msg_type == "generate_daily_digest":
+        return generate_daily_digest(
+            stream_id=msg.get("stream_id"),
+            stream_label=msg.get("stream_label"),
+            hours=int(msg.get("hours", 24)),
+            top_n=int(msg.get("top_n", 10)),
+            progress_callback=progress_callback,
+        )
+    if msg_type == "process_stream":
+        return process_stream(
+            stream_id=msg.get("stream_id"),
+            stream_label=msg.get("stream_label"),
+            days=int(msg.get("days", 3)),
+            limit=int(msg.get("limit", 500)),
+            strategy=msg.get("strategy"),
+            export_markdown=_coerce_bool(msg.get("export_markdown"), False),
+            progress_callback=progress_callback,
+        )
+    if msg_type == "rebuild_vector_store":
+        return rebuild_vector_store(progress_callback=progress_callback)
+
+    _emit_progress(progress_callback, "phase", phase="executing")
+    return handle_message(msg)
+
+
 def handle_message(msg: dict) -> dict:
     msg_type = msg.get("type")
-    if msg_type in ASYNC_JOB_OPERATIONS and _coerce_bool(msg.get("async"), False):
-        return _handle_submit_job(
-            {
-                "operation": msg_type,
-                "payload": {
-                    key: value
-                    for key, value in msg.items()
-                    if key not in {"type", "async", "dedupe_key", "force", "max_attempts"}
-                },
-                "dedupe_key": msg.get("dedupe_key"),
-                "force": msg.get("force"),
-                "max_attempts": msg.get("max_attempts", 3),
-            }
-        )
-    if msg_type == "submit_job":
-        return _handle_submit_job(msg)
-    if msg_type == "get_job":
-        return _handle_get_job(msg)
-    if msg_type == "retry_job":
-        return _handle_retry_job(msg)
     if msg_type == "get_vector_index_queue":
         return get_vector_index_queue_stats()
     if msg_type == "retry_vector_indexing":

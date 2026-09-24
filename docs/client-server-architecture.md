@@ -78,20 +78,20 @@ Hermes/Codex/Claude skills 也按客户端处理，而不是新的业务边界�
 3. Agent skills 继续作为薄客户端维护；若某个 skill 里的脚本变成通用能力，应迁回 `rss_analyzer/` 或项目 CLI。
 4. 当确认没有人再使用 native host 后，可将 `native_host/` 降级为 legacy 或直接删除。
 
-## 可恢复长任务
+## SSE 流式请求
 
-本地服务支持把耗时操作写入 SQLite 后台队列。客户端可以在原消息中加入
-`"async": true`，适用于：
+耗时操作通过 `POST /api/stream` 在当前 HTTP 请求中执行，响应类型为
+`text/event-stream`。服务会依次发送 `accepted`、`phase`、`progress`、文章级事件，
+最后发送 `complete` 或 `error`。Chrome 扩展应使用 `fetch()` 读取响应流；由于请求为
+POST，不使用浏览器的 `EventSource`。
 
-- `run_analysis`
-- `generate_daily_digest`
-- `process_stream`
-- `rebuild_vector_store`
-- `retry_vector_indexing`
+服务会在模型调用等静默阶段定期发送 SSE 注释心跳，避免长连接被中间层当作空闲连接
+关闭。心跳不代表后台任务：工作仍属于当前请求，最终结果也只通过同一个响应返回。
 
-提交后返回 `job.job_id`。使用 `get_job` 查询状态，使用 `retry_job` 重新提交失败任务。
-相同操作和参数默认会生成相同的去重键；需要强制新建任务时传 `"force": true`。
-服务重启后，执行中的任务会恢复为待执行状态。
+当前提供细粒度进度的操作包括 `run_analysis`、`generate_daily_digest`、
+`process_stream` 和 `rebuild_vector_store`。其他消息也可通过流式端点调用，但只会收到
+开始和最终结果事件。连接断开会通知处理流程在下一次进度回调时退出；已经进入的单次
+模型/API 调用无法由 Python 线程强制中断，只能等待该调用返回或自身超时。
 
 评分结果以 SQLite 为主数据。向量写入通过 `vector_index_outbox` 异步完成，写入失败会保留
 错误和重试次数。使用 `get_vector_index_queue` 查看积压，使用
