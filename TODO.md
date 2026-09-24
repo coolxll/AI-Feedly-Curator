@@ -35,6 +35,8 @@
 - [x] Extracted Feedly fetch-and-analyze orchestration from `feedly_workflows.py`
   - `feed_analysis_workflow.py` owns refresh, scoring, report generation, and successful-result mark-as-read
   - `feedly_workflows.py` is now a compatibility-only domain facade
+- [x] Started the TUI client split by extracting environment, path, and data helpers
+  - `rss_analyzer/tui/support.py` owns reusable non-interactive TUI support logic
 
 ## Environment Notes
 
