@@ -347,8 +347,8 @@ class TestBackendService(unittest.TestCase):
         response = handle_message({"type": ["not", "valid"]})
         self.assertEqual(response, {"error": "unknown_type"})
 
-    @patch("rss_analyzer.backend_service.save_articles")
-    @patch("rss_analyzer.backend_service.feedly_fetch_unread")
+    @patch("rss_analyzer.report_service.save_articles")
+    @patch("rss_analyzer.report_service.feedly_fetch_unread")
     def test_export_articles_handler_saves_fetched_articles(
         self, mock_feedly_fetch_unread, mock_save_articles
     ):
@@ -374,9 +374,9 @@ class TestBackendService(unittest.TestCase):
         )
         mock_save_articles.assert_called_once()
 
-    @patch("rss_analyzer.backend_service.generate_summary_report")
-    @patch("rss_analyzer.backend_service.load_articles")
-    @patch("rss_analyzer.backend_service.os.path.exists")
+    @patch("rss_analyzer.report_service.generate_summary_report")
+    @patch("rss_analyzer.report_service.load_articles")
+    @patch("rss_analyzer.report_service.os.path.exists")
     def test_generate_summary_handler_uses_input_file_when_articles_omitted(
         self, mock_exists, mock_load_articles, mock_generate_summary_report
     ):

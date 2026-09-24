@@ -27,6 +27,7 @@
 - HTTP 封装：`rss_analyzer/http_service.py`
 - 共享消息分发：`rss_analyzer/backend_service.py`
 - 文章级评分与摘要 handlers：`rss_analyzer/analysis_handlers.py`
+- 报告、日报与导出：`rss_analyzer/report_service.py`、`rss_analyzer/report_handlers.py`
 - Vector/search handlers：`rss_analyzer/vector_handlers.py`
 - Vector 生命周期与重建：`rss_analyzer/vector_service.py`
 
@@ -78,7 +79,7 @@ Hermes/Codex/Claude skills 也按客户端处理，而不是新的业务边界�
 ## 后续建议
 
 1. 把本地 GUI/Streamlit 中直接访问底层模块的地方，逐步收敛到同一套 service API。
-2. 按 report workflows、Feedly/filter workflows 继续拆分后端；registry
+2. 按 Feedly/filter workflows 继续拆分后端；registry
    保持为稳定的统一入口。
 3. Agent skills 继续作为薄客户端维护；若某个 skill 里的脚本变成通用能力，应迁回 `rss_analyzer/` 或项目 CLI。
 4. 当确认没有人再使用 native host 后，可将 `native_host/` 降级为 legacy 或直接删除。
