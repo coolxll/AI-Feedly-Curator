@@ -43,6 +43,8 @@
   - `rss_analyzer/tui/review.py` owns digest rendering, browser opening, and review execution loops
 - [x] Extracted export, summary, and deep-analysis interactions from `feedly_tui.py`
   - `rss_analyzer/tui/reports.py` owns report prompts and backend execution
+- [x] Extracted unread filter and cleanup interactions from `feedly_tui.py`
+  - `rss_analyzer/tui/cleanup.py` owns simple/fancy cleanup prompts and backend execution
 
 ## Environment Notes
 
