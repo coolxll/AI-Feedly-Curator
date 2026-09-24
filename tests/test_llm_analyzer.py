@@ -33,6 +33,7 @@ class TestLLMAnalyzer(unittest.TestCase):
 
         # 验证结果
         self.assertEqual(result["score"], 4.5)
+        self.assertEqual(result["status"], "success")
         self.assertEqual(result["summary"], "测试总结")
         self.assertEqual(result["detailed_scores"]["relevance"], 4)
         self.assertEqual(result["verdict"], "值得阅读")
@@ -45,8 +46,26 @@ class TestLLMAnalyzer(unittest.TestCase):
 
         result = analyze_article_with_llm("标题", "摘要", "内容")
 
-        self.assertEqual(result["score"], 0.0)
-        self.assertIn("分析失败", result["summary"])
+        self.assertEqual(result["status"], "error")
+        self.assertIsNone(result["score"])
+        self.assertEqual(result["error"]["code"], "analysis_failed")
+
+    @patch("rss_analyzer.scoring.score_article")
+    def test_analyze_article_preserves_structured_scoring_error(self, mock_score_article):
+        mock_score_article.return_value = {
+            "status": "error",
+            "score": None,
+            "overall_score": None,
+            "verdict": "分析失败",
+            "reason": "invalid JSON",
+            "error": {"code": "analysis_failed", "message": "invalid JSON"},
+        }
+
+        result = analyze_article_with_llm("标题", "摘要", "内容")
+
+        self.assertEqual(result["status"], "error")
+        self.assertIsNone(result["score"])
+        self.assertEqual(result["error"]["message"], "invalid JSON")
 
 
 if __name__ == "__main__":

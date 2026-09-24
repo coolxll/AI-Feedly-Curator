@@ -35,7 +35,25 @@ def analyze_article_with_llm(title: str, summary: str, content: str) -> dict:
 
     try:
         score_result = score_article(title, summary, content)
+        if score_result.get("status") == "error":
+            return {
+                "status": "error",
+                "score": None,
+                "verdict": score_result.get("verdict", "分析失败"),
+                "summary": "",
+                "reason": score_result.get("reason", "分析失败"),
+                "model": score_result.get("model", "unknown"),
+                "error": score_result.get(
+                    "error",
+                    {
+                        "code": "analysis_failed",
+                        "message": score_result.get("reason", "分析失败"),
+                    },
+                ),
+                "detailed_scores": {},
+            }
         return {
+            "status": "success",
             "score": score_result.get("overall_score", 0.0),
             "verdict": score_result.get("verdict", "未知"),
             "summary": score_result.get("comment", ""),
@@ -57,17 +75,13 @@ def analyze_article_with_llm(title: str, summary: str, content: str) -> dict:
         logger.error(f"文章分析失败: {e}")
         traceback.print_exc(file=sys.stderr)
         return {
-            "score": 0.0,
-            "verdict": "不太值得阅读",
-            "summary": f"分析失败: {str(e)}",
-            "reason": "API调用错误",
-            "detailed_scores": {
-                "relevance": 0,
-                "informativeness": 0,
-                "depth": 0,
-                "readability": 0,
-                "originality": 0,
-            },
+            "status": "error",
+            "score": None,
+            "verdict": "分析失败",
+            "summary": "",
+            "reason": str(e),
+            "error": {"code": "analysis_failed", "message": str(e)},
+            "detailed_scores": {},
         }
 
 
@@ -89,8 +103,29 @@ def analyze_articles_with_llm_batch(articles: list[dict]) -> list[dict]:
 
         analyzed = []
         for score_result in score_results:
+            if score_result.get("status") == "error":
+                analyzed.append(
+                    {
+                        "status": "error",
+                        "score": None,
+                        "verdict": score_result.get("verdict", "分析失败"),
+                        "summary": "",
+                        "reason": score_result.get("reason", "分析失败"),
+                        "model": score_result.get("model", "unknown"),
+                        "error": score_result.get(
+                            "error",
+                            {
+                                "code": "analysis_failed",
+                                "message": score_result.get("reason", "分析失败"),
+                            },
+                        ),
+                        "detailed_scores": {},
+                    }
+                )
+                continue
             analyzed.append(
                 {
+                    "status": "success",
                     "score": score_result.get("overall_score", 0.0),
                     "verdict": score_result.get("verdict", "未知"),
                     "summary": score_result.get("comment", ""),

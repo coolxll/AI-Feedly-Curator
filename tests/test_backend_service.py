@@ -203,6 +203,40 @@ class TestBackendService(unittest.TestCase):
         self.assertEqual(response["items"]["article-1"]["score"], 4.2)
         mock_batch.assert_not_called()
 
+    @patch("rss_analyzer.backend_service.save_cached_score")
+    @patch("rss_analyzer.backend_service.analyze_articles_with_llm_batch")
+    @patch("rss_analyzer.backend_service.get_cached_score", return_value=None)
+    def test_get_scores_does_not_cache_failed_analysis(
+        self, mock_cached_score, mock_batch, mock_save
+    ):
+        failed_result = {
+            "status": "error",
+            "score": None,
+            "reason": "provider timeout",
+            "error": {"code": "analysis_failed", "message": "provider timeout"},
+        }
+        mock_batch.return_value = [
+            {
+                **failed_result,
+            }
+            for _ in range(11)
+        ]
+
+        response = handle_message(
+            {
+                "type": "get_scores",
+                "items": [
+                    {"id": f"article-{index}", "title": f"Title {index}"}
+                    for index in range(1, 12)
+                ],
+            }
+        )
+
+        self.assertEqual(response["items"]["article-1"]["status"], "error")
+        self.assertIsNone(response["items"]["article-1"]["score"])
+        self.assertFalse(response["items"]["article-1"]["found"])
+        mock_save.assert_not_called()
+
     @patch("rss_analyzer.backend_service.get_cached_score")
     @patch("rss_analyzer.backend_service.save_cached_score")
     @patch("rss_analyzer.backend_service.summarize_single_article")
@@ -335,6 +369,50 @@ class TestBackendService(unittest.TestCase):
             stream_id=None,
             threads=4,
         )
+
+    @patch("rss_analyzer.backend_service.generate_summary_report", return_value={})
+    @patch("rss_analyzer.backend_service.feedly_mark_read", return_value=True)
+    @patch("rss_analyzer.backend_service.analyze_article_with_llm")
+    @patch("rss_analyzer.backend_service.save_articles")
+    @patch("rss_analyzer.backend_service.load_articles")
+    @patch("rss_analyzer.backend_service.os.path.exists", return_value=True)
+    def test_analyze_articles_marks_only_successful_results_read(
+        self,
+        mock_exists,
+        mock_load_articles,
+        mock_save_articles,
+        mock_analyze,
+        mock_mark_read,
+        mock_summary,
+    ):
+        from rss_analyzer.backend_service import analyze_articles
+
+        mock_load_articles.return_value = [
+            {"id": "ok", "title": "Successful", "content": "x" * 300},
+            {"id": "failed", "title": "Failed", "content": "x" * 300},
+        ]
+        mock_analyze.side_effect = [
+            {
+                "status": "success",
+                "score": 4.0,
+                "verdict": "值得阅读",
+                "reason": "useful",
+            },
+            {
+                "status": "error",
+                "score": None,
+                "reason": "timeout",
+                "error": {"code": "analysis_failed", "message": "timeout"},
+            },
+        ]
+
+        with patch.dict(PROJ_CONFIG, {"batch_scoring": False}):
+            result = analyze_articles(refresh=False, mark_read=True, limit=2)
+
+        mock_mark_read.assert_called_once_with(["ok"])
+        self.assertEqual(result["successful_count"], 1)
+        self.assertEqual(result["failed_count"], 1)
+        self.assertEqual(result["marked_read_count"], 1)
 
     @patch("rss_analyzer.backend_service.run_filter_workflow")
     def test_run_filters_handler_coerces_values(self, mock_run_filter_workflow):
@@ -537,6 +615,36 @@ class TestBackendService(unittest.TestCase):
 
         self.assertEqual(len(result.matched), 1)
         self.assertEqual(result.label, "low-score")
+        mock_feedly_mark_read.assert_not_called()
+
+    @patch("rss_analyzer.backend_service.feedly_mark_read")
+    @patch("rss_analyzer.backend_service.get_cached_score", return_value=None)
+    @patch("rss_analyzer.backend_service._score_article")
+    def test_low_score_filter_keeps_failed_analysis(
+        self, mock_score_article, mock_get_cached_score, mock_feedly_mark_read
+    ):
+        from rss_analyzer.backend_service import low_score_filter
+
+        mock_score_article.return_value = (
+            None,
+            {
+                "status": "error",
+                "score": None,
+                "error": {"code": "analysis_failed", "message": "timeout"},
+            },
+        )
+
+        with patch.dict(PROJ_CONFIG, {"batch_scoring": False}):
+            result = low_score_filter(
+                [{"id": "article-1", "title": "Unavailable article"}],
+                threshold=3.0,
+                dry_run=False,
+                mark_read=True,
+                incremental_mark=True,
+            )
+
+        self.assertEqual(result.matched, [])
+        self.assertEqual([item["id"] for item in result.remaining], ["article-1"])
         mock_feedly_mark_read.assert_not_called()
 
     @patch("rss_analyzer.backend_service.feedly_mark_read", return_value=True)
