@@ -36,6 +36,18 @@ pip install rich questionary prompt-toolkit
 cp .env.example .env
 ```
 
+Feedly 凭据保存在 `feedly_config.json`。首次授权、检查和手动刷新统一使用：
+
+```bash
+python feedly_token.py init
+python feedly_token.py check
+python feedly_token.py refresh
+```
+
+如需把凭据放在其他位置，设置 `FEEDLY_CONFIG_PATH`；如需代理，设置
+`FEEDLY_PROXY_URL`。CLI 与运行时 Feedly 客户端共用同一套配置、代理和 token
+刷新实现。
+
 ### 3. 运行
 
 #### 交互式模式 (推荐)
@@ -277,4 +289,3 @@ python -m unittest discover tests
 ## License
 
 MIT
-
