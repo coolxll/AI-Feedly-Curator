@@ -67,6 +67,48 @@ class TestLLMAnalyzer(unittest.TestCase):
         self.assertIsNone(result["score"])
         self.assertEqual(result["error"]["message"], "invalid JSON")
 
+    def test_generate_overall_summary_no_high_score_articles(self):
+        from rss_analyzer.llm_analyzer import generate_overall_summary
+
+        articles = [
+            {"title": "Low 1", "score": 2.5, "analysis": {"score": 2.5}},
+            {"title": "Low 2", "score": 1.0, "analysis": {"score": 1.0}},
+        ]
+        result = generate_overall_summary(articles)
+        self.assertEqual(result, "没有值得总结的高质量文章。")
+
+    @patch("rss_analyzer.llm_analyzer.OpenAI")
+    def test_generate_overall_summary_success_and_fallback_keys(self, mock_openai_cls):
+        from unittest.mock import MagicMock
+        from rss_analyzer.llm_analyzer import generate_overall_summary
+
+        mock_client = MagicMock()
+        mock_response = MagicMock()
+        mock_choice = MagicMock()
+        mock_choice.message.content = "## 测试总结报告\n推荐阅读。"
+        mock_response.choices = [mock_choice]
+        mock_response.usage.prompt_tokens = 100
+        mock_response.usage.completion_tokens = 50
+        mock_response.usage.total_tokens = 150
+        mock_response.id = "mock-id"
+        mock_response.model = "mock-model"
+        mock_response.created = 123456
+        mock_client.chat.completions.create.return_value = mock_response
+        mock_openai_cls.return_value = mock_client
+
+        # Article without "analysis" dict, using top-level fallbacks
+        articles = [
+            {
+                "title": "Good Article",
+                "url": "https://example.com/good",
+                "score": 4.5,
+                "summary": "Great content",
+            }
+        ]
+        result = generate_overall_summary(articles)
+        self.assertEqual(result, "## 测试总结报告\n推荐阅读。")
+        self.assertTrue(mock_client.chat.completions.create.called)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -234,22 +234,39 @@ def generate_overall_summary(analyzed_articles: list) -> str:
         skipped_count = 0
 
         for article in analyzed_articles:
-            analysis = article["analysis"]
-            score = analysis.get("score", 0.0)
-            red_flags = analysis.get("detailed_scores", {}).get("red_flags", [])
+            analysis = article.get("analysis")
+            if not isinstance(analysis, dict):
+                analysis = {}
+
+            score = analysis.get("score")
+            if score is None:
+                score = article.get("score", 0.0)
+
+            detailed_scores = analysis.get("detailed_scores")
+            if not isinstance(detailed_scores, dict):
+                detailed_scores = article.get("detailed_scores", {})
+            red_flags = detailed_scores.get("red_flags") or article.get("red_flags", [])
 
             if score < 3.0 or red_flags:
                 skipped_count += 1
                 continue
 
+            summary_text = (
+                analysis.get("summary")
+                or analysis.get("comment")
+                or article.get("summary")
+                or article.get("reason", "")
+            )
+            verdict = analysis.get("verdict") or article.get("verdict", "未知")
+
             articles_info.append(
                 {
-                    "title": article["title"],
-                    "link": article.get("link", ""),
+                    "title": article.get("title", "未命名文章"),
+                    "link": article.get("link") or article.get("url", ""),
                     "score": score,
-                    "verdict": analysis.get("verdict", "未知"),
-                    "summary": analysis.get("summary", ""),
-                    "detailed_scores": analysis.get("detailed_scores", {}),
+                    "verdict": verdict,
+                    "summary": summary_text,
+                    "detailed_scores": detailed_scores,
                 }
             )
 
