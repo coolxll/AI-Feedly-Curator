@@ -54,7 +54,8 @@ Feedly stream 选择交互位于 `rss_analyzer/tui/stream_selection.py`；
 stream overview 与 batch reading 交互位于 `rss_analyzer/tui/review.py`；
 导出、重新汇总与深度分析交互位于 `rss_analyzer/tui/reports.py`；
 未读过滤与清理交互位于 `rss_analyzer/tui/cleanup.py`；
-根目录的 `feedly_tui.py` 保留可执行入口与交互编排。
+主菜单与基础 fallback 菜单位于 `rss_analyzer/tui/menus.py`；根目录的
+`feedly_tui.py` 只保留可执行入口、运行环境初始化、context 组装和兼容 wrappers。
 
 ### 4. Agent Skills
 
