@@ -41,6 +41,8 @@
   - `rss_analyzer/tui/stream_selection.py` owns the interactive stream picker
 - [x] Extracted stream overview and batch-reading interactions from `feedly_tui.py`
   - `rss_analyzer/tui/review.py` owns digest rendering, browser opening, and review execution loops
+- [x] Extracted export, summary, and deep-analysis interactions from `feedly_tui.py`
+  - `rss_analyzer/tui/reports.py` owns report prompts and backend execution
 
 ## Environment Notes
 
