@@ -45,6 +45,9 @@
   - `rss_analyzer/tui/reports.py` owns report prompts and backend execution
 - [x] Extracted unread filter and cleanup interactions from `feedly_tui.py`
   - `rss_analyzer/tui/cleanup.py` owns simple/fancy cleanup prompts and backend execution
+- [x] Completed the TUI split by extracting main and fallback menu routing
+  - `rss_analyzer/tui/menus.py` owns menu presentation and routing
+  - `feedly_tui.py` is now the runtime bootstrap and compatibility entry point
 
 ## Environment Notes
 

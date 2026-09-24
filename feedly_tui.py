@@ -7,18 +7,12 @@ Interactive menu for running Feedly filters.
 import sys
 import logging
 import os
-from rss_analyzer.config import (
-    PROJ_CONFIG,
-    get_openai_task_config,
-)
 from rss_analyzer.feedly_client import (
     feedly_get_categories,
     feedly_get_subscriptions,
     feedly_get_unread_counts,
 )
 from rss_analyzer.tui.support import (
-    format_limit_display as _format_limit_display,
-    get_cleanup_defaults as _get_cleanup_defaults,
     get_review_defaults as _get_review_defaults,
     import_error_hint as _import_error_hint,
 )
@@ -51,6 +45,21 @@ from rss_analyzer.tui.cleanup import (
     run_filter_flow as _cleanup_run_filter_flow,
     simple_filter_flow as _cleanup_simple_filter_flow,
 )
+from rss_analyzer.tui.menus import (
+    MenuContext,
+    get_input as _menu_get_input,
+    main_menu as _menu_main,
+    pause_and_render_main_header as _menu_pause_and_render_main_header,
+    render_main_header as _menu_render_main_header,
+    run_reports_menu as _menu_run_reports,
+    run_review_menu as _menu_run_review,
+    simple_analyze_flow as _menu_simple_analyze_flow,
+    simple_export_flow as _menu_simple_export_flow,
+    simple_menu as _menu_simple_menu,
+    simple_process_stream_flow as _menu_simple_process_stream_flow,
+    simple_reports_menu as _menu_simple_reports_menu,
+    simple_review_menu as _menu_simple_review_menu,
+)
 from rich.console import Console
 from rich.panel import Panel
 from rich.logging import RichHandler
@@ -75,24 +84,29 @@ console = Console()
 logger = logging.getLogger("tui")
 
 
-def render_main_header():
-    analysis_model = get_openai_task_config(
-        "analysis", default_model="gpt-4o-mini"
-    ).model
-    summary_model = get_openai_task_config(
-        "summary", default_model="gpt-4o-mini"
-    ).model
-    console.print(
-        Panel.fit(
-            (
-                "Feedly AI Curator / 智能阅读与清理终端\n"
-                f"[dim]评分模型 (analysis):[/dim] {analysis_model}\n"
-                f"[dim]总结模型 (summary):[/dim] {summary_model}"
-            ),
-            style="bold cyan",
-            subtitle="交互式终端 (TUI)",
-        )
+def _menu_context() -> MenuContext:
+    return MenuContext(
+        console=console,
+        get_input=get_input,
+        get_review_defaults=_get_review_defaults,
+        simple_filter_flow=simple_filter_flow,
+        execute_process_stream=execute_process_stream,
+        execute_batch_read=execute_batch_read,
+        execute_analyze=execute_analyze,
+        execute_export=execute_export,
+        run_filter_flow=run_filter_flow,
+        run_summary_flow=run_summary_flow,
+        run_analyze_flow=run_analyze_flow,
+        run_export_flow=run_export_flow,
+        run_process_stream_flow=run_process_stream_flow,
+        run_batch_read_flow=run_batch_read_flow,
     )
+
+
+def render_main_header():
+    return _menu_render_main_header(_menu_context())
+
+
 
 
 def _maybe_reexec_in_project_venv() -> None:
@@ -130,199 +144,33 @@ def _maybe_reexec_in_project_venv() -> None:
 
 
 def get_input(prompt_text, default=None):
-    """Fallback input helper"""
-    p = f"{prompt_text} "
-    if default:
-        p += f"[{default}]: "
-    else:
-        p += ": "
-
-    val = input(p).strip()
-    if not val and default:
-        return default
-    return val
+    return _menu_get_input(prompt_text, default)
 
 
 def simple_menu():
-    """Fallback menu using standard input"""
-    console.clear()
-    console.print(
-        Panel.fit(
-            "Feedly AI Curator (基础简易模式)", style="bold cyan", subtitle="控制台交互"
-        )
-    )
-
-    while True:
-        console.print("\n[bold]主菜单 (Main Menu):[/bold]")
-        console.print("1. 📖 未读速览与清理 (Review Unread)")
-        console.print("2. 🧹 低分与快讯过滤 (Clean Up Unread)")
-        console.print("3. 📊 深度分析与综合报告 (Analyze & Reports)")
-        console.print("4. 💾 导出未读文章为 JSON (Export Unread JSON)")
-        console.print("5. 🚪 退出程序 (Exit)")
-
-        choice = get_input("请选择操作序号", default="1")
-
-        if choice == "5":
-            console.print("[cyan]感谢使用，再见！[/cyan]")
-            sys.exit()
-        elif choice == "1":
-            simple_review_menu()
-        elif choice == "2":
-            simple_filter_flow()
-        elif choice == "3":
-            simple_reports_menu()
-        elif choice == "4":
-            simple_export_flow()
-        else:
-            console.print("[red]无效选项，请重新输入[/red]")
+    return _menu_simple_menu(_menu_context())
 
 
 def simple_review_menu():
-    default_limit, default_days, default_chunk = _get_review_defaults()
-    limit_text = _format_limit_display(default_limit)
-    while True:
-        console.print("\n[bold]未读速览与清理 (Review Unread):[/bold]")
-        console.print(
-            f"1. ⚡ 一键雷达全景速览 (全局所有订阅, 上限: {limit_text}, 近 {default_days} 天)"
-        )
-        console.print(
-            f"2. ⚡ 一键分批逐步清理 (全局所有订阅, 每批: {default_chunk} 篇, 近 {default_days} 天)"
-        )
-        console.print("3. 🛠 自定义雷达速览")
-        console.print("4. 🛠 自定义分批清理")
-        console.print("5. 🔙 返回主菜单")
-        choice = get_input("请选择操作序号", default="1")
-        if choice == "1":
-            execute_process_stream(
-                stream_id=None,
-                limit=default_limit if default_limit > 0 else 9999,
-                days=default_days,
-                stream_label="Global All",
-            )
-        elif choice == "2":
-            execute_batch_read(
-                stream_id=None,
-                stream_label="Global All",
-                batch_size=default_chunk,
-                days=default_days,
-            )
-        elif choice == "3":
-            simple_process_stream_flow()
-        elif choice == "4":
-            run_batch_read_flow()
-        elif choice == "5":
-            return
-        else:
-            console.print("[red]无效选项，请重新输入[/red]")
+    return _menu_simple_review_menu(_menu_context())
 
 
 def simple_reports_menu():
-    while True:
-        console.print("\n[bold]深度分析与综合报告 (Analyze & Reports):[/bold]")
-        console.print("1. ⚡ 一键全量分析与总结 (上限: 100 篇, 强制刷新, 并发: 3)")
-        console.print("2. 🛠 自定义全量分析与报告")
-        console.print("3. 📋 重新生成总结报告 (基于已有分析数据)")
-        console.print("4. 🔙 返回主菜单")
-        choice = get_input("请选择操作序号", default="1")
-        if choice == "1":
-            execute_analyze(
-                limit=100, refresh=True, mark_read=False, stream_id=None, threads=3
-            )
-        elif choice == "2":
-            simple_analyze_flow()
-        elif choice == "3":
-            run_summary_flow()
-        elif choice == "4":
-            return
-        else:
-            console.print("[red]无效选项，请重新输入[/red]")
+    return _menu_simple_reports_menu(_menu_context())
 
 
 def simple_analyze_flow():
-    """Fallback analyze flow"""
-    console.print("\n[bold]全量分析与总结配置:[/bold]")
-
-    limit_str = get_input("文章抓取上限 (Article Limit)", default="100")
-    try:
-        limit = int(limit_str)
-    except ValueError:
-        limit = 100
-
-    refresh_str = get_input("是否从 Feedly 拉取最新文章? (y/n)", default="y")
-    refresh = refresh_str.lower().startswith("y")
-
-    stream_id = None
-    if refresh:
-        sid = get_input("指定 Stream ID (可选，直接回车使用全局订阅)", default="")
-        if sid:
-            stream_id = sid
-
-    default_mark = "y" if PROJ_CONFIG.get("mark_read") else "n"
-    mark_read_str = get_input(
-        "分析完成后是否在 Feedly 标记为已读? (y/n)", default=default_mark
-    )
-    mark_read = mark_read_str.lower().startswith("y")
-
-    threads_str = get_input("并发分析线程数 (默认: 3)", default="3")
-    try:
-        threads = int(threads_str)
-    except ValueError:
-        threads = 3
-
-    execute_analyze(limit, refresh, mark_read, stream_id, threads)
+    return _menu_simple_analyze_flow(_menu_context())
 
 
 def simple_export_flow():
-    """Fallback export flow"""
-    console.print("\n[bold]导出未读文章配置:[/bold]")
-
-    sid = get_input("指定 Stream ID (可选，直接回车使用全局订阅)", default="")
-    stream_id = sid if sid else None
-
-    limit_str = get_input("导出数量上限 (输入 0 为全量未读)", default="100")
-    try:
-        limit = int(limit_str)
-    except ValueError:
-        limit = 100
-
-    from datetime import datetime
-
-    default_filename = f"output/export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-    filename = get_input("导出文件路径", default=default_filename)
-
-    execute_export(limit, stream_id, filename)
+    return _menu_simple_export_flow(_menu_context())
 
 
 def simple_process_stream_flow():
-    default_limit, default_days, _ = _get_review_defaults()
-    console.print("\n[bold]Quick Review Stream:[/bold]")
-    sid = get_input("Stream ID (Optional, press Enter for Global)", default="")
-    stream_id = sid if sid else None
+    return _menu_simple_process_stream_flow(_menu_context())
 
-    limit_default_str = "0" if default_limit <= 0 else str(default_limit)
-    limit_str = get_input(
-        "Limit (0 or 'all' for full unread)", default=limit_default_str
-    )
-    if not limit_str or limit_str.strip().lower() in ("all", "0", "full"):
-        limit = 0
-    else:
-        try:
-            limit = int(limit_str)
-        except ValueError:
-            limit = default_limit
 
-    days_str = get_input("Recent Days", default=str(default_days))
-    try:
-        days = int(days_str)
-    except ValueError:
-        days = default_days
-
-    execute_process_stream(
-        stream_id,
-        limit=limit if limit > 0 else 9999,
-        days=days,
-        stream_label="Global All" if not stream_id else None,
-    )
 
 
 def _report_context() -> ReportContext:
@@ -410,140 +258,21 @@ def _verify_startup_dependencies_or_exit() -> None:
 
 
 def _pause_and_render_main_header() -> None:
-    input("\nPress Enter to return to menu...")
-    console.clear()
-    render_main_header()
+    return _menu_pause_and_render_main_header(_menu_context())
 
 
 def main_menu():
-    """Fancy menu using questionary"""
-    try:
-        import questionary
-
-        # Test if we can access the prompt session (catch NoConsoleScreenBufferError)
-        import prompt_toolkit  # noqa: F401
-    except ImportError:
-        simple_menu()
-        return
-
-    console.clear()
-    render_main_header()
-
-    while True:
-        action = questionary.select(
-            "请选择操作 (What would you like to do?):",
-            choices=[
-                questionary.Choice("1. 📖 未读速览与清理 (Review Unread)", value="review"),
-                questionary.Choice("2. 🧹 低分与快讯过滤 (Clean Up Unread)", value="cleanup"),
-                questionary.Choice("3. 📊 深度分析与综合报告 (Analyze & Reports)", value="reports"),
-                questionary.Choice("4. 💾 导出未读文章为 JSON (Export Unread JSON)", value="export"),
-                questionary.Choice("5. 🚪 退出程序 (Exit)", value="exit"),
-            ],
-            style=questionary.Style(
-                [
-                    ("qmark", "fg:cyan bold"),
-                    ("question", "fg:cyan bold"),
-                    ("answer", "fg:green bold"),
-                    ("pointer", "fg:cyan bold"),
-                    ("highlighted", "fg:cyan bold"),
-                    ("selected", "fg:green bold"),
-                ]
-            ),
-        ).ask()
-
-        if action == "exit":
-            console.print("[cyan]感谢使用，再见！[/cyan]")
-            sys.exit()
-        elif action == "review":
-            run_review_menu()
-            _pause_and_render_main_header()
-        elif action == "cleanup":
-            run_filter_flow()
-            _pause_and_render_main_header()
-        elif action == "reports":
-            run_reports_menu()
-            _pause_and_render_main_header()
-        elif action == "export":
-            run_export_flow()
-            _pause_and_render_main_header()
+    return _menu_main(_menu_context())
 
 
 def run_review_menu():
-    import questionary
-
-    default_limit, default_days, default_chunk = _get_review_defaults()
-    limit_text = _format_limit_display(default_limit)
-
-    action = questionary.select(
-        "未读速览与清理 (Review Unread):",
-        choices=[
-            questionary.Choice(
-                f"⚡ 一键雷达全景速览 (全局所有订阅, 上限: {limit_text}, 近 {default_days} 天)",
-                value="quick_default",
-            ),
-            questionary.Choice(
-                f"⚡ 一键分批逐步清理 (全局所有订阅, 每批: {default_chunk} 篇, 近 {default_days} 天)",
-                value="batch_default",
-            ),
-            questionary.Choice(
-                "🛠 自定义雷达速览 (选择订阅/分类, 自定义上限与天数)...",
-                value="quick_custom",
-            ),
-            questionary.Choice(
-                "🛠 自定义分批清理 (选择订阅/分类, 自定义每批数量与天数)...",
-                value="batch_custom",
-            ),
-            questionary.Choice("🔙 返回主菜单 (Back)", value="back"),
-        ],
-    ).ask()
-
-    if not action or action == "back":
-        return
-
-    if action in ("quick_default", "quick_all"):
-        execute_process_stream(
-            stream_id=None,
-            limit=default_limit if default_limit > 0 else 9999,
-            days=default_days,
-            stream_label="Global All",
-        )
-    elif action in ("batch_default", "batch_all"):
-        execute_batch_read(
-            stream_id=None,
-            stream_label="Global All",
-            batch_size=default_chunk,
-            days=default_days,
-        )
-    elif action in ("quick_custom", "quick"):
-        run_process_stream_flow()
-    elif action in ("batch_custom", "batch"):
-        run_batch_read_flow()
+    return _menu_run_review(_menu_context())
 
 
 def run_reports_menu():
-    import questionary
+    return _menu_run_reports(_menu_context())
 
-    action = questionary.select(
-        "深度分析与综合报告 (Analyze & Reports):",
-        choices=[
-            questionary.Choice(
-                "⚡ 一键全量深度分析 (上限: 100 篇, 强制刷新, 全局订阅, 并发: 3)",
-                value="quick_analyze",
-            ),
-            questionary.Choice("🛠 自定义深度分析与报告 (自定义上限、订阅源、标记已读等)...", value="analyze"),
-            questionary.Choice("📋 重新生成总结报告 (基于已有分析数据，无需重复调大模型打分)", value="summary"),
-            questionary.Choice("🔙 返回主菜单 (Back)", value="back"),
-        ],
-    ).ask()
 
-    if action == "quick_analyze":
-        execute_analyze(
-            limit=100, refresh=True, mark_read=False, stream_id=None, threads=3
-        )
-    elif action == "analyze":
-        run_analyze_flow()
-    elif action == "summary":
-        run_summary_flow()
 
 
 def run_summary_flow():
