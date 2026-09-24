@@ -24,6 +24,10 @@
 - [x] Extracted vector/search handlers and vector rebuild lifecycle from `backend_service.py`
 - [x] Extracted article-level scoring, analysis, and summary handlers from `backend_service.py`
 - [x] Extracted report, daily digest, and export workflows from `backend_service.py`
+- [x] Extracted Feedly analysis, filtering, stream, and batch-reading workflows from `backend_service.py`
+  - `feedly_workflows.py` owns the domain workflows
+  - `feedly_handlers.py` owns message/SSE transport adapters
+  - `backend_service.py` is now the stable compatibility facade and dispatcher
 
 ## Environment Notes
 
@@ -45,11 +49,11 @@
 
 - [x] Converged TUI analyze/export/summary flows onto the shared backend/service layer
   - `feedly_tui.py` no longer orchestrates `article_analyzer.main()` or `regenerate_summary` directly
-  - `article_analyzer.py` and `regenerate_summary.py` now wrap shared `rss_analyzer/backend_service.py` workflows
+  - `article_analyzer.py` and `regenerate_summary.py` now wrap shared `rss_analyzer/` workflows
   - Target architecture remains: one backend, multiple clients (TUI / Chrome extension / future GUI / Skills)
 
 - [x] Converged TUI filter flows onto the shared backend/service layer
-  - `feedly_tui.py` now runs filter workflows via `rss_analyzer/backend_service.py`
+  - `feedly_tui.py` now runs shared filter workflows through the compatibility facade
   - `feedly_filter.py` is now a thin CLI wrapper over the same shared backend workflow
 
 - [x] Added optional Dockerized ChromaDB service mode

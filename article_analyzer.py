@@ -8,9 +8,9 @@ import argparse
 import logging
 import os
 
-from rss_analyzer.backend_service import analyze_articles
-from rss_analyzer.report_service import export_articles
 from rss_analyzer.config import PROJ_CONFIG, setup_logging
+from rss_analyzer.feedly_workflows import analyze_articles
+from rss_analyzer.report_service import export_articles
 
 logger = logging.getLogger(__name__)
 

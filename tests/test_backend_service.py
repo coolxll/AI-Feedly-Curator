@@ -102,9 +102,9 @@ class TestBackendService(unittest.TestCase):
         self.assertEqual(result["p2-1"]["decision"], "must_read")
         self.assertTrue(result["p2-1"]["needs_deep_read"])
 
-    @patch("rss_analyzer.backend_service._deep_analyze_digest_candidates")
-    @patch("rss_analyzer.backend_service._batch_triage_articles")
-    @patch("rss_analyzer.backend_service.fetch_filter_articles")
+    @patch("rss_analyzer.feedly_workflows._deep_analyze_digest_candidates")
+    @patch("rss_analyzer.feedly_workflows._batch_triage_articles")
+    @patch("rss_analyzer.feedly_workflows.fetch_filter_articles")
     def test_process_batch_builds_p2_briefing_without_fetch_limit_from_chunk_size(
         self,
         mock_fetch_filter_articles,
@@ -396,7 +396,7 @@ class TestBackendService(unittest.TestCase):
         self.assertEqual(response["input_file"], input_file)
         mock_generate_summary_report.assert_called_once_with([])
 
-    @patch("rss_analyzer.backend_service.analyze_articles")
+    @patch("rss_analyzer.feedly_handlers.analyze_articles")
     def test_run_analysis_handler_coerces_string_booleans(
         self, mock_analyze_articles
     ):
@@ -422,14 +422,14 @@ class TestBackendService(unittest.TestCase):
             threads=4,
         )
 
-    @patch("rss_analyzer.backend_service.generate_summary_report", return_value={})
-    @patch("rss_analyzer.backend_service.feedly_mark_read", return_value=True)
-    @patch("rss_analyzer.backend_service.save_cached_score")
-    @patch("rss_analyzer.backend_service.get_cached_score", return_value=None)
-    @patch("rss_analyzer.backend_service.analyze_article_with_llm")
-    @patch("rss_analyzer.backend_service.save_articles")
-    @patch("rss_analyzer.backend_service.load_articles")
-    @patch("rss_analyzer.backend_service.os.path.exists", return_value=True)
+    @patch("rss_analyzer.feedly_workflows.generate_summary_report", return_value={})
+    @patch("rss_analyzer.feedly_workflows.feedly_mark_read", return_value=True)
+    @patch("rss_analyzer.feedly_workflows.save_cached_score")
+    @patch("rss_analyzer.feedly_workflows.get_cached_score", return_value=None)
+    @patch("rss_analyzer.feedly_workflows.analyze_article_with_llm")
+    @patch("rss_analyzer.feedly_workflows.save_articles")
+    @patch("rss_analyzer.feedly_workflows.load_articles")
+    @patch("rss_analyzer.feedly_workflows.os.path.exists", return_value=True)
     def test_analyze_articles_marks_only_successful_results_read(
         self,
         mock_exists,
@@ -479,7 +479,7 @@ class TestBackendService(unittest.TestCase):
         self.assertIn("article_failed", [event["event"] for event in events])
         self.assertEqual(events[-1]["phase"], "completed")
 
-    @patch("rss_analyzer.backend_service.analyze_articles")
+    @patch("rss_analyzer.feedly_handlers.analyze_articles")
     def test_stream_dispatcher_passes_progress_callback(self, mock_analyze_articles):
         from rss_analyzer.backend_service import handle_stream_message
 
@@ -495,7 +495,7 @@ class TestBackendService(unittest.TestCase):
         self.assertTrue(response["success"])
         self.assertIs(mock_analyze_articles.call_args.kwargs["progress_callback"], callback)
 
-    @patch("rss_analyzer.backend_service.run_filter_workflow")
+    @patch("rss_analyzer.feedly_handlers.run_filter_workflow")
     def test_run_filters_handler_coerces_values(self, mock_run_filter_workflow):
         mock_run_filter_workflow.return_value = {"success": True}
 
@@ -521,7 +521,7 @@ class TestBackendService(unittest.TestCase):
             stream_id="feed/abc",
         )
 
-    @patch("rss_analyzer.backend_service.process_stream")
+    @patch("rss_analyzer.feedly_handlers.process_stream")
     def test_process_stream_handler_coerces_values(self, mock_process_stream):
         mock_process_stream.return_value = {"success": True, "strategy": "radar"}
 
@@ -546,7 +546,7 @@ class TestBackendService(unittest.TestCase):
             export_markdown=True,
         )
 
-    @patch("rss_analyzer.backend_service.mark_stream_low_priority_read")
+    @patch("rss_analyzer.feedly_handlers.mark_stream_low_priority_read")
     def test_mark_stream_low_priority_read_handler_coerces_values(self, mock_mark_low):
         mock_mark_low.return_value = {"success": True, "marked_count": 2}
 
@@ -561,10 +561,10 @@ class TestBackendService(unittest.TestCase):
         self.assertTrue(response["success"])
         mock_mark_low.assert_called_once_with(["a", "b"], dry_run=False)
 
-    @patch("rss_analyzer.backend_service.render_stream_overview_markdown")
-    @patch("rss_analyzer.backend_service.analyze_article_with_llm")
-    @patch("rss_analyzer.backend_service.fetch_filter_articles")
-    @patch("rss_analyzer.backend_service.generate_stream_overview")
+    @patch("rss_analyzer.feedly_workflows.render_stream_overview_markdown")
+    @patch("rss_analyzer.feedly_workflows.analyze_article_with_llm")
+    @patch("rss_analyzer.feedly_workflows.fetch_filter_articles")
+    @patch("rss_analyzer.feedly_workflows.generate_stream_overview")
     def test_process_stream_demotes_low_score_must_read_after_analysis(
         self,
         mock_generate_stream_overview,
@@ -613,8 +613,8 @@ class TestBackendService(unittest.TestCase):
         mock_render_markdown.return_value = "digest markdown"
 
         with (
-            patch("rss_analyzer.backend_service.get_cached_score", return_value=None),
-            patch("rss_analyzer.backend_service.save_cached_score"),
+            patch("rss_analyzer.feedly_workflows.get_cached_score", return_value=None),
+            patch("rss_analyzer.feedly_workflows.save_cached_score"),
         ):
             result = process_stream(stream_id="feed/v2ex", stream_label="Feed: V2EX")
 
@@ -622,9 +622,9 @@ class TestBackendService(unittest.TestCase):
         self.assertEqual(len(result["digest"]["clear_items"]), 1)
         self.assertEqual(result["mark_read_candidates"], ["1"])
 
-    @patch("rss_analyzer.backend_service.logger")
-    @patch("rss_analyzer.backend_service.analyze_article_with_llm")
-    @patch("rss_analyzer.backend_service._prepare_article_analysis_inputs")
+    @patch("rss_analyzer.feedly_workflows.logger")
+    @patch("rss_analyzer.feedly_workflows.analyze_article_with_llm")
+    @patch("rss_analyzer.feedly_workflows._prepare_article_analysis_inputs")
     def test_deep_analyze_digest_candidates_logs_progress_and_preserves_order(
         self,
         mock_prepare_inputs,
@@ -642,8 +642,8 @@ class TestBackendService(unittest.TestCase):
         ]
 
         with (
-            patch("rss_analyzer.backend_service.get_cached_score", return_value=None),
-            patch("rss_analyzer.backend_service.save_cached_score"),
+            patch("rss_analyzer.feedly_workflows.get_cached_score", return_value=None),
+            patch("rss_analyzer.feedly_workflows.save_cached_score"),
         ):
             result = _deep_analyze_digest_candidates(items)
 
@@ -664,13 +664,13 @@ class TestBackendService(unittest.TestCase):
             info_messages,
         )
 
-    @patch("rss_analyzer.backend_service.logger")
+    @patch("rss_analyzer.feedly_workflows.logger")
     @patch(
-        "rss_analyzer.backend_service.analyze_article_with_llm",
+        "rss_analyzer.feedly_workflows.analyze_article_with_llm",
         side_effect=Exception("boom"),
     )
     @patch(
-        "rss_analyzer.backend_service._prepare_article_analysis_inputs",
+        "rss_analyzer.feedly_workflows._prepare_article_analysis_inputs",
         return_value=("summary", "Long enough content" * 20),
     )
     def test_deep_analyze_digest_candidates_keeps_batch_running_on_single_failure(
@@ -687,8 +687,8 @@ class TestBackendService(unittest.TestCase):
         self.assertNotIn("score", result[0])
         mock_logger.warning.assert_called()
 
-    @patch("rss_analyzer.backend_service.feedly_mark_read")
-    @patch("rss_analyzer.backend_service.get_cached_score")
+    @patch("rss_analyzer.feedly_workflows.feedly_mark_read")
+    @patch("rss_analyzer.feedly_workflows.get_cached_score")
     def test_low_score_filter_does_not_mark_read_inline(
         self, mock_get_cached_score, mock_feedly_mark_read
     ):
@@ -709,9 +709,9 @@ class TestBackendService(unittest.TestCase):
         self.assertEqual(result.label, "low-score")
         mock_feedly_mark_read.assert_not_called()
 
-    @patch("rss_analyzer.backend_service.feedly_mark_read")
-    @patch("rss_analyzer.backend_service.get_cached_score", return_value=None)
-    @patch("rss_analyzer.backend_service._score_article")
+    @patch("rss_analyzer.feedly_workflows.feedly_mark_read")
+    @patch("rss_analyzer.feedly_workflows.get_cached_score", return_value=None)
+    @patch("rss_analyzer.feedly_workflows._score_article")
     def test_low_score_filter_keeps_failed_analysis(
         self, mock_score_article, mock_get_cached_score, mock_feedly_mark_read
     ):
@@ -739,8 +739,8 @@ class TestBackendService(unittest.TestCase):
         self.assertEqual([item["id"] for item in result.remaining], ["article-1"])
         mock_feedly_mark_read.assert_not_called()
 
-    @patch("rss_analyzer.backend_service.feedly_mark_read", return_value=True)
-    @patch("rss_analyzer.backend_service.get_cached_score")
+    @patch("rss_analyzer.feedly_workflows.feedly_mark_read", return_value=True)
+    @patch("rss_analyzer.feedly_workflows.get_cached_score")
     def test_low_score_filter_incremental_mark_batches(
         self, mock_get_cached_score, mock_feedly_mark_read
     ):
@@ -769,8 +769,8 @@ class TestBackendService(unittest.TestCase):
         mock_feedly_mark_read.assert_any_call(["article-3", "article-4"])
         mock_feedly_mark_read.assert_any_call(["article-5"])
 
-    @patch("rss_analyzer.backend_service.feedly_mark_read")
-    @patch("rss_analyzer.backend_service.get_cached_score")
+    @patch("rss_analyzer.feedly_workflows.feedly_mark_read")
+    @patch("rss_analyzer.feedly_workflows.get_cached_score")
     def test_low_score_filter_incremental_mark_dry_run(
         self, mock_get_cached_score, mock_feedly_mark_read
     ):
@@ -795,7 +795,7 @@ class TestBackendService(unittest.TestCase):
         self.assertEqual(len(result.marked_ids), 0)
         mock_feedly_mark_read.assert_not_called()
 
-    @patch("rss_analyzer.backend_service.feedly_mark_read")
+    @patch("rss_analyzer.feedly_workflows.feedly_mark_read")
     def test_run_filter_pipeline_skips_already_marked(self, mock_feedly_mark_read):
         from rss_analyzer.backend_service import FilterResult, run_filter_pipeline
 
@@ -816,8 +816,8 @@ class TestBackendService(unittest.TestCase):
         self.assertEqual(result["remaining_count"], 1)
         mock_feedly_mark_read.assert_not_called()
 
-    @patch("rss_analyzer.backend_service.run_filter_pipeline")
-    @patch("rss_analyzer.backend_service.fetch_filter_articles")
+    @patch("rss_analyzer.feedly_workflows.run_filter_pipeline")
+    @patch("rss_analyzer.feedly_workflows.fetch_filter_articles")
     def test_run_filter_workflow_defaults_newsflash_to_36kr(
         self, mock_fetch_filter_articles, mock_run_filter_pipeline
     ):
