@@ -39,6 +39,8 @@
   - `rss_analyzer/tui/support.py` owns reusable non-interactive TUI support logic
 - [x] Extracted Feedly category/subscription selection from `feedly_tui.py`
   - `rss_analyzer/tui/stream_selection.py` owns the interactive stream picker
+- [x] Extracted stream overview and batch-reading interactions from `feedly_tui.py`
+  - `rss_analyzer/tui/review.py` owns digest rendering, browser opening, and review execution loops
 
 ## Environment Notes
 
