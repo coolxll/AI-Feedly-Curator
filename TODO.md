@@ -86,7 +86,12 @@
 
 - [x] Removed abandoned Streamlit dashboard (`rss_analyzer/streamlit_app.py`, `scripts/vector_viewer.py`) and removed `streamlit` dependency (pruning 16 transitive packages)
 - [x] Removed legacy `native_host/` adapter, `install_native_host.ps1`, `regenerate_summary.py` (integrated into TUI), and early migration scripts (`scripts/migrate_to_vector_store*.py`, `repair_vector_metadata.py`)
-- [ ] Prune merged local and remote git branches (`refactor/*`, `feat/*`)
+- [x] Feedly API 429 rate-limiting retry with exponential backoff and `Retry-After` header parsing
+- [x] Feedly mark-as-read batch size converged to conservative 100
+- [x] Feedly client HTTP explicit request timeout safeguards (10s connect, 30s read)
+- [x] Article web content extraction parallelized via thread pool prefetch in `feed_analysis_workflow`
+- [x] Prune merged local and remote git branches (`refactor/*`, `feat/*`, `feature/*`)
+- [x] Cleaned up legacy local vector-store leftovers (`chroma_db/`, `chroma_db_quarantine_*`)
 - [ ] Revisit larger repo layout only if needed later (`apps/`, `clients/`, etc.)
 
 ## Operational Notes
@@ -94,6 +99,3 @@
 - [ ] If embedding model/provider changes, rebuild the active vector-store collection
   - For Docker HTTP mode, rerun `uv run python rebuild_vector_store.py` against the configured `RSS_VECTOR_HTTP_URL`
   - For embedded mode, rebuild the local `chroma_db/`
-- [ ] Decide when to delete legacy local vector-store leftovers
-  - `chroma_db/`
-  - `chroma_db_quarantine_20260327_090524/`
