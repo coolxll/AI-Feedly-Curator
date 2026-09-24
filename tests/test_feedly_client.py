@@ -41,6 +41,38 @@ class TestFeedlyMarkRead(unittest.TestCase):
         self.assertEqual(call_args.kwargs["json"]["action"], "markAsRead")
 
     @patch("rss_analyzer.feedly_client.load_feedly_config")
+    @patch("rss_analyzer.feedly_client.requests.post")
+    def test_mark_read_chunks_by_default_batch_size(self, mock_post, mock_config):
+        """测试按默认 batch_size (100) 自动分批"""
+        mock_config.return_value = {"token": "test_token"}
+        mock_post.return_value = MagicMock(status_code=200)
+
+        ids = [f"id-{i}" for i in range(250)]
+        result = feedly_mark_read(ids)
+
+        self.assertTrue(result)
+        self.assertEqual(mock_post.call_count, 3)
+        self.assertEqual(len(mock_post.call_args_list[0].kwargs["json"]["entryIds"]), 100)
+        self.assertEqual(len(mock_post.call_args_list[1].kwargs["json"]["entryIds"]), 100)
+        self.assertEqual(len(mock_post.call_args_list[2].kwargs["json"]["entryIds"]), 50)
+
+    @patch("rss_analyzer.feedly_client.load_feedly_config")
+    @patch("rss_analyzer.feedly_client.requests.post")
+    def test_mark_read_custom_batch_size(self, mock_post, mock_config):
+        """测试自定义 batch_size 分批"""
+        mock_config.return_value = {"token": "test_token"}
+        mock_post.return_value = MagicMock(status_code=200)
+
+        ids = ["a", "b", "c", "d", "e"]
+        result = feedly_mark_read(ids, batch_size=2)
+
+        self.assertTrue(result)
+        self.assertEqual(mock_post.call_count, 3)
+        self.assertEqual(mock_post.call_args_list[0].kwargs["json"]["entryIds"], ["a", "b"])
+        self.assertEqual(mock_post.call_args_list[1].kwargs["json"]["entryIds"], ["c", "d"])
+        self.assertEqual(mock_post.call_args_list[2].kwargs["json"]["entryIds"], ["e"])
+
+    @patch("rss_analyzer.feedly_client.load_feedly_config")
     def test_mark_read_no_config(self, mock_config):
         """测试没有配置时返回 False"""
         mock_config.return_value = None

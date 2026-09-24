@@ -23,6 +23,7 @@ from .feedly_auth import (
 logger = logging.getLogger(__name__)
 
 __all__ = [
+    "DEFAULT_MARK_READ_BATCH_SIZE",
     "FEEDLY_CONFIG_FILE",
     "feedly_fetch_unread",
     "feedly_get_categories",
@@ -198,12 +199,19 @@ def feedly_fetch_unread(
         return None
 
 
-def feedly_mark_read(article_ids: list | str) -> bool:
+DEFAULT_MARK_READ_BATCH_SIZE = 100
+
+
+def feedly_mark_read(
+    article_ids: list | str,
+    batch_size: int = DEFAULT_MARK_READ_BATCH_SIZE,
+) -> bool:
     """
     标记文章为已读
 
     Args:
         article_ids: 文章 ID 或 ID 列表
+        batch_size: 每批提交给 Feedly markers API 的文章数量（默认 100，建议 ≤ 200 以防超时与限流）
 
     Returns:
         是否成功
@@ -221,11 +229,12 @@ def feedly_mark_read(article_ids: list | str) -> bool:
     if not article_ids:
         return True
 
+    safe_batch_size = max(1, batch_size)
+
     try:
-        batch_size = 1000
         all_success = True
-        for i in range(0, len(article_ids), batch_size):
-            chunk = article_ids[i : i + batch_size]
+        for i in range(0, len(article_ids), safe_batch_size):
+            chunk = article_ids[i : i + safe_batch_size]
             data = {"action": "markAsRead", "type": "entries", "entryIds": chunk}
             response = _request_with_token_refresh(
                 "POST",
