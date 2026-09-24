@@ -77,3 +77,22 @@ Hermes/Codex/Claude skills 也按客户端处理，而不是新的业务边界�
 2. 若后端接口继续增长，把消息分发从 `type`-switch 进一步整理成显式路由表。
 3. Agent skills 继续作为薄客户端维护；若某个 skill 里的脚本变成通用能力，应迁回 `rss_analyzer/` 或项目 CLI。
 4. 当确认没有人再使用 native host 后，可将 `native_host/` 降级为 legacy 或直接删除。
+
+## 可恢复长任务
+
+本地服务支持把耗时操作写入 SQLite 后台队列。客户端可以在原消息中加入
+`"async": true`，适用于：
+
+- `run_analysis`
+- `generate_daily_digest`
+- `process_stream`
+- `rebuild_vector_store`
+- `retry_vector_indexing`
+
+提交后返回 `job.job_id`。使用 `get_job` 查询状态，使用 `retry_job` 重新提交失败任务。
+相同操作和参数默认会生成相同的去重键；需要强制新建任务时传 `"force": true`。
+服务重启后，执行中的任务会恢复为待执行状态。
+
+评分结果以 SQLite 为主数据。向量写入通过 `vector_index_outbox` 异步完成，写入失败会保留
+错误和重试次数。使用 `get_vector_index_queue` 查看积压，使用
+`retry_vector_indexing` 重新处理失败项。

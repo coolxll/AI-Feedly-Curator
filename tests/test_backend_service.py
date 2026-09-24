@@ -300,6 +300,42 @@ class TestBackendService(unittest.TestCase):
         response = handle_message({"type": "does_not_exist"})
         self.assertEqual(response, {"error": "unknown_type"})
 
+    @patch("rss_analyzer.backend_service.get_job_manager")
+    def test_long_operation_can_be_submitted_as_durable_job(self, mock_get_manager):
+        manager = mock_get_manager.return_value
+        manager.submit.return_value = {
+            "job_id": "job-1",
+            "operation": "run_analysis",
+            "status": "pending",
+        }
+
+        response = handle_message(
+            {
+                "type": "run_analysis",
+                "async": True,
+                "limit": 25,
+                "refresh": False,
+            }
+        )
+
+        self.assertEqual(response["job"]["job_id"], "job-1")
+        args, kwargs = manager.submit.call_args
+        self.assertEqual(args, ("run_analysis", {"limit": 25, "refresh": False}))
+        self.assertEqual(len(kwargs["dedupe_key"]), 64)
+
+    @patch("rss_analyzer.backend_service.get_job_manager")
+    def test_job_status_and_retry_messages(self, mock_get_manager):
+        manager = mock_get_manager.return_value
+        manager.store.get.return_value = {"job_id": "job-1", "status": "failed"}
+        manager.retry.return_value = {"job_id": "job-1", "status": "pending"}
+
+        status = handle_message({"type": "get_job", "job_id": "job-1"})
+        retried = handle_message({"type": "retry_job", "job_id": "job-1"})
+
+        self.assertEqual(status["job"]["status"], "failed")
+        self.assertEqual(retried["job"]["status"], "pending")
+        manager.retry.assert_called_once_with("job-1")
+
     @patch("rss_analyzer.backend_service.save_articles")
     @patch("rss_analyzer.backend_service.feedly_fetch_unread")
     def test_export_articles_handler_saves_fetched_articles(
