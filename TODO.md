@@ -93,6 +93,18 @@
 - [x] Prune merged local and remote git branches (`refactor/*`, `feat/*`, `feature/*`)
 - [x] Cleaned up legacy local vector-store leftovers (`chroma_db/`, `chroma_db_quarantine_*`)
 - [ ] Revisit larger repo layout only if needed later (`apps/`, `clients/`, etc.)
+- [x] Made article content truncation configurable (`RSS_MAX_CONTENT_CHARS`)
+  - `article_fetcher.fetch_article_content` previously hard-coded `result[:10000]`
+    with no warning, silently dropping the tail of long articles (deep dives,
+    long-form reports) before LLM scoring/summarization
+  - Default raised to **20000** chars; every truncation now logs a warning with
+    `original_len`, `kept_len`, `dropped_len`, and the source URL
+  - Exposed as `PROJ_CONFIG["max_content_chars"]` + `RSS_MAX_CONTENT_CHARS` env
+    var; set `0` (or negative) to disable truncation entirely
+  - NOTE: this limit is a token-cost lever, not a technical one. Before
+    changing the default in production, measure the impact on LLM spend and on
+    scoring quality for long-form sources; the 20000 default is a provisional
+    value chosen to cover the majority of articles without a large cost jump.
 
 ## Operational Notes
 

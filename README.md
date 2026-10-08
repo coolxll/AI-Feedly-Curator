@@ -109,6 +109,7 @@ python rss_backend_service.py --host 127.0.0.1 --port 8765
 - `RSS_VECTOR_BACKEND`
 - `RSS_VECTOR_HTTP_URL`
 - `RSS_VECTOR_STATE_DIR`
+- `RSS_MAX_CONTENT_CHARS`（抓取正文传给 LLM 的最大字符数，默认 `20000`；设为 `0` 表示不截断）
 
 #### 4.2 加载扩展
 
