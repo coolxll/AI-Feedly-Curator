@@ -29,6 +29,15 @@ PKCE_CLIENT_SECRET = "feedlydev"
 DEFAULT_TOKEN_LIFETIME_SECONDS = 604800
 
 
+class FeedlyAuthError(Exception):
+    """Raised when Feedly authentication fails (expired/invalid token).
+
+    This is intentionally distinct from connection-level failures
+    (``requests.RequestException``) so callers can tell the user
+    "your login expired, re-authorize" instead of a generic timeout/error.
+    """
+
+
 def resolve_feedly_config_file() -> str:
     """Resolve config from the environment, working tree, or package root."""
     configured_path = os.getenv("FEEDLY_CONFIG_PATH")
@@ -151,6 +160,13 @@ def refresh_access_token(refresh_token: str) -> dict:
         proxies=proxy,
         timeout=15,
     )
+    if response.status_code in (400, 401, 403):
+        # The refresh_token itself is rejected: this is an auth failure, not a
+        # network problem, so surface it as FeedlyAuthError.
+        raise FeedlyAuthError(
+            "Feedly refresh_token 已被拒绝 "
+            f"({response.status_code}): {response.text[:200]}"
+        )
     response.raise_for_status()
     return response.json()
 
@@ -166,6 +182,10 @@ def apply_token_data(config: dict, token_data: dict, *, now: int | None = None) 
     expires_in = int(token_data.get("expires_in", DEFAULT_TOKEN_LIFETIME_SECONDS))
     updated["token_expires_in"] = expires_in
     updated["token_expires_at"] = (int(time.time()) if now is None else now) + expires_in
+    # Drop legacy duplicate fields (previously stale, never updated) so no code
+    # path can mistake them for the live token or its real expiry.
+    for legacy_key in ("access_token", "expires_at"):
+        updated.pop(legacy_key, None)
     return updated
 
 
@@ -185,13 +205,25 @@ def refresh_feedly_config(
 ) -> dict | None:
     refresh_token = config.get("refresh_token")
     if not refresh_token:
-        logger.error("Feedly token expired and no refresh_token is configured")
+        logger.error(
+            "Feedly 登录已失效：token 过期且没有可用的 refresh_token，"
+            "请运行 `uv run python feedly_token.py init` 重新授权"
+        )
         return None
 
     try:
         token_data = refresh_access_token(refresh_token)
+    except FeedlyAuthError as exc:
+        # Surface a single complete, actionable message: the refresh_token
+        # itself was rejected, so retrying will not help.
+        message = (
+            "Feedly 登录已失效：refresh_token 已被拒绝，"
+            "请运行 `uv run python feedly_token.py init` 重新授权"
+        )
+        logger.error(message)
+        raise FeedlyAuthError(message) from exc
     except requests.RequestException as exc:
-        logger.error("Feedly token refresh failed: %s", exc)
+        logger.error("Feedly token 刷新失败（网络/连接问题）: %s", exc)
         return None
 
     updated = apply_token_data(config, token_data)

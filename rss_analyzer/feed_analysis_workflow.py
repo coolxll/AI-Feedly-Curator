@@ -25,7 +25,11 @@ from rss_analyzer.config import (
     get_vector_store_config,
     is_vector_store_enabled,
 )
-from rss_analyzer.feedly_client import feedly_fetch_unread, feedly_mark_read
+from rss_analyzer.feedly_client import (
+    FeedlyAuthError,
+    feedly_fetch_unread,
+    feedly_mark_read,
+)
 from rss_analyzer.llm_analyzer import (
     analyze_article_with_llm,
     analyze_articles_with_llm_batch,
@@ -97,7 +101,16 @@ def analyze_articles(
             logger.info("Target Stream: %s", stream_id)
         logger.info("=" * 60)
         logger.info("Fetching latest %s unread articles...", effective_limit)
-        articles = feedly_fetch_unread(limit=effective_limit, stream_id=stream_id)
+        try:
+            articles = feedly_fetch_unread(limit=effective_limit, stream_id=stream_id)
+        except FeedlyAuthError:
+            return {
+                "error": "auth_failed",
+                "message": (
+                    "Feedly 登录已失效或 token 无效，"
+                    "请运行 `uv run python feedly_token.py init` 重新授权。"
+                ),
+            }
         if articles is None:
             return {
                 "error": "fetch_failed",

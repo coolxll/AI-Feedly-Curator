@@ -45,7 +45,10 @@ articles_summary.md
 rss-summary-*.md
 output/
 feedly_final_report.md
-tmp/readflow/
+# Local scratch / generated runtime data (reports, chunk files, caches)
+tmp/
+# Throwaway scratch scripts (e.g. _tmp_fetch_*.py, _tmp_mark_*.py)
+_tmp_*.py
 
 # Claude skills
 .claude/

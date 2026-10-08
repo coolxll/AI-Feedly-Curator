@@ -63,10 +63,19 @@ def mark_ids(ids: list[str], *, batch_size: int, dry_run: bool) -> int:
             print(f"... {len(cleaned) - 20} more")
         return 0
 
-    from rss_analyzer.feedly_client import feedly_mark_read
+    from rss_analyzer.feedly_client import FeedlyAuthError, feedly_mark_read
 
     for batch in chunked(cleaned, batch_size):
-        if not feedly_mark_read(batch):
+        try:
+            ok = feedly_mark_read(batch)
+        except FeedlyAuthError as exc:
+            print(f"Feedly 认证失败: {exc}", file=sys.stderr)
+            print(
+                "请运行以下命令重新授权: uv run python feedly_token.py init",
+                file=sys.stderr,
+            )
+            return 1
+        if not ok:
             print(f"Failed to mark batch of {len(batch)} entries", file=sys.stderr)
             return 1
     return 0
