@@ -11,6 +11,7 @@ import requests
 
 from .feedly_auth import (
     FEEDLY_CONFIG_FILE,
+    FeedlyAuthError,
     get_feedly_headers,
     get_feedly_proxy as _get_proxy,
     load_feedly_config,
@@ -26,6 +27,7 @@ __all__ = [
     "DEFAULT_MARK_READ_BATCH_SIZE",
     "DEFAULT_REQUEST_TIMEOUT",
     "FEEDLY_CONFIG_FILE",
+    "FeedlyAuthError",
     "feedly_fetch_unread",
     "feedly_get_categories",
     "feedly_get_subscriptions",
@@ -72,6 +74,11 @@ def _request_with_token_refresh(
     1. Automatic token refresh and single retry on 401 Unauthorized.
     2. Exponential backoff and Retry-After retry on 429 Too Many Requests.
     3. Explicit timeout safeguard (connect 10s, read 30s) by default.
+
+    Raises:
+        FeedlyAuthError: the token is expired/invalid and re-authorization is
+            required. This is reported separately from connection errors
+            (``requests.RequestException``) so the two are never conflated.
     """
     request_func = getattr(requests, method.lower())
     kwargs["headers"] = get_feedly_headers(config["token"])
@@ -84,13 +91,23 @@ def _request_with_token_refresh(
     while True:
         response = request_func(url, **kwargs)
 
-        if response.status_code == 401 and not refreshed:
-            refreshed_config = refresh_feedly_config(config)
-            if refreshed_config:
-                refreshed = True
-                config.update(refreshed_config)
-                kwargs["headers"] = get_feedly_headers(refreshed_config["token"])
-                continue
+        if response.status_code == 401:
+            if not refreshed:
+                refreshed_config = refresh_feedly_config(config)
+                if refreshed_config:
+                    refreshed = True
+                    config.update(refreshed_config)
+                    kwargs["headers"] = get_feedly_headers(refreshed_config["token"])
+                    continue
+            # Refresh was impossible or the refreshed token is still rejected.
+            # The message is self-contained; log it once here so every caller
+            # (CLI, TUI, skills) gets the same actionable guidance.
+            message = (
+                "Feedly 登录已失效：token 无效或过期，"
+                "请运行 `uv run python feedly_token.py init` 重新授权"
+            )
+            logger.error(message)
+            raise FeedlyAuthError(message)
 
         if response.status_code == 429 and attempt < max_rate_limit_retries:
             delay = _calculate_backoff_delay(response, attempt, base_delay=base_backoff)
@@ -159,8 +176,12 @@ def feedly_fetch_unread(
             )
 
             if response.status_code == 401:
-                logger.error("Feedly认证失败，请检查token")
-                return None if not articles else articles
+                # Normally unreachable: _request_with_token_refresh raises
+                # FeedlyAuthError on 401. Kept as a defensive guard.
+                raise FeedlyAuthError(
+                    "Feedly 登录已失效：token 无效或过期，"
+                    "请运行 `uv run python feedly_token.py init` 重新授权"
+                )
             if response.status_code != 200:
                 logger.error(
                     f"Feedly API错误: {response.status_code} - {response.text}"
@@ -196,6 +217,13 @@ def feedly_fetch_unread(
 
         # Trim to exact limit if we over-fetched
         return articles if not has_limit else articles[:limit]
+    except FeedlyAuthError:
+        # Login/authorization failure: propagate so callers can tell the user to
+        # re-authorize, instead of mixing it up with a network/timeout error.
+        raise
+    except requests.RequestException as e:
+        logger.error(f"获取Feedly未读文章失败（连接/超时）: {e}")
+        return None
     except Exception as e:
         logger.error(f"获取Feedly未读文章异常: {str(e)}")
         import traceback
@@ -256,6 +284,11 @@ def feedly_mark_read(
                 all_success = False
 
         return all_success
+    except FeedlyAuthError:
+        raise
+    except requests.RequestException as e:
+        logger.error(f"标记已读失败（连接/超时）: {e}")
+        return False
     except Exception as e:
         logger.error(f"标记已读异常: {str(e)}")
         return False
@@ -283,6 +316,11 @@ def feedly_get_categories() -> list | None:
         else:
             logger.error(f"获取分类失败: {response.status_code} - {response.text}")
             return None
+    except FeedlyAuthError:
+        raise
+    except requests.RequestException as e:
+        logger.error(f"获取分类失败（连接/超时）: {e}")
+        return None
     except Exception as e:
         logger.error(f"获取分类异常: {str(e)}")
         return None
@@ -310,6 +348,11 @@ def feedly_get_subscriptions() -> list | None:
         else:
             logger.error(f"获取订阅失败: {response.status_code} - {response.text}")
             return None
+    except FeedlyAuthError:
+        raise
+    except requests.RequestException as e:
+        logger.error(f"获取订阅失败（连接/超时）: {e}")
+        return None
     except Exception as e:
         logger.error(f"获取订阅异常: {str(e)}")
         return None
@@ -339,6 +382,11 @@ def feedly_get_unread_counts() -> dict | None:
         else:
             logger.error(f"获取未读计数失败: {response.status_code} - {response.text}")
             return None
+    except FeedlyAuthError:
+        raise
+    except requests.RequestException as e:
+        logger.error(f"获取未读计数失败（连接/超时）: {e}")
+        return None
     except Exception as e:
         logger.error(f"获取未读计数异常: {str(e)}")
         return None

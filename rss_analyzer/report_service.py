@@ -10,7 +10,10 @@ from typing import Callable
 
 from rss_analyzer.cache import iter_cached_scores
 from rss_analyzer.config import LATEST_ANALYZED_FILE, LATEST_SUMMARY_FILE
-from rss_analyzer.feedly_client import feedly_fetch_unread
+from rss_analyzer.feedly_client import (
+    FeedlyAuthError,
+    feedly_fetch_unread,
+)
 from rss_analyzer.llm_analyzer import generate_overall_summary
 from rss_analyzer.stream_strategy import save_stream_overview_markdown
 from rss_analyzer.utils import load_articles, save_articles
@@ -173,7 +176,16 @@ def regenerate_summary(input_file: str = LATEST_ANALYZED_FILE) -> dict:
 
 def export_articles(limit: int, output_file: str, stream_id: str | None = None) -> dict:
     logger.info("Exporting up to %s unread articles to %s", limit, output_file)
-    articles = feedly_fetch_unread(limit=limit, stream_id=stream_id)
+    try:
+        articles = feedly_fetch_unread(limit=limit, stream_id=stream_id)
+    except FeedlyAuthError:
+        return {
+            "error": "auth_failed",
+            "message": (
+                "Feedly 登录已失效或 token 无效，"
+                "请运行 `uv run python feedly_token.py init` 重新授权。"
+            ),
+        }
     if articles is None:
         return {
             "error": "fetch_failed",

@@ -8,6 +8,7 @@ import sys
 import logging
 import os
 from rss_analyzer.feedly_client import (
+    FeedlyAuthError,
     feedly_get_categories,
     feedly_get_subscriptions,
     feedly_get_unread_counts,
@@ -389,6 +390,19 @@ if __name__ == "__main__":
         main_menu()
     except KeyboardInterrupt:
         sys.exit()
+    except FeedlyAuthError as e:
+        # Auth failure is not a UI/console problem: report it plainly and exit.
+        console.print(
+            Panel(
+                "[bold red]Feedly 登录已失效[/bold red]\n\n"
+                f"{e}\n\n"
+                "请运行以下命令重新授权：\n"
+                "  uv run python feedly_token.py init",
+                title="认证失败",
+                style="red",
+            )
+        )
+        sys.exit(1)
     except Exception as e:
         # Fallback for NoConsoleScreenBufferError or other TUI init failures
         if "NoConsole" in str(e) or "console" in str(e).lower():

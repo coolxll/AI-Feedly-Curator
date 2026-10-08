@@ -5,7 +5,11 @@ feedly_client 模块单元测试
 import unittest
 from unittest.mock import patch, MagicMock
 
-from rss_analyzer.feedly_client import feedly_fetch_unread, feedly_mark_read
+from rss_analyzer.feedly_client import (
+    FeedlyAuthError,
+    feedly_fetch_unread,
+    feedly_mark_read,
+)
 
 
 class TestFeedlyMarkRead(unittest.TestCase):
@@ -84,13 +88,12 @@ class TestFeedlyMarkRead(unittest.TestCase):
     @patch("rss_analyzer.feedly_client.load_feedly_config")
     @patch("rss_analyzer.feedly_client.requests.post")
     def test_mark_read_api_error(self, mock_post, mock_config):
-        """测试 API 返回错误时"""
+        """401 must surface as an explicit auth error, not a silent False."""
         mock_config.return_value = {"token": "test_token"}
         mock_post.return_value = MagicMock(status_code=401, text="Unauthorized")
 
-        result = feedly_mark_read("article_id")
-
-        self.assertFalse(result)
+        with self.assertRaises(FeedlyAuthError):
+            feedly_mark_read("article_id")
 
     @patch("rss_analyzer.feedly_client.refresh_feedly_config")
     @patch("rss_analyzer.feedly_client.load_feedly_config")

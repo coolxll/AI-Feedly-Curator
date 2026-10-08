@@ -240,9 +240,17 @@ def main() -> int:
     if args.input:
         articles = load_articles(Path(args.input))
     else:
-        from rss_analyzer.feedly_client import feedly_fetch_unread
+        from rss_analyzer.feedly_client import FeedlyAuthError, feedly_fetch_unread
 
-        fetched = feedly_fetch_unread(stream_id=args.stream_id, limit=args.limit)
+        try:
+            fetched = feedly_fetch_unread(stream_id=args.stream_id, limit=args.limit)
+        except FeedlyAuthError as exc:
+            print(f"Feedly 认证失败: {exc}", file=sys.stderr)
+            print(
+                "请运行以下命令重新授权: uv run python feedly_token.py init",
+                file=sys.stderr,
+            )
+            return 1
         if fetched is None:
             print("Failed to fetch unread articles from Feedly", file=sys.stderr)
             return 1
