@@ -7,7 +7,7 @@ from typing import Callable
 
 import requests
 
-from .config import PROJ_CONFIG
+from .config import PROJ_CONFIG, get_max_content_chars
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +55,31 @@ def fetch_articles_content_concurrently(
                 results[url] = f"处理异常: {str(e)}"
 
     return results
+
+
+def _truncate_content(content: str, url: str) -> str:
+    """Apply the configurable content-length cap, warning when it bites.
+
+    Truncation is a token-cost trade-off, not a silent detail: dropping the
+    tail of a long-form article changes what the LLM can score and summarize.
+    Log loudly so the loss is visible instead of being mistaken for the
+    article's real length.
+    """
+    limit = get_max_content_chars()
+    if limit is None or limit <= 0 or len(content) <= limit:
+        return content
+
+    dropped = len(content) - limit
+    logger.warning(
+        "Article content truncated: kept %d/%d chars (dropped %d, %.0f%%) for %s. "
+        "Raise RSS_MAX_CONTENT_CHARS to keep more.",
+        limit,
+        len(content),
+        dropped,
+        dropped / len(content) * 100,
+        url,
+    )
+    return content[:limit]
 
 
 def fetch_article_content(url: str) -> str:
@@ -108,7 +133,7 @@ def fetch_article_content(url: str) -> str:
                 downloaded, include_comments=False, include_tables=False
             )
             if result:
-                return result[:10000]  # 限制长度
+                return _truncate_content(result, url)
             else:
                 return "内容提取为空 (可能是纯JS渲染页面)"
         else:

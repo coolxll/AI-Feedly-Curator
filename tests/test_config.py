@@ -17,6 +17,7 @@ from rss_analyzer.config import (
     build_openai_client_kwargs,
     get_config,
     get_embedding_config,
+    get_max_content_chars,
     get_openai_task_config,
     get_vector_store_config,
     is_vector_store_enabled,
@@ -256,6 +257,36 @@ class TestConfig(unittest.TestCase):
     def test_is_vector_store_enabled_supports_legacy_alias(self):
         with patch.dict(os.environ, {"ENABLE_VECTOR_STORE": "0"}, clear=True):
             self.assertFalse(is_vector_store_enabled())
+
+
+class TestMaxContentChars(unittest.TestCase):
+    """Article truncation must be configurable and never silently wrong."""
+
+    def test_default_is_positive(self):
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(get_max_content_chars(), PROJ_CONFIG["max_content_chars"])
+            self.assertGreater(get_max_content_chars(), 0)
+
+    def test_env_override(self):
+        with patch.dict(os.environ, {"RSS_MAX_CONTENT_CHARS": "12000"}, clear=True):
+            self.assertEqual(get_max_content_chars(), 12000)
+
+    def test_zero_disables_truncation(self):
+        with patch.dict(os.environ, {"RSS_MAX_CONTENT_CHARS": "0"}, clear=True):
+            self.assertEqual(get_max_content_chars(), 0)
+
+    def test_blank_env_falls_back_to_default(self):
+        with patch.dict(os.environ, {"RSS_MAX_CONTENT_CHARS": "   "}, clear=True):
+            self.assertEqual(
+                get_max_content_chars(), PROJ_CONFIG["max_content_chars"]
+            )
+
+    def test_invalid_env_falls_back_and_warns(self):
+        with patch.dict(os.environ, {"RSS_MAX_CONTENT_CHARS": "abc"}, clear=True):
+            with self.assertLogs("rss_analyzer.config", level="WARNING"):
+                self.assertEqual(
+                    get_max_content_chars(), PROJ_CONFIG["max_content_chars"]
+                )
 
 
 if __name__ == "__main__":

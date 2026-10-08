@@ -115,6 +115,10 @@ PROJ_CONFIG = {
     "auto_mark_read_threshold": 0,  # 0=disabled; articles scoring below this are auto-marked read
     "incremental_mark": True,
     "filter_mark_batch_size": 20,
+    # Max characters of fetched article body passed to the LLM. 0 = no limit.
+    # This is a token-cost lever: raising it improves long-form fidelity but
+    # increases spend. Override with RSS_MAX_CONTENT_CHARS.
+    "max_content_chars": 20000,
 }
 
 TRUTHY_VALUES = {"1", "true", "yes", "on"}
@@ -164,6 +168,32 @@ def _parse_bool(value, default: bool) -> bool:
     if normalized in FALSY_VALUES:
         return False
     return default
+
+
+def get_max_content_chars() -> int:
+    """Resolve the max characters of fetched article body sent to the LLM.
+
+    Priority:
+    1. RSS_MAX_CONTENT_CHARS
+    2. PROJ_CONFIG["max_content_chars"]
+
+    Returns 0 (or a negative value) to mean "no truncation". An unparsable
+    value falls back to the default and is logged as a warning rather than
+    silently disabling the safeguard.
+    """
+    default = int(PROJ_CONFIG.get("max_content_chars", 0) or 0)
+    raw = os.getenv("RSS_MAX_CONTENT_CHARS")
+    if raw is None or not str(raw).strip():
+        return default
+    try:
+        return int(str(raw).strip())
+    except (TypeError, ValueError):
+        logger.warning(
+            "RSS_MAX_CONTENT_CHARS=%r is not an integer; falling back to %d",
+            raw,
+            default,
+        )
+        return default
 
 
 def is_vector_store_enabled() -> bool:
