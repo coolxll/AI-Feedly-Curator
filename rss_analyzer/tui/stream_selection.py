@@ -115,6 +115,8 @@ def select_stream_interactive(
     ).ask()
 
     stream_label = None
+    if stream_id is None:
+        return None, None
     if stream_id == GLOBAL_STREAM_SENTINEL:
         return None, "Global All"
 

@@ -4,8 +4,10 @@ HTTP wrapper around the shared backend message dispatcher.
 
 from __future__ import annotations
 
+import hmac
 import json
 import logging
+import os
 import queue
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -33,7 +35,30 @@ class BackendHTTPRequestHandler(BaseHTTPRequestHandler):
         if not origin:
             return True
 
+        raw_allowed_ids = (os.getenv("RSS_ALLOWED_EXTENSION_IDS") or "").strip()
+        if raw_allowed_ids:
+            allowed_ids = {
+                item.strip() for item in raw_allowed_ids.split(",") if item.strip()
+            }
+            for prefix in ALLOWED_EXTENSION_ORIGIN_PREFIXES:
+                if origin.startswith(prefix):
+                    ext_id = origin[len(prefix):]
+                    return ext_id in allowed_ids
+            return False
+
         return origin.startswith(ALLOWED_EXTENSION_ORIGIN_PREFIXES)
+
+    def _is_authorized(self) -> bool:
+        expected_token = (os.getenv("RSS_BACKEND_API_TOKEN") or "").strip()
+        if not expected_token:
+            return True
+
+        auth_header = (self.headers.get("Authorization") or "").strip()
+        scheme, _, provided_token = auth_header.partition(" ")
+        if scheme.lower() != "bearer" or not provided_token.strip():
+            return False
+
+        return hmac.compare_digest(provided_token.strip(), expected_token)
 
     def _write_json(self, status_code: int, payload: dict, include_cors: bool = True) -> None:
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
@@ -45,7 +70,7 @@ class BackendHTTPRequestHandler(BaseHTTPRequestHandler):
             if origin:
                 self.send_header("Access-Control-Allow-Origin", origin)
                 self.send_header("Vary", "Origin")
-            self.send_header("Access-Control-Allow-Headers", "Content-Type")
+            self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
             self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         self.end_headers()
         self.wfile.write(body)
@@ -55,6 +80,12 @@ class BackendHTTPRequestHandler(BaseHTTPRequestHandler):
             403,
             {"error": "forbidden_origin", "message": "Origin is not allowed"},
             include_cors=False,
+        )
+
+    def _reject_unauthorized(self) -> None:
+        self._write_json(
+            401,
+            {"error": "unauthorized", "message": "Missing or invalid API token"},
         )
 
     def _start_sse(self) -> None:
@@ -116,12 +147,21 @@ class BackendHTTPRequestHandler(BaseHTTPRequestHandler):
                     raise value
 
                 response = value
-                if response.get("error"):
+                err_obj = response.get("error")
+                if err_obj:
+                    if isinstance(err_obj, dict):
+                        error_code = err_obj.get("code", "error")
+                        error_message = err_obj.get(
+                            "message", response.get("message", "Request failed")
+                        )
+                    else:
+                        error_code = err_obj
+                        error_message = response.get("message", "Request failed")
                     self._write_sse(
                         {
                             "event": "error",
-                            "error": response.get("error"),
-                            "message": response.get("message", "Request failed"),
+                            "error": error_code,
+                            "message": error_message,
                         }
                     )
                 else:
@@ -205,6 +245,10 @@ class BackendHTTPRequestHandler(BaseHTTPRequestHandler):
             self._write_json(404, {"error": "not_found"})
             return
 
+        if not self._is_authorized():
+            self._reject_unauthorized()
+            return
+
         try:
             payload = self._read_json()
         except ValueError as exc:
@@ -220,7 +264,7 @@ class BackendHTTPRequestHandler(BaseHTTPRequestHandler):
             try:
                 self._write_sse({"event": "accepted", "type": payload.get("type")})
                 self._serve_sse(payload)
-            except (BrokenPipeError, ConnectionResetError):
+            except ConnectionError:
                 logger.info("SSE client disconnected; request processing stopped")
             except Exception as exc:
                 logger.exception("Unhandled streaming backend exception")
@@ -228,7 +272,7 @@ class BackendHTTPRequestHandler(BaseHTTPRequestHandler):
                     self._write_sse(
                         {"event": "error", "error": "exception", "message": str(exc)}
                     )
-                except (BrokenPipeError, ConnectionResetError):
+                except ConnectionError:
                     pass
             finally:
                 self.close_connection = True

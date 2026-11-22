@@ -126,11 +126,12 @@ def simple_review_menu(context: MenuContext):
                 stream_label="Global All",
                 batch_size=default_chunk,
                 days=default_days,
+                simple=True,
             )
         elif choice == "3":
             simple_process_stream_flow(context)
         elif choice == "4":
-            context.run_batch_read_flow()
+            context.run_batch_read_flow(simple=True)
         elif choice == "5":
             return
         else:
@@ -288,6 +289,9 @@ def main_menu(context: MenuContext):
             ),
         ).ask()
 
+        if action is None:
+            context.console.print("[cyan]感谢使用，再见！[/cyan]")
+            break
         if action == "exit":
             context.console.print("[cyan]感谢使用，再见！[/cyan]")
             sys.exit()
@@ -372,6 +376,9 @@ def run_reports_menu(context: MenuContext):
             questionary.Choice("🔙 返回主菜单 (Back)", value="back"),
         ],
     ).ask()
+
+    if not action or action == "back":
+        return
 
     if action == "quick_analyze":
         context.execute_analyze(

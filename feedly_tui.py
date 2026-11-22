@@ -293,6 +293,7 @@ def _review_context() -> ReviewContext:
         load_backend_service=_load_backend_service,
         select_stream_interactive=select_stream_interactive,
         get_review_defaults=_get_review_defaults,
+        get_input=get_input,
     )
 
 
@@ -312,17 +313,18 @@ def _loop_open_articles(digest):
     return _review_loop_open_articles(_review_context(), digest)
 
 
-def run_batch_read_flow():
-    return _review_run_batch_read_flow(_review_context())
+def run_batch_read_flow(*, simple: bool = False):
+    return _review_run_batch_read_flow(_review_context(), simple=simple)
 
 
-def execute_batch_read(stream_id, stream_label=None, batch_size=50, days=3):
+def execute_batch_read(stream_id, stream_label=None, batch_size=50, days=3, *, simple: bool = False):
     return _review_execute_batch_read(
         _review_context(),
         stream_id,
         stream_label=stream_label,
         batch_size=batch_size,
         days=days,
+        simple=simple,
     )
 
 

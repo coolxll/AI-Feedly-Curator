@@ -248,12 +248,14 @@ def run_filter_flow(context: CleanupContext):
         "文章数量上限 (0 或 'all' 表示全量未读):",
         default=limit_default_str,
     ).ask()
+    if limit_str is None:
+        return
     if not limit_str or limit_str.strip().lower() in ("all", "0", "full"):
         limit = 0
     else:
         try:
             limit = int(limit_str)
-        except ValueError:
+        except (TypeError, ValueError):
             context.console.print(f"[red]无效的数字，使用默认值 {limit_default_str}[/red]")
             limit = default_limit
 
@@ -262,15 +264,19 @@ def run_filter_flow(context: CleanupContext):
         threshold_str = questionary.text(
             "评分过滤阈值 (Score Threshold):", default=str(default_threshold)
         ).ask()
+        if threshold_str is None:
+            return
         try:
             threshold = float(threshold_str)
-        except ValueError:
+        except (TypeError, ValueError):
             context.console.print(f"[red]无效的阈值，使用默认值 {default_threshold}[/red]")
             threshold = default_threshold
 
     dry_run = questionary.confirm(
         "是否为演练模式 (Dry Run - 仅模拟不实际修改)?:", default=False
     ).ask()
+    if dry_run is None:
+        return
 
     # Stream Selection
     stream_id = None
@@ -278,13 +284,19 @@ def run_filter_flow(context: CleanupContext):
     use_stream = questionary.confirm(
         "是否指定特定分类/订阅源 (默认全局所有)?:", default=False
     ).ask()
+    if use_stream is None:
+        return
     if use_stream:
         stream_id, stream_label = context.select_stream_interactive()
+        if stream_id is None and stream_label is None:
+            return
 
     # Execution
     mark_read = questionary.confirm(
         "清理完成后是否在 Feedly 标记为已读?:", default=default_mark_read
     ).ask()
+    if mark_read is None:
+        return
 
     context.execute_filter(
         mode,

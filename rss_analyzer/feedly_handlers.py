@@ -28,10 +28,28 @@ def _coerce_bool(value, default: bool) -> bool:
     return bool(value)
 
 
+def _coerce_int(value, default: int) -> int:
+    if value is None or isinstance(value, bool):
+        return default
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _coerce_float(value, default: float) -> float:
+    if value is None or isinstance(value, bool):
+        return default
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
 def handle_run_analysis(msg: dict) -> dict:
     return analyze_articles(
-        input_file=msg.get("input_file", PROJ_CONFIG["input_file"]),
-        limit=int(msg.get("limit", PROJ_CONFIG["limit"])),
+        input_file=msg.get("input_file") or PROJ_CONFIG["input_file"],
+        limit=_coerce_int(msg.get("limit"), PROJ_CONFIG["limit"]),
         mark_read=_coerce_bool(msg.get("mark_read"), PROJ_CONFIG["mark_read"]),
         refresh=_coerce_bool(msg.get("refresh"), PROJ_CONFIG["refresh"]),
         stream_id=msg.get("stream_id"),
@@ -41,9 +59,9 @@ def handle_run_analysis(msg: dict) -> dict:
 
 def handle_run_filters(msg: dict) -> dict:
     kwargs = {
-        "mode": msg.get("mode", "all"),
-        "limit": int(msg.get("limit", 1000)),
-        "threshold": float(msg.get("threshold", 3.0)),
+        "mode": msg.get("mode") or "all",
+        "limit": _coerce_int(msg.get("limit"), 1000),
+        "threshold": _coerce_float(msg.get("threshold"), 3.0),
         "dry_run": _coerce_bool(msg.get("dry_run"), False),
         "mark_read": _coerce_bool(msg.get("mark_read"), PROJ_CONFIG["mark_read"]),
         "stream_id": msg.get("stream_id"),
@@ -51,7 +69,7 @@ def handle_run_filters(msg: dict) -> dict:
     if "incremental_mark" in msg:
         kwargs["incremental_mark"] = _coerce_bool(msg["incremental_mark"], True)
     if "mark_batch_size" in msg and msg["mark_batch_size"] is not None:
-        kwargs["mark_batch_size"] = int(msg["mark_batch_size"])
+        kwargs["mark_batch_size"] = _coerce_int(msg["mark_batch_size"], 20)
     return run_filter_workflow(**kwargs)
 
 
@@ -59,8 +77,8 @@ def handle_process_stream(msg: dict) -> dict:
     return process_stream(
         stream_id=msg.get("stream_id"),
         stream_label=msg.get("stream_label"),
-        days=int(msg.get("days", 3)),
-        limit=int(msg.get("limit", 500)),
+        days=_coerce_int(msg.get("days"), 3),
+        limit=_coerce_int(msg.get("limit"), 500),
         strategy=msg.get("strategy"),
         export_markdown=_coerce_bool(msg.get("export_markdown"), False),
     )
@@ -75,8 +93,8 @@ def handle_mark_stream_low_priority_read(msg: dict) -> dict:
 
 def stream_run_analysis(msg: dict, progress_callback: ProgressCallback) -> dict:
     return analyze_articles(
-        input_file=msg.get("input_file", PROJ_CONFIG["input_file"]),
-        limit=int(msg.get("limit", PROJ_CONFIG["limit"])),
+        input_file=msg.get("input_file") or PROJ_CONFIG["input_file"],
+        limit=_coerce_int(msg.get("limit"), PROJ_CONFIG["limit"]),
         mark_read=_coerce_bool(msg.get("mark_read"), PROJ_CONFIG["mark_read"]),
         refresh=_coerce_bool(msg.get("refresh"), PROJ_CONFIG["refresh"]),
         stream_id=msg.get("stream_id"),
@@ -89,8 +107,8 @@ def stream_process_stream(msg: dict, progress_callback: ProgressCallback) -> dic
     return process_stream(
         stream_id=msg.get("stream_id"),
         stream_label=msg.get("stream_label"),
-        days=int(msg.get("days", 3)),
-        limit=int(msg.get("limit", 500)),
+        days=_coerce_int(msg.get("days"), 3),
+        limit=_coerce_int(msg.get("limit"), 500),
         strategy=msg.get("strategy"),
         export_markdown=_coerce_bool(msg.get("export_markdown"), False),
         progress_callback=progress_callback,

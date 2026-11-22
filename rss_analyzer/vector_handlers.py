@@ -35,10 +35,28 @@ def _coerce_bool(value, default: bool) -> bool:
     return bool(value)
 
 
+def _coerce_int(value, default: int) -> int:
+    if value is None or isinstance(value, bool):
+        return default
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _coerce_float(value, default: float | None) -> float | None:
+    if value is None or isinstance(value, bool):
+        return default
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
 def handle_semantic_search(msg: dict) -> dict:
     query = msg.get("query")
-    limit = msg.get("limit", 5)
-    min_score = msg.get("min_score")
+    limit = _coerce_int(msg.get("limit"), 5)
+    min_score = _coerce_float(msg.get("min_score"), None)
 
     if not query:
         return {"error": "no_query", "message": "Query string is required"}
@@ -88,9 +106,9 @@ def handle_get_article_tags(msg: dict) -> dict:
 
 
 def handle_discover_trending_topics(msg: dict) -> dict:
-    limit = msg.get("limit", 5)
-    sample_size = msg.get("sample_size", 100)
-    hours = msg.get("hours", 24)
+    limit = _coerce_int(msg.get("limit"), 5)
+    sample_size = _coerce_int(msg.get("sample_size"), 100)
+    hours = _coerce_int(msg.get("hours"), 24)
 
     logger.info(
         "Handling discover_trending_topics: limit=%s, sample_size=%s, hours=%s",
@@ -231,7 +249,7 @@ def handle_retry_vector_indexing(msg: dict) -> dict:
     wait = _coerce_bool(msg.get("wait"), False)
     retry_result = retry_vector_index_queue(wake_worker=not wait)
     if wait:
-        processed = process_vector_index_queue(limit=int(msg.get("limit", 100)))
+        processed = process_vector_index_queue(limit=_coerce_int(msg.get("limit"), 100))
         return {**retry_result, **processed}
     return retry_result
 

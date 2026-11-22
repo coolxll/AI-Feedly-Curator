@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Callable
 
-from rss_analyzer.config import LATEST_ANALYZED_FILE, PROJ_CONFIG
+from rss_analyzer.config import LATEST_ANALYZED_FILE, OUTPUT_DIR, PROJ_CONFIG
 from rss_analyzer.report_service import (
     export_articles,
     generate_daily_digest,
@@ -16,15 +17,44 @@ from rss_analyzer.report_service import (
 ProgressCallback = Callable[[dict], None]
 MessageHandler = Callable[[dict], dict]
 StreamHandler = Callable[[dict, ProgressCallback], dict]
+EXPORT_OUTPUT_DIR: str | Path = OUTPUT_DIR
+
+
+def _coerce_int(value, default: int) -> int:
+    if value is None or isinstance(value, bool):
+        return default
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _resolve_confined_output_file(output_file: object) -> Path | None:
+    if not isinstance(output_file, str) or not output_file.strip():
+        return None
+    try:
+        allowed_dir = Path(EXPORT_OUTPUT_DIR).resolve()
+        candidate = Path(output_file).resolve()
+    except (TypeError, ValueError, OSError):
+        return None
+    if candidate == allowed_dir or not candidate.is_relative_to(allowed_dir):
+        return None
+    return candidate
 
 
 def handle_export_articles(msg: dict) -> dict:
     output_file = msg.get("output_file")
     if not output_file:
         return {"error": "no_output_file", "message": "Output file is required"}
+    resolved_output = _resolve_confined_output_file(output_file)
+    if resolved_output is None:
+        return {
+            "error": "invalid_output_file",
+            "message": f"Output file must be inside {EXPORT_OUTPUT_DIR}",
+        }
     return export_articles(
-        limit=int(msg.get("limit", PROJ_CONFIG["limit"])),
-        output_file=output_file,
+        limit=_coerce_int(msg.get("limit"), PROJ_CONFIG["limit"]),
+        output_file=str(resolved_output),
         stream_id=msg.get("stream_id"),
     )
 
@@ -34,7 +64,7 @@ def handle_generate_summary(msg: dict) -> dict:
     if articles is not None:
         return generate_summary_report(articles)
     return regenerate_summary(
-        input_file=msg.get("input_file", LATEST_ANALYZED_FILE)
+        input_file=msg.get("input_file") or LATEST_ANALYZED_FILE
     )
 
 
@@ -42,8 +72,8 @@ def handle_generate_daily_digest(msg: dict) -> dict:
     return generate_daily_digest(
         stream_id=msg.get("stream_id"),
         stream_label=msg.get("stream_label"),
-        hours=int(msg.get("hours", 24)),
-        top_n=int(msg.get("top_n", 10)),
+        hours=_coerce_int(msg.get("hours"), 24),
+        top_n=_coerce_int(msg.get("top_n"), 10),
     )
 
 
@@ -54,8 +84,8 @@ def stream_generate_daily_digest(
     return generate_daily_digest(
         stream_id=msg.get("stream_id"),
         stream_label=msg.get("stream_label"),
-        hours=int(msg.get("hours", 24)),
-        top_n=int(msg.get("top_n", 10)),
+        hours=_coerce_int(msg.get("hours"), 24),
+        top_n=_coerce_int(msg.get("top_n"), 10),
         progress_callback=progress_callback,
     )
 

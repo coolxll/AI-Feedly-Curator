@@ -16,6 +16,17 @@ class ReviewContext:
     load_backend_service: Callable[[], object | None]
     select_stream_interactive: Callable[[], tuple[str | None, str | None]]
     get_review_defaults: Callable[[], tuple[int, int, int]]
+    get_input: Callable[..., str] | None = None
+
+
+def _prompt_input(context: ReviewContext, prompt_text: str, default: str | None = None) -> str:
+    if context.get_input is not None:
+        return context.get_input(prompt_text, default=default)
+    prompt = f"{prompt_text} [{default}]: " if default else f"{prompt_text}: "
+    val = input(prompt).strip()
+    if not val and default is not None:
+        return default
+    return val
 
 
 def render_stream_result(context: ReviewContext, result):
@@ -174,9 +185,26 @@ def prompt_open_stream_article(context: ReviewContext, digest):
         context.console.print("[red]打开文章链接失败。[/red]")
 
 
-def loop_open_articles(context: ReviewContext, digest):
+def _format_score(score) -> str:
+    if score is None or isinstance(score, bool):
+        return ""
+    try:
+        return f" [{float(score):.1f}]"
+    except (TypeError, ValueError):
+        return f" [{score}]"
+
+
+def loop_open_articles(context: ReviewContext, digest, *, simple: bool = False):
     """Open articles from digest in browser, one at a time in a loop."""
-    import questionary
+    use_simple = simple
+    questionary = None
+    if not use_simple:
+        try:
+            import questionary as _questionary
+
+            questionary = _questionary
+        except ImportError:
+            use_simple = True
 
     openable_items = []
     for section, items in (
@@ -203,29 +231,45 @@ def loop_open_articles(context: ReviewContext, digest):
             context.console.print("[dim]本批次推荐文章已全部在浏览器中打开。[/dim]")
             break
 
-        label_to_item: dict[str, dict] = {}
-        labels: list[str] = []
-        for section, item in remaining:
-            score_str = ""
-            score = item.get("score")
-            if score is not None:
-                score_str = f" [{score:.1f}]"
-            label = f"[{section}] {item['title']}{score_str}"
-            label_to_item[label] = item
-            labels.append(label)
+        if use_simple:
+            context.console.print(f"\n[bold]打开文章阅读 (剩余 {len(remaining)} 篇):[/bold]")
+            for idx, (section, item) in enumerate(remaining, start=1):
+                score_str = _format_score(item.get("score"))
+                context.console.print(f"{idx}. [{section}] {item['title']}{score_str}")
+            context.console.print("0. 阅读完毕，返回上一级 (Done reading)")
+            choice = _prompt_input(context, "请输入文章序号 (输入 0 返回)", default="0")
+            if not choice or choice.strip().lower() in ("0", "q", "exit"):
+                break
+            try:
+                selected_idx = int(choice) - 1
+            except (TypeError, ValueError):
+                context.console.print("[red]无效序号，请重新输入[/red]")
+                continue
+            if selected_idx < 0 or selected_idx >= len(remaining):
+                context.console.print("[red]无效序号，请重新输入[/red]")
+                continue
+            item = remaining[selected_idx][1]
+        else:
+            label_to_item: dict[str, dict] = {}
+            labels: list[str] = []
+            for idx, (section, item) in enumerate(remaining, start=1):
+                score_str = _format_score(item.get("score"))
+                label = f"{idx}. [{section}] {item['title']}{score_str}"
+                label_to_item[label] = item
+                labels.append(label)
 
-        done_label = "阅读完毕，返回上一级 (Done reading)"
-        labels.append(done_label)
-        selected_label = questionary.select(
-            f"打开文章阅读 (剩余 {len(remaining)} 篇):", choices=labels
-        ).ask()
+            done_label = "阅读完毕，返回上一级 (Done reading)"
+            labels.append(done_label)
+            selected_label = questionary.select(
+                f"打开文章阅读 (剩余 {len(remaining)} 篇):", choices=labels
+            ).ask()
 
-        if selected_label is None or selected_label == done_label:
-            break
+            if selected_label is None or selected_label == done_label:
+                break
 
-        item = label_to_item.get(selected_label)
-        if not item:
-            continue
+            item = label_to_item.get(selected_label)
+            if not item:
+                continue
 
         if open_stream_article(context, item):
             opened_links.add(item["link"])
@@ -234,15 +278,57 @@ def loop_open_articles(context: ReviewContext, digest):
             context.console.print("[red]打开文章链接失败。[/red]")
 
 
-def run_batch_read_flow(context: ReviewContext):
+def run_batch_read_flow(context: ReviewContext, *, simple: bool = False):
     """Batch reading mode: fetch N articles, AI filter, read, mark, repeat."""
-    import questionary
-
     _, default_days, default_chunk = context.get_review_defaults()
+
+    use_simple = simple
+    questionary = None
+    if not use_simple:
+        try:
+            import questionary as _questionary
+
+            questionary = _questionary
+        except ImportError:
+            use_simple = True
+
+    if use_simple:
+        context.console.print("\n[bold]自定义分批清理配置:[/bold]")
+        sid = _prompt_input(context, "指定 Stream ID (可选，直接回车使用全局订阅)", default="")
+        stream_id = sid if sid else None
+        stream_label = "全量未读 (Global All)" if not stream_id else None
+
+        batch_str = _prompt_input(
+            context, "每批次处理文章数 (Chunk Size)", default=str(default_chunk)
+        )
+        try:
+            batch_size = int(batch_str)
+        except (TypeError, ValueError):
+            batch_size = default_chunk
+
+        days_str = _prompt_input(
+            context, "最近天数范围 (Recent Days)", default=str(default_days)
+        )
+        try:
+            days = int(days_str)
+        except (TypeError, ValueError):
+            days = default_days
+
+        execute_batch_read(
+            context,
+            stream_id,
+            stream_label=stream_label,
+            batch_size=batch_size,
+            days=days,
+            simple=True,
+        )
+        return
 
     use_stream = questionary.confirm(
         "是否指定特定分类/订阅源 (默认全局所有)?:", default=False
     ).ask()
+    if use_stream is None:
+        return
     if use_stream:
         stream_id, stream_label = context.select_stream_interactive()
         if stream_id is None and stream_label is None:
@@ -252,15 +338,19 @@ def run_batch_read_flow(context: ReviewContext):
         stream_label = "全量未读 (Global All)"
 
     batch_str = questionary.text("每批次处理文章数 (Chunk Size):", default=str(default_chunk)).ask()
+    if batch_str is None:
+        return
     try:
         batch_size = int(batch_str)
-    except ValueError:
+    except (TypeError, ValueError):
         batch_size = default_chunk
 
     days_str = questionary.text("最近天数范围 (Recent Days):", default=str(default_days)).ask()
+    if days_str is None:
+        return
     try:
         days = int(days_str)
-    except ValueError:
+    except (TypeError, ValueError):
         days = default_days
 
     execute_batch_read(
@@ -278,8 +368,18 @@ def execute_batch_read(
     stream_label=None,
     batch_size=50,
     days=3,
+    *,
+    simple: bool = False,
 ):
-    import questionary
+    use_simple = simple
+    questionary = None
+    if not use_simple:
+        try:
+            import questionary as _questionary
+
+            questionary = _questionary
+        except ImportError:
+            use_simple = True
 
     display_stream = stream_label if stream_label else (stream_id or "全量未读 (Global All)")
     context.console.print(
@@ -311,6 +411,11 @@ def execute_batch_read(
                 batch_size=batch_size,
                 days=days,
             )
+            if result.get("error"):
+                context.console.print(
+                    Panel(result.get("message") or str(result["error"]), style="red")
+                )
+                break
 
             fetched = result.get("fetched_count", 0)
             if fetched == 0:
@@ -324,23 +429,53 @@ def execute_batch_read(
 
             # Interactive loop for this batch
             while True:
-                choices = [
-                    questionary.Choice("📖 在浏览器中打开文章阅读", value="open"),
-                    questionary.Choice(
-                        f"🗑️ 标记本批 {len(mark_read_ids)} 篇低优先级文章为已读",
-                        value="mark_clear",
-                    ),
-                    questionary.Choice("✅ 标记本批全部文章为已读并进入下一批", value="mark_all"),
-                    questionary.Choice("⏭️ 跳过标记，直接进入下一批", value="next"),
-                    questionary.Choice("🚪 退出分批阅读", value="exit"),
-                ]
-                action = questionary.select(
-                    "请选择对本批次文章的操作:",
-                    choices=choices,
-                ).ask()
+                if use_simple:
+                    context.console.print("\n[bold]请选择对本批次文章的操作:[/bold]")
+                    context.console.print("1. 📖 在浏览器中打开文章阅读")
+                    context.console.print(
+                        f"2. 🗑️ 标记本批 {len(mark_read_ids)} 篇低优先级文章为已读"
+                    )
+                    context.console.print("3. ✅ 标记本批全部文章为已读并进入下一批")
+                    context.console.print("4. ⏭️ 跳过标记，直接进入下一批")
+                    context.console.print("5. 🚪 退出分批阅读")
+                    choice = _prompt_input(context, "请选择操作序号", default="5")
+                    action_map = {
+                        "1": "open",
+                        "2": "mark_clear",
+                        "3": "mark_all",
+                        "4": "next",
+                        "5": "exit",
+                    }
+                    if not choice:
+                        action = None
+                    else:
+                        action = action_map.get(choice.strip())
+                        if action is None:
+                            context.console.print("[red]无效选项，请重新输入[/red]")
+                            continue
+                else:
+                    choices = [
+                        questionary.Choice("📖 在浏览器中打开文章阅读", value="open"),
+                        questionary.Choice(
+                            f"🗑️ 标记本批 {len(mark_read_ids)} 篇低优先级文章为已读",
+                            value="mark_clear",
+                        ),
+                        questionary.Choice("✅ 标记本批全部文章为已读并进入下一批", value="mark_all"),
+                        questionary.Choice("⏭️ 跳过标记，直接进入下一批", value="next"),
+                        questionary.Choice("🚪 退出分批阅读", value="exit"),
+                    ]
+                    action = questionary.select(
+                        "请选择对本批次文章的操作:",
+                        choices=choices,
+                    ).ask()
 
-                if action == "open":
-                    loop_open_articles(context, digest)
+                if action is None or action == "exit":
+                    context.console.print(
+                        f"[cyan]分批阅读已结束。累计标记已读: {total_marked} 篇[/cyan]"
+                    )
+                    return
+                elif action == "open":
+                    loop_open_articles(context, digest, simple=use_simple)
                 elif action == "mark_clear":
                     if mark_read_ids:
                         mark_result = backend.mark_articles_read(mark_read_ids)
@@ -349,6 +484,7 @@ def execute_batch_read(
                                 f"[green]已成功标记 {mark_result['marked_count']} 篇低优先级文章为已读。[/green]"
                             )
                             total_marked += mark_result["marked_count"]
+                            mark_read_ids = []
                         else:
                             context.console.print("[red]标记已读失败。[/red]")
                     else:
@@ -376,11 +512,6 @@ def execute_batch_read(
                     break  # move to next batch after marking all
                 elif action == "next":
                     break
-                elif action == "exit":
-                    context.console.print(
-                        f"[cyan]分批阅读已结束。累计标记已读: {total_marked} 篇[/cyan]"
-                    )
-                    return
 
         context.console.print(
             f"\n[bold green]分批阅读已完成！累计标记已读: {total_marked} 篇[/bold green]"
@@ -401,6 +532,8 @@ def run_process_stream_flow(context: ReviewContext):
     use_stream = questionary.confirm(
         "是否指定特定分类/订阅源 (默认全局所有)?:", default=False
     ).ask()
+    if use_stream is None:
+        return
     if use_stream:
         stream_id, stream_label = context.select_stream_interactive()
         if stream_id is None and stream_label is None:
@@ -413,18 +546,22 @@ def run_process_stream_flow(context: ReviewContext):
     limit_str = questionary.text(
         "抓取文章数量上限 (0 或 'all' 表示全量未读):", default=limit_default_str
     ).ask()
+    if limit_str is None:
+        return
     if not limit_str or limit_str.strip().lower() in ("all", "0", "full"):
         limit = 0
     else:
         try:
             limit = int(limit_str)
-        except ValueError:
+        except (TypeError, ValueError):
             limit = default_limit
 
     days_str = questionary.text("最近天数范围 (Recent Days):", default=str(default_days)).ask()
+    if days_str is None:
+        return
     try:
         days = int(days_str)
-    except ValueError:
+    except (TypeError, ValueError):
         days = default_days
 
     execute_process_stream(
@@ -468,6 +605,11 @@ def execute_process_stream(
             days=days,
             limit=limit,
         )
+        if result.get("error"):
+            context.console.print(
+                Panel(result.get("message") or str(result["error"]), style="red")
+            )
+            return
         render_stream_result(context, result)
 
         try:

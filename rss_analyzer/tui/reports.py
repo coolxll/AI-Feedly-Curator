@@ -34,6 +34,8 @@ def run_export_flow(context: ReportContext):
     use_stream = questionary.confirm(
         "是否指定特定分类或订阅源 (默认导出全局所有)?", default=False
     ).ask()
+    if use_stream is None:
+        return
     if use_stream:
         stream_id, stream_label = context.select_stream_interactive()
         if stream_id is None and stream_label is None:
@@ -44,14 +46,18 @@ def run_export_flow(context: ReportContext):
 
     # 2. Limit
     limit_str = questionary.text("导出文章数量上限 (输入 0 为全量):", default="100").ask()
+    if limit_str is None:
+        return
     try:
         limit = int(limit_str)
-    except ValueError:
+    except (TypeError, ValueError):
         limit = 100
 
     # 3. Output Filename
     default_filename = f"output/export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
     filename = questionary.text("导出文件路径 (Output Filename):", default=default_filename).ask()
+    if not filename:
+        return
 
     execute_export(context, limit, stream_id, filename, stream_label)
 
@@ -133,12 +139,14 @@ def run_summary_flow(context: ReportContext):
         ],
     ).ask()
 
-    if mode == "back":
+    if not mode or mode == "back":
         return
 
     use_stream = questionary.confirm(
         "是否指定特定分类或订阅源 (默认全局所有)?", default=False
     ).ask()
+    if use_stream is None:
+        return
     if use_stream:
         stream_id, stream_label = context.select_stream_interactive()
         if stream_id is None and stream_label is None:
@@ -171,6 +179,11 @@ def run_summary_flow(context: ReportContext):
                 return
 
             result = backend_service.generate_summary_report(articles)
+            if result.get("error"):
+                context.console.print(
+                    Panel(result.get("message") or str(result["error"]), style="red")
+                )
+                return
             context.console.print(
                 Panel(
                     "总结报告生成完成！(Summary Generation Complete)\n"
@@ -186,9 +199,11 @@ def run_summary_flow(context: ReportContext):
 
     # refresh mode
     limit_str = questionary.text("文章数量上限 (Article Limit):", default="100").ask()
+    if limit_str is None:
+        return
     try:
         limit = int(limit_str)
-    except ValueError:
+    except (TypeError, ValueError):
         context.console.print("[red]无效的数字，使用默认值 100[/red]")
         limit = 100
 
@@ -196,6 +211,8 @@ def run_summary_flow(context: ReportContext):
         "分析完成后是否在 Feedly 标记为已读 (Mark as read)?:",
         default=PROJ_CONFIG.get("mark_read", False),
     ).ask()
+    if mark_read is None:
+        return
 
     execute_analyze(context, limit, True, mark_read, stream_id, 3, stream_label)
 
@@ -206,15 +223,19 @@ def run_analyze_flow(context: ReportContext):
 
     # Configure parameters
     limit_str = questionary.text("文章数量上限 (Article Limit):", default="100").ask()
+    if limit_str is None:
+        return
     try:
         limit = int(limit_str)
-    except ValueError:
+    except (TypeError, ValueError):
         context.console.print("[red]无效的数字，使用默认值 100[/red]")
         limit = 100
 
     refresh = questionary.confirm(
         "是否从 Feedly 拉取最新未读文章 (Refresh)?:", default=True
     ).ask()
+    if refresh is None:
+        return
 
     stream_id = None
     stream_label = None
@@ -223,18 +244,26 @@ def run_analyze_flow(context: ReportContext):
         use_stream = questionary.confirm(
             "是否指定特定分类/订阅源 (默认全局所有)?:", default=False
         ).ask()
+        if use_stream is None:
+            return
         if use_stream:
             stream_id, stream_label = context.select_stream_interactive()
+            if stream_id is None and stream_label is None:
+                return
 
     mark_read = questionary.confirm(
         "分析完成后是否在 Feedly 标记为已读 (Mark as read)?:",
         default=PROJ_CONFIG.get("mark_read", False),
     ).ask()
+    if mark_read is None:
+        return
 
     threads_str = questionary.text("并发分析线程数 (Threads):", default="3").ask()
+    if threads_str is None:
+        return
     try:
         threads = int(threads_str)
-    except ValueError:
+    except (TypeError, ValueError):
         context.console.print("[red]无效的线程数，使用默认值 3[/red]")
         threads = 3
 
