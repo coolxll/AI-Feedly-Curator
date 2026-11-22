@@ -184,7 +184,7 @@ def _deep_analyze_digest_candidates(items: list[dict]) -> list[dict]:
                         completed,
                         total,
                         title,
-                        enriched.get("score", 0.0),
+                        enriched.get("score") or 0.0,
                     )
                 elif status != "analyzed" and should_log_progress:
                     logger.info(
@@ -269,12 +269,11 @@ def _rerank_digest_after_analysis(digest: dict) -> dict:
 
     for item in digest.get("deep_analyzed_reads", []):
         score = item.get("score")
-        verdict = item.get("verdict", "")
-        relevance = (
-            item.get("analysis", {})
-            .get("detailed_scores", {})
-            .get("relevance", 0)
-        )
+        verdict = item.get("verdict") or ""
+        detailed_scores = (item.get("analysis") or {}).get("detailed_scores") or {}
+        relevance = detailed_scores.get("relevance")
+        if relevance is None:
+            relevance = 0
 
         if score is None:
             retained_must_read.append(item)
@@ -571,17 +570,19 @@ def _batch_triage_articles(
             parsed = _parse_batch_triage_results(chunk, _extract_json_array(raw))
             for article in chunk:
                 aid = article.get("id", "")
-                triage = parsed.get(aid) or _fallback_batch_triage(article)
-                final[aid] = triage
-                _save_batch_triage(article, triage)
+                if aid in parsed:
+                    triage = parsed[aid]
+                    final[aid] = triage
+                    if triage.get("source") == "llm":
+                        _save_batch_triage(article, triage)
+                else:
+                    final[aid] = _fallback_batch_triage(article)
         except Exception:
             fallback_chunk_count += 1
             logger.warning("Batch triage chunk failed; using fallback triage", exc_info=True)
             for article in chunk:
                 aid = article.get("id", "")
-                triage = _fallback_batch_triage(article)
-                final[aid] = triage
-                _save_batch_triage(article, triage)
+                final[aid] = _fallback_batch_triage(article)
 
     if stats is not None:
         stats.update(
@@ -838,14 +839,28 @@ def process_batch(
     # Auto mark-read for low-score articles when threshold is configured
     auto_mark_threshold = PROJ_CONFIG.get("auto_mark_read_threshold", 0)
     auto_marked_result = None
-    if auto_mark_threshold and mark_read_candidates:
-        auto_marked_result = mark_articles_read(mark_read_candidates, dry_run=False)
-        digest["auto_marked_read"] = auto_marked_result
-        logger.info(
-            "Auto marked %s clear articles as read (threshold=%.1f)",
-            auto_marked_result.get("marked_count", 0),
-            auto_mark_threshold,
-        )
+    if auto_mark_threshold:
+        threshold_val = float(auto_mark_threshold)
+        auto_mark_ids = []
+        for item in clear_items:
+            if not item.get("id"):
+                continue
+            score = item.get("score")
+            if score is None or isinstance(score, bool):
+                continue
+            try:
+                if float(score) < threshold_val:
+                    auto_mark_ids.append(item["id"])
+            except (TypeError, ValueError):
+                continue
+        if auto_mark_ids:
+            auto_marked_result = mark_articles_read(auto_mark_ids, dry_run=False)
+            digest["auto_marked_read"] = auto_marked_result
+            logger.info(
+                "Auto marked %s clear articles as read (threshold=%.1f)",
+                auto_marked_result.get("marked_count", 0),
+                threshold_val,
+            )
 
     return {
         "success": True,

@@ -15,7 +15,7 @@ from rss_analyzer.report_service import export_articles
 logger = logging.getLogger(__name__)
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="AI Article Analyzer")
 
     parser.add_argument(
@@ -57,7 +57,7 @@ def main() -> None:
         "--threads", type=int, help="Number of threads for concurrent batch scoring"
     )
 
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     debug_mode = (
         args.debug
@@ -72,12 +72,12 @@ def main() -> None:
             output_file=args.export,
             stream_id=args.stream_id,
         )
-        if result.get("error"):
-            logger.error(result["message"])
-            return
+        if result.get("error") or not result.get("success"):
+            logger.error(result.get("message") or result.get("error") or "Export failed")
+            return 1
 
         logger.info("Exported %s articles to %s", result["article_count"], result["output_file"])
-        return
+        return 0
 
     result = analyze_articles(
         input_file=args.input,
@@ -87,14 +87,15 @@ def main() -> None:
         stream_id=args.stream_id,
         threads=args.threads,
     )
-    if result.get("error"):
-        logger.error(result["message"])
-        return
+    if result.get("error") or not result.get("success"):
+        logger.error(result.get("message") or result.get("error") or "Analysis failed")
+        return 1
 
     logger.info("Analyzed %s articles", result["processed_count"])
     logger.info("Saved analysis to %s", result["analyzed_file"])
     logger.info("Saved summary to %s", result["summary_file"])
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

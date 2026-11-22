@@ -98,6 +98,7 @@ def run_filter_pipeline(
     remaining = articles
     total_matched = 0
     steps: list[dict] = []
+    mark_read_failed = False
 
     for filter_func in filters:
         if not remaining:
@@ -107,9 +108,11 @@ def run_filter_pipeline(
         already_marked = getattr(result, "marked_ids", set())
         unmarked = [a for a in result.matched if a.get("id") not in already_marked]
         if unmarked:
-            mark_filter_results_as_read(unmarked, result.label, dry_run, mark_read)
+            if not mark_filter_results_as_read(unmarked, result.label, dry_run, mark_read):
+                mark_read_failed = True
         elif result.matched and dry_run:
-            mark_filter_results_as_read(result.matched, result.label, dry_run, mark_read)
+            if not mark_filter_results_as_read(result.matched, result.label, dry_run, mark_read):
+                mark_read_failed = True
         elif result.matched and mark_read:
             logger.info(
                 "All %s %s articles were marked as read progressively",
@@ -128,13 +131,16 @@ def run_filter_pipeline(
         remaining = result.remaining
 
     logger.info("Filtered %s/%s articles", total_matched, len(articles))
-    return {
-        "success": True,
+    payload = {
+        "success": not mark_read_failed,
         "article_count": len(articles),
         "filtered_count": total_matched,
         "remaining_count": len(remaining),
         "steps": steps,
     }
+    if mark_read_failed:
+        payload["error"] = "mark_read_failed"
+    return payload
 
 def newsflash_filter(articles: list) -> FilterResult:
     matched = [article for article in articles if is_newsflash(article)]
@@ -258,12 +264,37 @@ def low_score_filter(
         if not batch_queue:
             return
 
-        batch_payload = [
-            PreparedArticle(**item["payload"])
-            for item in batch_queue
-        ]
-        batch_results = _get_analysis_service().analyze_many_prepared(batch_payload)
-        for item, analysis in zip(batch_queue, batch_results):
+        current_batch = batch_queue
+        batch_queue = []
+
+        try:
+            batch_payload = [
+                PreparedArticle(**item["payload"])
+                for item in current_batch
+            ]
+            batch_results = _get_analysis_service().analyze_many_prepared(batch_payload)
+            if len(batch_results) != len(current_batch):
+                raise ValueError(
+                    f"Batch scoring returned {len(batch_results)} results for {len(current_batch)} articles"
+                )
+        except Exception as exc:
+            logger.error("Batch scoring failed; falling back to skipped: %s", exc)
+            for item in current_batch:
+                _handle_scored_filter_article(
+                    item["article"],
+                    None,
+                    item["prefix"],
+                    threshold,
+                    dry_run,
+                    matched,
+                    remaining,
+                    mark_read,
+                    unmarked_buffer=unmarked_buffer if (incremental_mark and mark_read and not dry_run) else None,
+                    on_matched=check_and_flush_incremental,
+                )
+            return
+
+        for item, analysis in zip(current_batch, batch_results):
             score = analysis.get("score") if analysis.get("status", "success") == "success" else None
             _handle_scored_filter_article(
                 item["article"],
@@ -277,18 +308,34 @@ def low_score_filter(
                 unmarked_buffer=unmarked_buffer if (incremental_mark and mark_read and not dry_run) else None,
                 on_matched=check_and_flush_incremental,
             )
-        batch_queue = []
 
     for idx, article in enumerate(articles, 1):
         title = article.get("title", "")[:50]
         prefix = f"[{idx}/{len(articles)}]"
         logger.info("%s Scoring %s...", prefix, title)
         if batch_scoring:
+            try:
+                payload = _prepare_article_scoring(article)
+            except Exception as exc:
+                logger.error("%s Failed to prepare article for batch scoring: %s", prefix, exc)
+                _handle_scored_filter_article(
+                    article,
+                    None,
+                    prefix,
+                    threshold,
+                    dry_run,
+                    matched,
+                    remaining,
+                    mark_read,
+                    unmarked_buffer=unmarked_buffer if (incremental_mark and mark_read and not dry_run) else None,
+                    on_matched=check_and_flush_incremental,
+                )
+                continue
             batch_queue.append(
                 {
                     "article": article,
                     "prefix": prefix,
-                    "payload": _prepare_article_scoring(article),
+                    "payload": payload,
                 }
             )
             if len(batch_queue) >= batch_size:

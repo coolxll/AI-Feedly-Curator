@@ -639,8 +639,8 @@ def generate_radar_overview(
     stream_label: str | None = None,
     days: int = 3,
 ) -> dict:
-    recent_articles = filter_recent_articles(articles, days)
-    prefiltered_out, recent_articles = _prefilter_articles(recent_articles)
+    all_recent_articles = filter_recent_articles(articles, days)
+    prefiltered_out, remaining_recent_articles = _prefilter_articles(all_recent_articles)
     grouped: dict[str, list[dict]] = {}
     low_priority_items: list[dict] = []
     candidate_items: list[dict] = []
@@ -650,7 +650,7 @@ def generate_radar_overview(
         preview = _article_preview(article, bucket, True)
         low_priority_items.append(preview)
 
-    for article in recent_articles:
+    for article in remaining_recent_articles:
         bucket = _bucket_key(article, stream_label)
         preview = _article_preview(article, bucket, _is_low_priority(article, bucket))
         grouped.setdefault(bucket, []).append(preview)
@@ -695,7 +695,7 @@ def generate_radar_overview(
         stream_label=stream_label or stream_id or "Selected stream",
         strategy=STRATEGY_RADAR,
         days=days,
-        recent_articles=recent_articles,
+        recent_articles=all_recent_articles,
         candidate_items=candidate_items,
         theme_groups=theme_groups,
         must_read_items=must_read_items,
@@ -708,7 +708,7 @@ def generate_radar_overview(
         strategy=STRATEGY_RADAR,
         stream_label=stream_label or stream_id or "Selected stream",
         days=days,
-        article_count=len(recent_articles),
+        article_count=len(all_recent_articles),
         summary=summary,
         theme_groups=theme_groups,
         worth_expanding_items=must_read_items,
@@ -722,7 +722,7 @@ def generate_radar_overview(
         "stream_id": stream_id,
         "stream_label": stream_label,
         "days": days,
-        "article_count": len(recent_articles),
+        "article_count": len(all_recent_articles),
         "summary": summary,
         "theme_groups": theme_groups,
         "worth_expanding_items": must_read_items,
@@ -747,14 +747,11 @@ def generate_quick_clear_overview(
     low_priority_items = [
         _article_preview(article, "newsflash", True) for article in matched
     ]
-    must_read_items = [
-        _article_preview(article, "remaining", False) for article in remaining[:10]
+    candidate_items = [
+        _article_preview(article, "remaining", False) for article in remaining
     ]
-    must_read_items, overflow_count = _select_must_read_items(must_read_items)
-    skim_items = _pick_skim_items(
-        [_article_preview(article, "remaining", False) for article in remaining],
-        must_read_items,
-    )
+    must_read_items, overflow_count = _select_must_read_items(candidate_items)
+    skim_items = _pick_skim_items(candidate_items, must_read_items)
     llm_candidate_interpretations = _llm_interpret_candidates(must_read_items)
     for item in must_read_items:
         llm_interpretation = llm_candidate_interpretations.get(str(item.get("id")))
@@ -768,7 +765,7 @@ def generate_quick_clear_overview(
         strategy=STRATEGY_QUICK_CLEAR,
         days=days,
         recent_articles=recent_articles,
-        candidate_items=[_article_preview(article, "remaining", False) for article in remaining],
+        candidate_items=candidate_items,
         theme_groups=[],
         must_read_items=must_read_items,
         skim_items=skim_items,

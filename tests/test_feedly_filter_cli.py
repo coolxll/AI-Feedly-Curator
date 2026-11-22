@@ -203,5 +203,85 @@ class TestFeedlyFilterAuthFailure(unittest.TestCase):
         self.assertEqual(rc, 1)
 
 
+class TestFilterWorkflowErrorHandling(unittest.TestCase):
+    def test_run_filter_pipeline_reports_mark_read_failure(self):
+        from rss_analyzer.filter_workflows import FilterResult, run_filter_pipeline
+
+        articles = [{"id": "a1", "title": "Low"}, {"id": "a2", "title": "Keep"}]
+        dummy_filter = lambda items: FilterResult(
+            matched=[articles[0]],
+            remaining=[articles[1]],
+            label="low-score",
+        )
+
+        with patch(
+            "rss_analyzer.filter_workflows.mark_filter_results_as_read",
+            return_value=False,
+        ):
+            result = run_filter_pipeline(articles, [dummy_filter], dry_run=False, mark_read=True)
+
+        self.assertFalse(result["success"])
+        self.assertEqual(result["error"], "mark_read_failed")
+        self.assertEqual(result["filtered_count"], 1)
+        self.assertEqual(result["remaining_count"], 1)
+
+    def test_low_score_filter_batch_errors_fallback_without_losing_buffer(self):
+        from rss_analyzer.config import PROJ_CONFIG
+        from rss_analyzer.filter_workflows import low_score_filter
+
+        articles = [
+            {"id": "a1", "title": "Prepare Fail"},
+            {"id": "a2", "title": "Good Low"},
+            {"id": "a3", "title": "Batch Fail 1"},
+            {"id": "a4", "title": "Batch Fail 2"},
+        ]
+
+        def fake_prepare(article):
+            if article["id"] == "a1":
+                raise RuntimeError("fetch failed")
+            return {
+                "article_id": article["id"],
+                "title": article["title"],
+                "url": f"https://example.com/{article['id']}",
+                "summary": "s",
+                "content": "c",
+            }
+
+        call_count = {"n": 0}
+
+        class FakeAnalysisService:
+            def analyze_many_prepared(self, payload):
+                call_count["n"] += 1
+                if call_count["n"] == 1:
+                    return [{"status": "success", "score": 1.5} for _ in payload]
+                raise RuntimeError("transient API error")
+
+        with (
+            patch.dict(PROJ_CONFIG, {"batch_scoring": True, "batch_size": 2}),
+            patch("rss_analyzer.filter_workflows._prepare_article_scoring", side_effect=fake_prepare),
+            patch(
+                "rss_analyzer.filter_workflows._get_analysis_service",
+                return_value=FakeAnalysisService(),
+            ),
+            patch("rss_analyzer.filter_workflows.feedly_mark_read", return_value=True) as mock_mark,
+        ):
+            # batch 1 has a2 + a3 (scored 1.5 -> matched), wait: let's test prepare fail + batch 2 fail
+            result = low_score_filter(
+                articles,
+                threshold=2.5,
+                dry_run=False,
+                mark_read=True,
+                incremental_mark=True,
+                mark_batch_size=10,
+            )
+
+        # a1 failed prepare -> remaining; a2+a3 succeeded in batch 1 -> matched & flushed at end;
+        # a4 failed in batch 2 -> remaining
+        self.assertEqual([a["id"] for a in result.matched], ["a2", "a3"])
+        self.assertEqual([a["id"] for a in result.remaining], ["a1", "a4"])
+        mock_mark.assert_called_once_with(["a2", "a3"])
+        self.assertEqual(result.marked_ids, {"a2", "a3"})
+
+
 if __name__ == "__main__":
     unittest.main()

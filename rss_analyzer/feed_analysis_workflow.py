@@ -120,8 +120,7 @@ def analyze_articles(
         save_articles(articles, LATEST_UNREAD_FILE)
         logger.info("Saved %s unread articles to %s", len(articles), LATEST_UNREAD_FILE)
 
-        if input_file == PROJ_CONFIG["input_file"]:
-            input_file = LATEST_UNREAD_FILE
+        input_file = LATEST_UNREAD_FILE
     else:
         logger.info("=" * 60)
         logger.info("Using local article data without refresh")
@@ -171,7 +170,7 @@ def analyze_articles(
         return bool(art.get("link"))
 
     def _is_prefiltered(art: dict, seen: set[str]) -> bool:
-        title = art.get("title", "")
+        title = art.get("title") or ""
         if any(kw in title for kw in filter_keywords):
             return True
         article_url = art.get("link", "") or art.get("originId", "")
@@ -236,28 +235,34 @@ def analyze_articles(
             return
 
         verdict = analysis_result.get("verdict", "Unknown")
-        score = analysis_result["score"]
-        if (
-            "red_flags" in analysis_result.get("detailed_scores", {})
-            and analysis_result["detailed_scores"]["red_flags"]
-        ):
-            red_flags = analysis_result["detailed_scores"]["red_flags"]
+        score = analysis_result.get("score")
+        raw_detailed = analysis_result.get("detailed_scores")
+        detailed_scores = raw_detailed if isinstance(raw_detailed, dict) else {}
+        red_flags = detailed_scores.get("red_flags")
+        if red_flags:
             logger.info("  Red Flags: %s", red_flags)
             verdict = f"Blocked: {verdict}"
 
-        title_str = article_item.get("title", "Unknown Title")
+        title_str = article_item.get("title") or "Unknown Title"
         logger.info("  Title: %s", title_str)
-        logger.info("  Score: %.1f/5.0 - %s", score, verdict)
+        try:
+            score_display = (
+                f"{float(score):.1f}/5.0"
+                if score is not None and not isinstance(score, bool)
+                else "N/A"
+            )
+        except (TypeError, ValueError):
+            score_display = str(score)
+        logger.info("  Score: %s - %s", score_display, verdict)
         logger.info("  Reason: %s", analysis_result.get("reason", ""))
-        if "detailed_scores" in analysis_result:
-            scores = analysis_result["detailed_scores"]
+        if detailed_scores:
             logger.info(
                 "  Detail: relevance=%s informativeness=%s depth=%s readability=%s originality=%s",
-                scores["relevance"],
-                scores["informativeness"],
-                scores["depth"],
-                scores["readability"],
-                scores["originality"],
+                detailed_scores.get("relevance"),
+                detailed_scores.get("informativeness"),
+                detailed_scores.get("depth"),
+                detailed_scores.get("readability"),
+                detailed_scores.get("originality"),
             )
 
         analyzed_articles.append({**article_item, "analysis": analysis_result})
@@ -304,29 +309,30 @@ def analyze_articles(
 
     try:
         for idx, article in enumerate(articles[:effective_limit], 1):
+            article_title = article.get("title") or ""
             logger.info(
                 "Processing article %s/%s: %s",
                 idx,
                 min(effective_limit, len(articles)),
-                article["title"],
+                article_title,
             )
             _emit_progress(
                 progress_callback,
                 "article_started",
                 id=article.get("id"),
-                title=article.get("title", "Unknown Title"),
+                title=article_title or "Unknown Title",
                 current=idx,
                 total=total_articles,
             )
 
             filter_keywords = PROJ_CONFIG.get("filter_keywords", [])
-            if any(kw in article["title"] for kw in filter_keywords):
+            if any(kw in article_title for kw in filter_keywords):
                 logger.info("  Skipped: title matched filter keyword")
                 _emit_progress(
                     progress_callback,
                     "article_skipped",
                     id=article.get("id"),
-                    title=article.get("title"),
+                    title=article_title,
                     reason="filter_keyword",
                     current=idx,
                     total=total_articles,
@@ -341,14 +347,14 @@ def analyze_articles(
                     progress_callback,
                     "article_skipped",
                     id=article.get("id"),
-                    title=article.get("title"),
+                    title=article_title,
                     reason="filter_url",
                     current=idx,
                     total=total_articles,
                 )
                 continue
 
-            norm_title = "".join(filter(str.isalnum, article["title"].lower()))
+            norm_title = "".join(filter(str.isalnum, article_title.lower()))
             if len(norm_title) > 5:
                 if norm_title in seen_titles:
                     logger.info("  Skipped: duplicate title")
@@ -415,7 +421,7 @@ def analyze_articles(
                 batch_queue.append(
                     {
                         "article": article,
-                        "title": article.get("title", ""),
+                        "title": article_title,
                         "summary": summary,
                         "content": content,
                     }
@@ -444,7 +450,7 @@ def analyze_articles(
                 analysis = analysis_service.analyze_prepared(
                     PreparedArticle(
                         article_id=str(article.get("id") or ""),
-                        title=article["title"],
+                        title=article_title,
                         url=article.get("link", ""),
                         summary=summary,
                         content=content,

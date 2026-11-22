@@ -126,22 +126,40 @@ decision 只能是：
 {json.dumps(items, ensure_ascii=False)}"""
 
 
+def _safe_int(value, default: int = 0) -> int:
+    if value is None or isinstance(value, bool):
+        return default
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _safe_float(value, default: float = 0.0) -> float:
+    if value is None or isinstance(value, bool):
+        return default
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
 def parse_readflow_triage_results(articles: list[dict], raw_items: list) -> dict[str, dict]:
     result: dict[str, dict] = {}
     for entry in raw_items:
         if not isinstance(entry, dict):
             continue
-        idx = int(entry.get("n", 0) or 0) - 1
+        idx = _safe_int(entry.get("n"), 0) - 1
         if not (0 <= idx < len(articles)):
             continue
         article = articles[idx]
-        score = float(entry.get("score") or 0.0)
+        score = _safe_float(entry.get("score"), 0.0)
         event = str(entry.get("event") or article.get("title", ""))
         domain = normalize_readflow_domain(entry.get("domain"))
         triage = {
             "domain": domain,
             "readflow_domain": domain,
-            "domain_confidence": float(entry.get("domain_confidence") or 0.0),
+            "domain_confidence": _safe_float(entry.get("domain_confidence"), 0.0),
             "score": score,
             "decision": coerce_readflow_decision(entry.get("decision"), score),
             "event": event,

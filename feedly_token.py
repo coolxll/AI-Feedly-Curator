@@ -192,10 +192,17 @@ def cmd_check(auto_refresh: bool = False) -> None:
         print("   正在用 refresh_token 自动续期...")
         try:
             save_config(refresh_access_token(refresh_token))
+        except FeedlyAuthError as exc:
+            print(f"❌ 续期失败（refresh_token 被拒绝）: {exc}")
+            print("   refresh_token 可能已失效，需要重新授权: uv run python feedly_token.py init")
+            raise SystemExit(1) from exc
         except requests.HTTPError as exc:
             print(f"❌ 续期失败: {exc.response.status_code} {exc.response.text}")
             print("   refresh_token 可能已失效，需要重新授权: uv run python feedly_token.py init")
             raise SystemExit(1) from exc
+        except requests.RequestException as exc:
+            print(f"❌ 续期失败（连接/超时）: {exc}")
+            raise SystemExit(2) from exc
 
         # Re-verify with the freshly refreshed token.
         new_config = load_config()
@@ -220,10 +227,25 @@ def cmd_check(auto_refresh: bool = False) -> None:
     raise SystemExit(1)
 
 
+def _print_usage(executable: str) -> None:
+    print(f"用法: uv run python {executable} [init|refresh|check] [--auto-refresh]")
+    print("  init    — 首次 PKCE 授权，获取 access_token + refresh_token")
+    print("  refresh — 用 refresh_token 自动续期 access_token")
+    print("  check   — 实际调用 Feedly /v3/profile 校验 token")
+    print("            --auto-refresh  401 时自动续期并复检")
+    print("\n退出码: 0=有效, 1=认证失败, 2=连接/超时")
+
+
 def main(argv: list[str] | None = None) -> None:
     args = sys.argv[1:] if argv is None else argv
+    executable = sys.argv[0] if argv is None else "feedly_token.py"
+
+    if "-h" in args or "--help" in args or args[:1] == ["help"]:
+        _print_usage(executable)
+        return
+
     auto_refresh = "--auto-refresh" in args
-    positional = [a for a in args if not a.startswith("--")]
+    positional = [a for a in args if not a.startswith("-")]
     command = positional[0] if positional else "check"
 
     if command == "check":
@@ -236,13 +258,9 @@ def main(argv: list[str] | None = None) -> None:
         cmd_init()
         return
 
-    executable = sys.argv[0] if argv is None else "feedly_token.py"
-    print(f"用法: uv run python {executable} [init|refresh|check] [--auto-refresh]")
-    print("  init    — 首次 PKCE 授权，获取 access_token + refresh_token")
-    print("  refresh — 用 refresh_token 自动续期 access_token")
-    print("  check   — 实际调用 Feedly /v3/profile 校验 token")
-    print("            --auto-refresh  401 时自动续期并复检")
-    print("\n退出码: 0=有效, 1=认证失败, 2=连接/超时")
+    print(f"❌ 未知命令: {command}", file=sys.stderr)
+    _print_usage(executable)
+    raise SystemExit(2)
 
 
 if __name__ == "__main__":

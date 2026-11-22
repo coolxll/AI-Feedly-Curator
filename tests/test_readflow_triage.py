@@ -56,6 +56,43 @@ class TestReadflowTriage(unittest.TestCase):
         self.assertEqual(coerce_readflow_decision(None, 3.0), "skim")
         self.assertEqual(coerce_readflow_decision(None, 1.0), "clear")
 
+    def test_parse_results_handles_malformed_numeric_fields_per_entry(self):
+        articles = [
+            {"id": "1", "title": "First", "summary": "s1"},
+            {"id": "2", "title": "Second", "summary": "s2"},
+            {"id": "3", "title": "Third", "summary": "s3"},
+        ]
+        result = parse_readflow_triage_results(
+            articles,
+            [
+                {"n": "bad-index", "score": 4.5, "domain": "Tech"},
+                {
+                    "n": 2,
+                    "domain": "Tech",
+                    "score": "not-a-float",
+                    "domain_confidence": "high",
+                    "decision": "skim",
+                },
+                {
+                    "n": "3",
+                    "domain": "P2",
+                    "score": "4.6",
+                    "domain_confidence": "0.9",
+                    "decision": "must_read",
+                },
+            ],
+        )
+
+        self.assertNotIn("1", result)
+        self.assertIn("2", result)
+        self.assertEqual(result["2"]["score"], 0.0)
+        self.assertEqual(result["2"]["domain_confidence"], 0.0)
+        self.assertEqual(result["2"]["decision"], "skim")
+        self.assertIn("3", result)
+        self.assertEqual(result["3"]["score"], 4.6)
+        self.assertEqual(result["3"]["domain_confidence"], 0.9)
+        self.assertEqual(result["3"]["decision"], "must_read")
+
 
 if __name__ == "__main__":
     unittest.main()
