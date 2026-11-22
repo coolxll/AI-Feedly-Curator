@@ -108,6 +108,24 @@ class TestDashScopeEmbeddingFunction(unittest.TestCase):
         )
         self.assertIsNotNone(embedding_fn.client)
 
+    @patch("rss_analyzer.vector_store.OpenAI")
+    def test_call_sorts_out_of_order_embeddings_by_index(self, mock_openai):
+        mock_client = Mock()
+        mock_client.embeddings.create.return_value = SimpleNamespace(
+            data=[
+                SimpleNamespace(index=2, embedding=[0.3]),
+                SimpleNamespace(index=0, embedding=[0.1]),
+                SimpleNamespace(index=1, embedding=[0.2]),
+            ]
+        )
+        mock_openai.return_value = mock_client
+
+        with patch.dict(os.environ, {"EMBEDDING_API_KEY": "k"}, clear=True):
+            embedding_fn = DashScopeEmbeddingFunction()
+            vectors = embedding_fn(["a", "b", "c"])
+
+        self.assertEqual([round(float(v[0]), 2) for v in vectors], [0.1, 0.2, 0.3])
+
 
 class TestVectorStoreRecovery(unittest.TestCase):
     def build_store(self, persist_dir: str = "unused") -> ChromaVectorStore:
@@ -284,6 +302,164 @@ class TestVectorStoreRecovery(unittest.TestCase):
             metadatas=[{"score": 4.0}, {"score": 3.5}],
             embeddings=[[0.1, 0.2], [0.3, 0.4]],
         )
+
+    def test_cleanup_invalid_entries_omits_ids_from_include_and_handles_none_values(self):
+        store = self.build_store("unused")
+        store.collection = Mock()
+        store.collection.get.return_value = {
+            "ids": ["id-none", "id-blank", "id-short-none-meta", "id-valid"],
+            "documents": [None, "   ", "tiny", "This is a valid document body."],
+            "metadatas": [None, {}, None, {"title": "Valid"}],
+        }
+
+        removed = store.cleanup_invalid_entries()
+
+        store.collection.get.assert_called_once_with(include=["documents", "metadatas"])
+        store.collection.delete.assert_called_once_with(
+            ids=["id-none", "id-blank", "id-short-none-meta"]
+        )
+        self.assertEqual(removed, 3)
+
+    def test_clear_collection_recreates_collection_via_client_delete_collection(self):
+        store = self.build_store("unused")
+        store.backend = "embedded"
+        store.embedding_fn = Mock()
+        new_collection = Mock()
+        store.client = Mock()
+        store.client.get_or_create_collection.return_value = new_collection
+        store.collection = Mock()
+
+        result = store.clear_collection()
+
+        self.assertTrue(result)
+        store.client.delete_collection.assert_called_once_with(
+            name="unit_test_articles"
+        )
+        store.client.get_or_create_collection.assert_called_once_with(
+            name="unit_test_articles",
+            embedding_function=store.embedding_fn,
+        )
+        self.assertIs(store.collection, new_collection)
+
+    def test_clear_collection_falls_back_to_deleting_ids_when_client_lacks_delete_collection(self):
+        store = self.build_store("unused")
+        store.client = SimpleNamespace()
+        store.collection = Mock()
+        store.collection.get.return_value = {"ids": ["a1", "a2"]}
+
+        result = store.clear_collection()
+
+        self.assertTrue(result)
+        store.collection.get.assert_called_once_with(include=[])
+        store.collection.delete.assert_called_once_with(ids=["a1", "a2"])
+
+    @patch("rss_analyzer.vector_store.DashScopeEmbeddingFunction")
+    def test_refresh_embedding_fingerprint_updates_embedding_fn_and_collection(
+        self, mock_embedding_cls
+    ):
+        store = self.build_store("unused")
+        store.backend = "embedded"
+        old_fn = Mock()
+        new_fn = SimpleNamespace(
+            base_url="https://embedding-new.example/v1", model_name="new-model"
+        )
+        mock_embedding_cls.return_value = new_fn
+        recreated_collection = Mock()
+        recreated_collection.count.return_value = 0
+        store.client = Mock()
+        store.client.get_or_create_collection.return_value = recreated_collection
+        store.collection = Mock()
+        store.embedding_fn = old_fn
+
+        with (
+            patch.object(store, "_load_embedding_fingerprint", return_value=None),
+            patch.object(store, "_write_embedding_fingerprint") as mock_write,
+        ):
+            ok = store.refresh_embedding_fingerprint()
+
+        self.assertTrue(ok)
+        self.assertIs(store.embedding_fn, new_fn)
+        self.assertIs(store.collection, recreated_collection)
+        store.client.get_or_create_collection.assert_called_once_with(
+            name="unit_test_articles",
+            embedding_function=new_fn,
+        )
+        mock_write.assert_called_once()
+
+    def test_delete_articles_empty_list_returns_true_without_calling_collection(self):
+        store = self.build_store("unused")
+        store.collection = Mock()
+        self.assertTrue(store.delete_articles([]))
+        store.collection.delete.assert_not_called()
+
+    def test_normalize_metadata_skips_none_values(self):
+        store = self.build_store("unused")
+        normalized = store._normalize_metadata({"title": "T", "score": None, "ok": True})
+        self.assertEqual(normalized, {"title": "T", "ok": True})
+        self.assertNotIn("score", normalized)
+
+    def test_search_similar_guards_limit_clamps_fetch_and_handles_bad_metadata(self):
+        store = self.build_store("unused")
+        store.collection = Mock()
+        store.collection.count.return_value = 3
+        store.collection.query.return_value = {
+            "ids": [["a1", "a2", "a3"]],
+            "documents": [["doc1", "doc2", "doc3"]],
+            "metadatas": [[None, {"score": "None"}, {"score": 2.0}]],
+            "distances": [[0.1, 0.2, 0.3]],
+        }
+
+        self.assertEqual(store.search_similar("q", limit=0), [])
+        store.collection.query.assert_not_called()
+
+        results = store.search_similar("q", limit=5, min_score=3.0)
+        # fetch_limit should be clamped to collection.count() == 3
+        self.assertEqual(store.collection.query.call_args.kwargs["n_results"], 3)
+        # a1 (None metadata) and a2 ("None" score) don't crash; a3 (score 2.0 < 3.0) is filtered out
+        self.assertEqual([r["id"] for r in results], ["a1", "a2"])
+
+    def test_discover_trending_topics_guards_none_metadata_and_caps_sample_size(self):
+        from datetime import datetime
+
+        store = self.build_store("unused")
+        now_iso = datetime.now().isoformat()
+        store.collection = Mock()
+        store.collection.get.return_value = {
+            "ids": ["a1", "a2", "a3"],
+            "documents": ["python rust", "python go", "python java"],
+            "metadatas": [
+                {"title": "T1", "updated_at": now_iso},
+                None,
+                {"title": "T3", "updated_at": now_iso},
+            ],
+        }
+        seen_ids = []
+
+        def fake_tags(article_id, _text):
+            seen_ids.append(article_id)
+            return ["python"]
+
+        with (
+            patch("rss_analyzer.cache.get_app_cache", return_value=None),
+            patch("rss_analyzer.cache.set_app_cache"),
+            patch.object(store, "get_article_tags", side_effect=fake_tags),
+        ):
+            trending = store.discover_trending_topics(limit=5, sample_size=1, hours=24)
+
+        self.assertEqual(len(seen_ids), 1)
+        self.assertEqual(trending[0]["topic"], "Python")
+
+    def test_quarantine_persist_dir_strips_trailing_slash(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            chroma_dir = os.path.join(tmpdir, "chroma_db")
+            os.makedirs(chroma_dir)
+            store = self.build_store(chroma_dir + os.sep)
+            backup_dir = store._quarantine_persist_dir()
+            self.assertTrue(backup_dir.startswith(f"{chroma_dir}_quarantine_"))
+            self.assertTrue(os.path.isdir(backup_dir))
+            self.assertTrue(os.path.isdir(chroma_dir))
 
 
 if __name__ == "__main__":

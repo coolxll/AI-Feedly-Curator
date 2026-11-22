@@ -1,56 +1,82 @@
+import contextlib
 import sqlite3
 import json
 import os
 import logging
 import threading
-from datetime import datetime
+import time
+from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 from rss_analyzer.config import is_vector_store_enabled
 
 logger = logging.getLogger(__name__)
 
-DB_PATH = os.getenv("RSS_SCORES_DB", os.path.join(os.getcwd(), "rss_scores.db"))
+_DEFAULT_DB_PATH = str(Path(__file__).resolve().parent.parent / "rss_scores.db")
+_INITIAL_DB_PATH = os.getenv("RSS_SCORES_DB") or _DEFAULT_DB_PATH
+DB_PATH = _INITIAL_DB_PATH
+
+
+def get_db_path() -> str:
+    """Resolve the active SQLite cache DB path.
+
+    Honors explicit monkeypatches to ``DB_PATH``, otherwise checks
+    ``RSS_SCORES_DB`` dynamically and defaults to ``<PROJECT_ROOT>/rss_scores.db``.
+    """
+    if DB_PATH != _INITIAL_DB_PATH:
+        return DB_PATH
+    return os.getenv("RSS_SCORES_DB") or _DEFAULT_DB_PATH
+
+
+@contextlib.contextmanager
+def _connect():
+    conn = sqlite3.connect(get_db_path(), timeout=30.0)
+    try:
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=30000")
+        yield conn
+    finally:
+        conn.close()
 
 
 def init_db():
     try:
-        conn = sqlite3.connect(DB_PATH)
-        c = conn.cursor()
-        # Create table with additional title and url columns
-        c.execute("""
-            CREATE TABLE IF NOT EXISTS article_scores (
-                article_id TEXT PRIMARY KEY,
-                score REAL,
-                data TEXT,
-                title TEXT,
-                url TEXT,
-                updated_at TIMESTAMP
-            )
-        """)
-        # Create table for general app cache (e.g. trending topics)
-        c.execute("""
-            CREATE TABLE IF NOT EXISTS app_cache (
-                cache_key TEXT PRIMARY KEY,
-                cache_value TEXT,
-                expires_at TIMESTAMP
-            )
-        """)
-        c.execute("""
-            CREATE TABLE IF NOT EXISTS vector_index_outbox (
-                article_id TEXT PRIMARY KEY,
-                payload TEXT NOT NULL,
-                status TEXT NOT NULL DEFAULT 'pending',
-                attempts INTEGER NOT NULL DEFAULT 0,
-                last_error TEXT,
-                updated_at TEXT NOT NULL
-            )
-        """)
-        c.execute(
-            "UPDATE vector_index_outbox SET status = 'pending' WHERE status = 'processing'"
-        )
-        conn.commit()
-        conn.close()
+        with _connect() as conn:
+            with conn:
+                c = conn.cursor()
+                # Create table with additional title and url columns
+                c.execute("""
+                    CREATE TABLE IF NOT EXISTS article_scores (
+                        article_id TEXT PRIMARY KEY,
+                        score REAL,
+                        data TEXT,
+                        title TEXT,
+                        url TEXT,
+                        updated_at TIMESTAMP
+                    )
+                """)
+                # Create table for general app cache (e.g. trending topics)
+                c.execute("""
+                    CREATE TABLE IF NOT EXISTS app_cache (
+                        cache_key TEXT PRIMARY KEY,
+                        cache_value TEXT,
+                        expires_at TIMESTAMP
+                    )
+                """)
+                c.execute("""
+                    CREATE TABLE IF NOT EXISTS vector_index_outbox (
+                        article_id TEXT PRIMARY KEY,
+                        payload TEXT NOT NULL,
+                        status TEXT NOT NULL DEFAULT 'pending',
+                        attempts INTEGER NOT NULL DEFAULT 0,
+                        last_error TEXT,
+                        updated_at TEXT NOT NULL
+                    )
+                """)
+                c.execute(
+                    "UPDATE vector_index_outbox SET status = 'pending' WHERE status = 'processing'"
+                )
     except Exception as e:
         logger.error(f"Failed to init cache db: {e}")
 
@@ -58,13 +84,12 @@ def init_db():
 def get_app_cache(key: str) -> dict | None:
     """Retrieve a value from the app cache if not expired"""
     try:
-        conn = sqlite3.connect(DB_PATH)
-        c = conn.cursor()
-        c.execute(
-            "SELECT cache_value, expires_at FROM app_cache WHERE cache_key = ?", (key,)
-        )
-        row = c.fetchone()
-        conn.close()
+        with _connect() as conn:
+            c = conn.cursor()
+            c.execute(
+                "SELECT cache_value, expires_at FROM app_cache WHERE cache_key = ?", (key,)
+            )
+            row = c.fetchone()
 
         if row:
             value_json, expires_at_str = row
@@ -83,19 +108,13 @@ def get_app_cache(key: str) -> dict | None:
 def set_app_cache(key: str, value: dict, ttl_seconds: int):
     """Store a value in the app cache with a TTL"""
     try:
-        conn = sqlite3.connect(DB_PATH)
-        c = conn.cursor()
-        # Calculate expiration
-        from datetime import timedelta
-
         expires_at = (datetime.now() + timedelta(seconds=ttl_seconds)).isoformat()
-
-        c.execute(
-            "INSERT OR REPLACE INTO app_cache (cache_key, cache_value, expires_at) VALUES (?, ?, ?)",
-            (key, json.dumps(value, ensure_ascii=False), expires_at),
-        )
-        conn.commit()
-        conn.close()
+        with _connect() as conn:
+            with conn:
+                conn.execute(
+                    "INSERT OR REPLACE INTO app_cache (cache_key, cache_value, expires_at) VALUES (?, ?, ?)",
+                    (key, json.dumps(value, ensure_ascii=False), expires_at),
+                )
     except Exception as e:
         logger.error(f"App cache write error: {e}")
 
@@ -103,11 +122,9 @@ def set_app_cache(key: str, value: dict, ttl_seconds: int):
 def delete_app_cache(key: str):
     """Delete a value from the app cache"""
     try:
-        conn = sqlite3.connect(DB_PATH)
-        c = conn.cursor()
-        c.execute("DELETE FROM app_cache WHERE cache_key = ?", (key,))
-        conn.commit()
-        conn.close()
+        with _connect() as conn:
+            with conn:
+                conn.execute("DELETE FROM app_cache WHERE cache_key = ?", (key,))
     except Exception as e:
         logger.error(f"App cache delete error: {e}")
 
@@ -121,15 +138,14 @@ def get_cached_score(
     if not article_id:
         return None
     try:
-        conn = sqlite3.connect(DB_PATH)
-        c = conn.cursor()
-        # Select with new title and url columns
-        c.execute(
-            "SELECT score, data, title, url, updated_at FROM article_scores WHERE article_id = ?",
-            (article_id,),
-        )
-        row = c.fetchone()
-        conn.close()
+        with _connect() as conn:
+            c = conn.cursor()
+            # Select with new title and url columns
+            c.execute(
+                "SELECT score, data, title, url, updated_at FROM article_scores WHERE article_id = ?",
+                (article_id,),
+            )
+            row = c.fetchone()
 
         if row:
             try:
@@ -164,17 +180,16 @@ def iter_cached_scores() -> list[dict[str, Any]]:
     Return all cached article scores with normalized data payloads.
     """
     try:
-        conn = sqlite3.connect(DB_PATH)
-        c = conn.cursor()
-        c.execute(
-            """
-            SELECT article_id, score, data, title, url, updated_at
-            FROM article_scores
-            ORDER BY updated_at DESC
-            """
-        )
-        rows = c.fetchall()
-        conn.close()
+        with _connect() as conn:
+            c = conn.cursor()
+            c.execute(
+                """
+                SELECT article_id, score, data, title, url, updated_at
+                FROM article_scores
+                ORDER BY updated_at DESC
+                """
+            )
+            rows = c.fetchall()
 
         items = []
         for article_id, score, data_json, title, url, updated_at in rows:
@@ -254,40 +269,41 @@ def save_cached_score(article_id: str, score: float, data: dict):
         )
         title = data.get("title", "")
         url = data.get("url", "")
-        with sqlite3.connect(DB_PATH) as conn:
-            conn.execute(
-                """
-                INSERT OR REPLACE INTO article_scores (article_id, score, data, title, url, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    article_id,
-                    score,
-                    json.dumps(data, ensure_ascii=False),
-                    title,
-                    url,
-                    updated_at,
-                ),
-            )
-            if vector_payload:
+        with _connect() as conn:
+            with conn:
                 conn.execute(
                     """
-                    INSERT INTO vector_index_outbox (
-                        article_id, payload, status, attempts, last_error, updated_at
-                    ) VALUES (?, ?, 'pending', 0, NULL, ?)
-                    ON CONFLICT(article_id) DO UPDATE SET
-                        payload = excluded.payload,
-                        status = 'pending',
-                        attempts = 0,
-                        last_error = NULL,
-                        updated_at = excluded.updated_at
+                    INSERT OR REPLACE INTO article_scores (article_id, score, data, title, url, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
                     """,
                     (
                         article_id,
-                        json.dumps(vector_payload, ensure_ascii=False),
+                        score,
+                        json.dumps(data, ensure_ascii=False),
+                        title,
+                        url,
                         updated_at,
                     ),
                 )
+                if vector_payload:
+                    conn.execute(
+                        """
+                        INSERT INTO vector_index_outbox (
+                            article_id, payload, status, attempts, last_error, updated_at
+                        ) VALUES (?, ?, 'pending', 0, NULL, ?)
+                        ON CONFLICT(article_id) DO UPDATE SET
+                            payload = excluded.payload,
+                            status = 'pending',
+                            attempts = 0,
+                            last_error = NULL,
+                            updated_at = excluded.updated_at
+                        """,
+                        (
+                            article_id,
+                            json.dumps(vector_payload, ensure_ascii=False),
+                            updated_at,
+                        ),
+                    )
 
         if not vector_enabled:
             logger.debug("Vector store disabled; skipped embedding persistence for %s", article_id)
@@ -302,7 +318,7 @@ def save_cached_score(article_id: str, score: float, data: dict):
 
 def get_vector_index_queue_stats() -> dict[str, int]:
     try:
-        with sqlite3.connect(DB_PATH) as connection:
+        with _connect() as connection:
             rows = connection.execute(
                 "SELECT status, COUNT(*) FROM vector_index_outbox GROUP BY status"
             ).fetchall()
@@ -319,8 +335,7 @@ def process_vector_index_queue(limit: int = 20) -> dict[str, int]:
     processed = 0
     failed = 0
     for _ in range(max(1, limit)):
-        connection = sqlite3.connect(DB_PATH, timeout=30)
-        try:
+        with _connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             row = connection.execute(
                 """
@@ -341,8 +356,6 @@ def process_vector_index_queue(limit: int = 20) -> dict[str, int]:
                 (datetime.now().isoformat(), article_id),
             )
             connection.commit()
-        finally:
-            connection.close()
 
         try:
             from rss_analyzer.vector_store import vector_store
@@ -354,44 +367,48 @@ def process_vector_index_queue(limit: int = 20) -> dict[str, int]:
                 payload["metadata"],
             ):
                 raise RuntimeError("Vector store rejected article")
-            with sqlite3.connect(DB_PATH) as connection:
-                connection.execute(
-                    """
-                    DELETE FROM vector_index_outbox
-                    WHERE article_id = ? AND status = 'processing' AND payload = ?
-                    """,
-                    (article_id, payload_json),
-                )
+            with _connect() as connection:
+                with connection:
+                    connection.execute(
+                        """
+                        DELETE FROM vector_index_outbox
+                        WHERE article_id = ? AND status = 'processing' AND payload = ?
+                        """,
+                        (article_id, payload_json),
+                    )
             processed += 1
         except Exception as exc:
             failed += 1
             logger.warning("Vector indexing failed for %s: %s", article_id, exc)
-            with sqlite3.connect(DB_PATH) as connection:
-                connection.execute(
-                    """
-                    UPDATE vector_index_outbox
-                    SET status = 'failed', last_error = ?, updated_at = ?
-                    WHERE article_id = ? AND status = 'processing' AND payload = ?
-                    """,
-                    (str(exc), datetime.now().isoformat(), article_id, payload_json),
-                )
+            with _connect() as connection:
+                with connection:
+                    connection.execute(
+                        """
+                        UPDATE vector_index_outbox
+                        SET status = 'failed', last_error = ?, updated_at = ?
+                        WHERE article_id = ? AND status = 'processing' AND payload = ?
+                        """,
+                        (str(exc), datetime.now().isoformat(), article_id, payload_json),
+                    )
     return {"processed": processed, "failed": failed, **get_vector_index_queue_stats()}
 
 
 def retry_vector_index_queue(*, wake_worker: bool = True) -> dict[str, int]:
-    with sqlite3.connect(DB_PATH) as connection:
-        cursor = connection.execute(
-            """
-            UPDATE vector_index_outbox
-            SET status = 'pending', last_error = NULL, updated_at = ?
-            WHERE status = 'failed'
-            """,
-            (datetime.now().isoformat(),),
-        )
+    with _connect() as connection:
+        with connection:
+            cursor = connection.execute(
+                """
+                UPDATE vector_index_outbox
+                SET status = 'pending', last_error = NULL, updated_at = ?
+                WHERE status = 'failed'
+                """,
+                (datetime.now().isoformat(),),
+            )
+            retried = cursor.rowcount
     if wake_worker:
         start_vector_index_worker()
         _VECTOR_WORKER_EVENT.set()
-    return {"retried": cursor.rowcount, **get_vector_index_queue_stats()}
+    return {"retried": retried, **get_vector_index_queue_stats()}
 
 
 _VECTOR_WORKER_EVENT = threading.Event()
@@ -403,11 +420,15 @@ def _vector_worker() -> None:
     while True:
         _VECTOR_WORKER_EVENT.wait(timeout=5)
         _VECTOR_WORKER_EVENT.clear()
-        if not is_vector_store_enabled():
-            continue
-        result = process_vector_index_queue(limit=20)
-        if result["pending"]:
-            _VECTOR_WORKER_EVENT.set()
+        try:
+            if not is_vector_store_enabled():
+                continue
+            result = process_vector_index_queue(limit=20)
+            if result["pending"]:
+                _VECTOR_WORKER_EVENT.set()
+        except Exception as exc:
+            logger.error("Vector index worker error: %s", exc)
+            time.sleep(2)
 
 
 def start_vector_index_worker() -> None:

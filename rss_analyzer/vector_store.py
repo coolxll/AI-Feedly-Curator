@@ -91,8 +91,11 @@ class DashScopeEmbeddingFunction(EmbeddingFunction):
             )
 
             # OpenAI SDK returns a list of embedding objects.
-            # We need to ensure they are sorted by index (usually are) and extract the vector.
-            embeddings = [data.embedding for data in response.data]
+            # Ensure they are sorted by index when present and extract the vector.
+            data_items = list(response.data)
+            if all(getattr(item, "index", None) is not None for item in data_items):
+                data_items.sort(key=lambda item: item.index)
+            embeddings = [data.embedding for data in data_items]
             return embeddings
 
         except Exception as e:
@@ -251,9 +254,10 @@ print(collection.count())
 
     def _quarantine_persist_dir(self) -> str:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        backup_dir = f"{self.persist_dir}_quarantine_{timestamp}"
-        os.replace(self.persist_dir, backup_dir)
-        os.makedirs(self.persist_dir, exist_ok=True)
+        normalized_dir = self.persist_dir.rstrip("/\\")
+        backup_dir = f"{normalized_dir}_quarantine_{timestamp}"
+        os.replace(normalized_dir, backup_dir)
+        os.makedirs(normalized_dir, exist_ok=True)
         return backup_dir
 
     def _build_embedding_fingerprint(self, embedding_fn: DashScopeEmbeddingFunction) -> dict:
@@ -325,6 +329,16 @@ print(collection.count())
         )
         self._write_embedding_fingerprint(current)
 
+    def is_embedding_fingerprint_mismatch(self) -> bool:
+        """
+        Return True if a stored fingerprint exists and differs from the current embedding config.
+        """
+        existing = self._load_embedding_fingerprint()
+        if not existing:
+            return False
+        current = self._build_embedding_fingerprint(DashScopeEmbeddingFunction())
+        return existing.get("fingerprint") != current["fingerprint"]
+
     def refresh_embedding_fingerprint(self) -> bool:
         """
         Re-check fingerprint metadata against the current embedding config.
@@ -334,7 +348,19 @@ print(collection.count())
             return False
 
         try:
-            self._ensure_embedding_fingerprint(DashScopeEmbeddingFunction())
+            new_embedding_fn = DashScopeEmbeddingFunction()
+            self.embedding_fn = new_embedding_fn
+            if not self._uses_client_side_embeddings():
+                if self.client is not None and callable(
+                    getattr(self.client, "get_or_create_collection", None)
+                ):
+                    self.collection = self.client.get_or_create_collection(
+                        name=self.collection_name,
+                        embedding_function=new_embedding_fn,
+                    )
+                elif hasattr(self.collection, "_embedding_function"):
+                    self.collection._embedding_function = new_embedding_fn
+            self._ensure_embedding_fingerprint(new_embedding_fn)
             return True
         except Exception as e:
             logger.error(f"Failed to refresh embedding fingerprint: {e}")
@@ -344,6 +370,8 @@ print(collection.count())
         safe_metadata = {}
         if metadata:
             for k, v in metadata.items():
+                if v is None:
+                    continue
                 if isinstance(v, (str, int, float, bool)):
                     safe_metadata[k] = v
                 else:
@@ -449,10 +477,19 @@ print(collection.count())
         """
         if not getattr(self, "enabled", True) or not self.collection:
             return []
+        if limit <= 0:
+            return []
 
         try:
             # Increase the number of results we fetch to account for potential filtering
             fetch_limit = limit * 3 if min_score is not None else limit
+            count_fn = getattr(self.collection, "count", None)
+            if callable(count_fn):
+                total_count = count_fn()
+                if isinstance(total_count, int):
+                    if total_count <= 0:
+                        return []
+                    fetch_limit = min(fetch_limit, total_count)
             if self._uses_client_side_embeddings():
                 results = self.collection.query(
                     query_embeddings=self._embed_texts([query]),
@@ -473,18 +510,25 @@ print(collection.count())
                 distances = results["distances"][0] if results["distances"] else []
 
                 for i in range(len(ids)):
+                    raw_metadata = metadatas[i] if i < len(metadatas) else None
+                    metadata = raw_metadata if isinstance(raw_metadata, dict) else {}
                     result_item = {
                         "id": ids[i],
                         "text": documents[i] if i < len(documents) else "",
-                        "metadata": metadatas[i] if i < len(metadatas) else {},
+                        "metadata": metadata,
                         "distance": distances[i] if i < len(distances) else 0.0,
                     }
 
                     # Apply score filtering if min_score is specified
                     if min_score is not None:
-                        score = result_item["metadata"].get("score")
-                        if score is not None and score < min_score:
-                            continue  # Skip this result if below threshold
+                        raw_score = metadata.get("score")
+                        if raw_score is not None and not isinstance(raw_score, bool):
+                            try:
+                                numeric_score = float(raw_score)
+                            except (TypeError, ValueError):
+                                numeric_score = None
+                            if numeric_score is not None and numeric_score < min_score:
+                                continue  # Skip this result if below threshold
 
                     formatted_results.append(result_item)
 
@@ -529,9 +573,10 @@ print(collection.count())
         """
         if not getattr(self, "enabled", True) or not self.collection:
             return False
+        if not article_ids:
+            return True
         try:
             self.collection.delete(ids=article_ids)
-            logger.debug(f"Deleted {len(article_ids)} articles from vector store")
             return True
         except Exception as e:
             logger.error(f"Failed to delete articles from vector store: {e}")
@@ -547,7 +592,23 @@ print(collection.count())
         if not getattr(self, "enabled", True) or not self.collection:
             return False
         try:
-            # Get all IDs in the collection first
+            if self.client is not None and callable(
+                getattr(self.client, "delete_collection", None)
+            ):
+                self.client.delete_collection(name=self.collection_name)
+                if self._uses_client_side_embeddings():
+                    self.collection = self.client.get_or_create_collection(
+                        name=self.collection_name
+                    )
+                else:
+                    self.collection = self.client.get_or_create_collection(
+                        name=self.collection_name,
+                        embedding_function=self.embedding_fn,
+                    )
+                logger.info("Recreated vector store collection '%s'", self.collection_name)
+                return True
+
+            # Fallback for mock/test clients without delete_collection
             all_items = self.collection.get(include=[])
             if all_items["ids"]:
                 self.collection.delete(ids=all_items["ids"])
@@ -619,24 +680,27 @@ print(collection.count())
         if not getattr(self, "enabled", True) or not self.collection:
             return 0
         try:
-            # Get all documents and their metadata
-            all_items = self.collection.get(include=["documents", "metadatas", "ids"])
+            # Get all documents and their metadata ("ids" is always returned by ChromaDB)
+            all_items = self.collection.get(include=["documents", "metadatas"])
+            ids = all_items.get("ids") or []
+            documents = all_items.get("documents") or []
+            metadatas = all_items.get("metadatas") or []
 
             invalid_ids = []
-            for i, doc in enumerate(all_items["documents"]):
+            for i, doc in enumerate(documents):
+                if i >= len(ids):
+                    break
                 # Check for empty or invalid content
                 if not doc or len(doc.strip()) == 0:
-                    invalid_ids.append(all_items["ids"][i])
+                    invalid_ids.append(ids[i])
+                    continue
 
                 # Optionally check for other invalid conditions
-                metadata = (
-                    all_items["metadatas"][i] if i < len(all_items["metadatas"]) else {}
-                )
+                metadata = (metadatas[i] if i < len(metadatas) else None) or {}
                 if (
                     not metadata.get("title") and len(doc.strip()) < 10
                 ):  # Very short without title
-                    if all_items["ids"][i] not in invalid_ids:
-                        invalid_ids.append(all_items["ids"][i])
+                    invalid_ids.append(ids[i])
 
             if invalid_ids:
                 self.collection.delete(ids=invalid_ids)
@@ -865,16 +929,20 @@ print(collection.count())
             # Filter by time if hours is specified
             cutoff_time = (current_time - timedelta(hours=hours)).isoformat()
 
+            metadatas = all_articles.get("metadatas") or []
+            documents = all_articles.get("documents") or []
+
             items = []
             for i in range(len(all_articles["ids"])):
-                metadata = all_articles["metadatas"][i] if i < len(all_articles["metadatas"]) else {}
-                updated_at = metadata.get("updated_at", "")
+                raw_metadata = metadatas[i] if i < len(metadatas) else None
+                metadata = raw_metadata if isinstance(raw_metadata, dict) else {}
+                updated_at = str(metadata.get("updated_at") or "")
 
                 # Only include articles within the time window
                 if updated_at >= cutoff_time:
                     items.append({
                         "id": all_articles["ids"][i],
-                        "document": all_articles["documents"][i],
+                        "document": documents[i] if i < len(documents) else "",
                         "metadata": metadata,
                         "updated_at": updated_at
                     })
@@ -885,18 +953,18 @@ print(collection.count())
                 # Re-process all articles without time filter
                 items = []
                 for i in range(len(all_articles["ids"])):
-                    metadata = all_articles["metadatas"][i] if i < len(all_articles["metadatas"]) else {}
+                    raw_metadata = metadatas[i] if i < len(metadatas) else None
+                    metadata = raw_metadata if isinstance(raw_metadata, dict) else {}
                     items.append({
                         "id": all_articles["ids"][i],
-                        "document": all_articles["documents"][i],
+                        "document": documents[i] if i < len(documents) else "",
                         "metadata": metadata,
-                        "updated_at": metadata.get("updated_at", "")
+                        "updated_at": str(metadata.get("updated_at") or "")
                     })
-                items.sort(key=lambda x: x["updated_at"], reverse=True)
-                items = items[:sample_size]
-            else:
-                # Sort by updated_at descending (newest first)
-                items.sort(key=lambda x: x["updated_at"], reverse=True)
+
+            # Sort by updated_at descending (newest first) and cap to sample_size in both branches
+            items.sort(key=lambda x: x["updated_at"], reverse=True)
+            items = items[:sample_size]
 
             # Extract tags for the results
             all_tags = []

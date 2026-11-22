@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import logging
 import os
-from datetime import datetime, timedelta
+import tempfile
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable
 
@@ -32,11 +33,31 @@ def _emit_progress(
         callback({"event": event, **payload})
 
 
+def _atomic_write_text(path: str | Path, content: str) -> None:
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_path = tempfile.mkstemp(
+        dir=target.parent,
+        prefix=f".{target.name}.",
+        suffix=".tmp",
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as output:
+            output.write(content)
+        os.replace(tmp_path, target)
+    except BaseException:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
+
+
 def build_monthly_output_path(prefix: str, suffix: str) -> str:
     now = datetime.now()
     output_dir = Path("output") / now.strftime("%Y-%m")
     output_dir.mkdir(parents=True, exist_ok=True)
-    return str(output_dir / f"{prefix}_{now.strftime('%Y%m%d_%H%M%S')}.{suffix}")
+    return str(output_dir / f"{prefix}_{now.strftime('%Y%m%d_%H%M%S_%f')}.{suffix}")
 
 
 def generate_summary_report(articles: list[dict]) -> dict:
@@ -44,10 +65,8 @@ def generate_summary_report(articles: list[dict]) -> dict:
     overall_summary = generate_overall_summary(articles)
     summary_file = build_monthly_output_path("summary", "md")
 
-    with open(summary_file, "w", encoding="utf-8") as output:
-        output.write(overall_summary)
-    with open(LATEST_SUMMARY_FILE, "w", encoding="utf-8") as latest:
-        latest.write(overall_summary)
+    _atomic_write_text(summary_file, overall_summary)
+    _atomic_write_text(LATEST_SUMMARY_FILE, overall_summary)
 
     return {
         "success": True,
@@ -56,6 +75,48 @@ def generate_summary_report(articles: list[dict]) -> dict:
         "summary_file": summary_file,
         "latest_summary_file": LATEST_SUMMARY_FILE,
     }
+
+
+def _safe_score(item: dict) -> float:
+    raw = item.get("score")
+    if raw is None:
+        return 0.0
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _normalize_timestamp_utc(value) -> datetime | None:
+    if isinstance(value, str):
+        timestamp = datetime.fromisoformat(value)
+    elif isinstance(value, datetime):
+        timestamp = value
+    else:
+        return None
+    return timestamp.astimezone(timezone.utc)
+
+
+def _extract_item_stream_ids(item: dict) -> set[str]:
+    data = item.get("data") or {}
+    stream_ids: set[str] = set()
+    for key in ("stream_id", "origin_stream_id"):
+        val = data.get(key)
+        if isinstance(val, str) and val:
+            stream_ids.add(val)
+    origin = data.get("origin")
+    if isinstance(origin, dict):
+        origin_sid = origin.get("streamId")
+        if isinstance(origin_sid, str) and origin_sid:
+            stream_ids.add(origin_sid)
+    categories = data.get("categories")
+    if isinstance(categories, list):
+        for cat in categories:
+            if isinstance(cat, dict):
+                cat_id = cat.get("id")
+                if isinstance(cat_id, str) and cat_id:
+                    stream_ids.add(cat_id)
+    return stream_ids
 
 
 def generate_daily_digest(
@@ -68,20 +129,23 @@ def generate_daily_digest(
 ) -> dict:
     """Generate a tiered digest from recently scored articles."""
     _emit_progress(progress_callback, "phase", phase="loading_cache")
-    cutoff = datetime.now() - timedelta(hours=hours)
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
     recent = []
     for item in iter_cached_scores():
         updated = item.get("updated_at")
         if not updated:
             continue
         try:
-            timestamp = (
-                datetime.fromisoformat(updated) if isinstance(updated, str) else updated
-            )
-            if timestamp >= cutoff:
+            timestamp = _normalize_timestamp_utc(updated)
+            if timestamp is not None and timestamp >= cutoff:
                 recent.append(item)
         except (ValueError, TypeError):
             continue
+
+    if stream_id and any(_extract_item_stream_ids(item) for item in recent):
+        recent = [
+            item for item in recent if stream_id in _extract_item_stream_ids(item)
+        ]
 
     if not recent:
         result = {
@@ -93,10 +157,10 @@ def generate_daily_digest(
         _emit_progress(progress_callback, "progress", phase="completed", current=0, total=0)
         return result
 
-    recent.sort(key=lambda item: item.get("score", 0), reverse=True)
-    must_read = [item for item in recent if item.get("score", 0) >= 3.8][:top_n]
-    skim = [item for item in recent if 2.5 <= item.get("score", 0) < 3.8][:top_n]
-    low = [item for item in recent if item.get("score", 0) < 2.5]
+    recent.sort(key=_safe_score, reverse=True)
+    must_read = [item for item in recent if _safe_score(item) >= 3.8][:top_n]
+    skim = [item for item in recent if 2.5 <= _safe_score(item) < 3.8][:top_n]
+    low = [item for item in recent if _safe_score(item) < 2.5]
     lines = [
         "# RSS Daily Digest",
         "",
@@ -113,8 +177,8 @@ def generate_daily_digest(
         data = item.get("data") or {}
         title = data.get("title", item.get("article_id", "Unknown"))
         url = data.get("url", "")
-        score = item.get("score", 0)
-        summary = (data.get("summary") or data.get("comment", ""))[:200]
+        score = _safe_score(item)
+        summary = str(data.get("summary") or data.get("comment") or "")[:200]
         lines.append(
             f"- [{title}]({url}) (score: {score:.1f})"
             if url
@@ -128,7 +192,7 @@ def generate_daily_digest(
         data = item.get("data") or {}
         title = data.get("title", item.get("article_id", "Unknown"))
         url = data.get("url", "")
-        score = item.get("score", 0)
+        score = _safe_score(item)
         lines.append(
             f"- [{title}]({url}) (score: {score:.1f})"
             if url

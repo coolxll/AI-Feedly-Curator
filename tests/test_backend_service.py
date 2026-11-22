@@ -968,6 +968,207 @@ class TestBackendService(unittest.TestCase):
 
         self.assertEqual(response["error"], "vector_store_unavailable")
 
+    @patch("rss_analyzer.vector_service.is_vector_store_enabled", return_value=True)
+    @patch("rss_analyzer.vector_service.iter_cached_scores", return_value=[])
+    @patch("rss_analyzer.vector_service.get_vector_store")
+    def test_rebuild_vector_store_refuses_to_clear_when_cache_empty(
+        self, mock_get_vector_store, mock_iter_cached_scores, mock_vector_enabled
+    ):
+        from rss_analyzer.vector_service import rebuild_vector_store
+
+        vector_store = Mock()
+        vector_store.collection = object()
+        mock_get_vector_store.return_value = vector_store
+
+        response = rebuild_vector_store()
+
+        self.assertEqual(response["error"], "empty_cache")
+        self.assertFalse(response["success"])
+        self.assertEqual(response["cached_count"], 0)
+        self.assertFalse(response["cleared"])
+        vector_store.clear_collection.assert_not_called()
+
+    @patch("rss_analyzer.vector_service.is_vector_store_enabled", return_value=True)
+    @patch("rss_analyzer.vector_service.iter_cached_scores", return_value=[])
+    @patch("rss_analyzer.vector_service.get_vector_store")
+    def test_rebuild_vector_store_allows_empty_when_explicitly_requested(
+        self, mock_get_vector_store, mock_iter_cached_scores, mock_vector_enabled
+    ):
+        from rss_analyzer.vector_service import rebuild_vector_store
+
+        vector_store = Mock()
+        vector_store.backend = "embedded"
+        vector_store.collection = object()
+        vector_store.clear_collection.return_value = True
+        vector_store.get_article_count.return_value = 0
+        mock_get_vector_store.return_value = vector_store
+
+        response = rebuild_vector_store(allow_empty=True)
+
+        self.assertTrue(response["success"])
+        self.assertEqual(response["cached_count"], 0)
+        self.assertEqual(response["concurrency"], 1)
+        vector_store.clear_collection.assert_called_once()
+        vector_store.refresh_embedding_fingerprint.assert_called_once()
+
+    def test_rebuild_vector_store_rejects_concurrent_rebuild(self):
+        from rss_analyzer import vector_service
+
+        self.assertTrue(vector_service._REBUILD_LOCK.acquire(blocking=False))
+        try:
+            response = vector_service.rebuild_vector_store()
+        finally:
+            vector_service._REBUILD_LOCK.release()
+
+        self.assertFalse(response["success"])
+        self.assertEqual(response["error"], "rebuild_in_progress")
+
+    @patch("rss_analyzer.vector_service.is_vector_store_enabled", return_value=True)
+    @patch.dict("os.environ", {"RSS_VECTOR_REBUILD_RESUME": "1"}, clear=False)
+    @patch("rss_analyzer.vector_service.iter_cached_scores")
+    @patch("rss_analyzer.vector_service.get_vector_store")
+    def test_rebuild_vector_store_refuses_resume_on_fingerprint_mismatch(
+        self, mock_get_vector_store, mock_iter_cached_scores, mock_vector_enabled
+    ):
+        from rss_analyzer.vector_service import rebuild_vector_store
+
+        vector_store = Mock()
+        vector_store.backend = "embedded"
+        vector_store.collection = object()
+        vector_store.is_embedding_fingerprint_mismatch.return_value = True
+        mock_get_vector_store.return_value = vector_store
+        mock_iter_cached_scores.return_value = [
+            {
+                "article_id": "article-1",
+                "score": 4.0,
+                "data": {"title": "T", "summary": "S"},
+                "updated_at": "2026-03-26T12:00:00",
+            }
+        ]
+
+        response = rebuild_vector_store()
+
+        self.assertFalse(response["success"])
+        self.assertEqual(response["error"], "embedding_fingerprint_mismatch")
+        vector_store.clear_collection.assert_not_called()
+        vector_store.add_articles.assert_not_called()
+
+    @patch("rss_analyzer.vector_service.is_vector_store_enabled", return_value=True)
+    @patch.dict("os.environ", {"RSS_VECTOR_REBUILD_BATCH_SIZE": "1"}, clear=False)
+    @patch("rss_analyzer.vector_service.iter_cached_scores")
+    @patch("rss_analyzer.vector_service.build_vector_store_payload")
+    @patch("rss_analyzer.vector_service.get_vector_store")
+    def test_rebuild_vector_store_cancels_futures_when_progress_callback_raises(
+        self,
+        mock_get_vector_store,
+        mock_build_payload,
+        mock_iter_cached_scores,
+        mock_vector_enabled,
+    ):
+        from rss_analyzer import vector_service
+
+        vector_store = Mock()
+        vector_store.backend = "embedded"
+        vector_store.collection = object()
+        vector_store.clear_collection.return_value = True
+        vector_store.add_articles.return_value = {"success_count": 1, "failed_ids": []}
+        mock_get_vector_store.return_value = vector_store
+        mock_iter_cached_scores.return_value = [
+            {"article_id": "a1", "score": 4.0, "data": {"title": "T1"}, "updated_at": "2026-03-26T12:00:00"},
+            {"article_id": "a2", "score": 4.0, "data": {"title": "T2"}, "updated_at": "2026-03-26T12:00:01"},
+        ]
+        mock_build_payload.side_effect = [
+            {"article_id": "a1", "document_text": "T1", "metadata": {"score": 4.0}},
+            {"article_id": "a2", "document_text": "T2", "metadata": {"score": 4.0}},
+        ]
+
+        def failing_callback(event):
+            if event.get("phase") == "indexing":
+                raise BrokenPipeError("client disconnected")
+
+        fake_executor = Mock()
+        future1 = Mock()
+        future1.result.return_value = {"success_count": 1, "failed_ids": []}
+        future2 = Mock()
+        fake_executor.submit.side_effect = [future1, future2]
+
+        with (
+            patch(
+                "rss_analyzer.vector_service.concurrent.futures.ThreadPoolExecutor",
+                return_value=fake_executor,
+            ),
+            patch(
+                "rss_analyzer.vector_service.concurrent.futures.as_completed",
+                return_value=[future1, future2],
+            ),
+        ):
+            with self.assertRaises(BrokenPipeError):
+                vector_service.rebuild_vector_store(progress_callback=failing_callback)
+
+        fake_executor.shutdown.assert_called_once_with(wait=False, cancel_futures=True)
+        # Lock must be released after failure
+        self.assertTrue(vector_service._REBUILD_LOCK.acquire(blocking=False))
+        vector_service._REBUILD_LOCK.release()
+
+    def test_utils_is_newsflash_handles_none_link_and_save_articles_is_atomic(self):
+        import json
+        import tempfile
+        from pathlib import Path
+        from rss_analyzer.utils import is_newsflash, save_articles
+
+        self.assertFalse(is_newsflash({"link": None}))
+        self.assertTrue(
+            is_newsflash({"link": "https://36kr.com/newsflashes/123456"})
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "nested" / "articles.json"
+            save_articles([{"id": "1", "title": "Hello"}], str(target))
+            self.assertTrue(target.exists())
+            self.assertEqual(json.loads(target.read_text(encoding="utf-8"))[0]["id"], "1")
+            # No leftover temp files in directory
+            self.assertEqual([p.name for p in target.parent.iterdir()], ["articles.json"])
+
+    def test_report_service_build_monthly_path_and_atomic_summary_write(self):
+        import tempfile
+        from pathlib import Path
+        from rss_analyzer import report_service
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            old_cwd = Path.cwd()
+            latest_path = Path(tmpdir) / "nested_latest" / "latest_summary.md"
+            try:
+                import os
+
+                os.chdir(tmpdir)
+                p1 = report_service.build_monthly_output_path("summary", "md")
+                # Filename includes 6-digit microseconds
+                self.assertRegex(Path(p1).name, r"^summary_\d{8}_\d{6}_\d{6}\.md$")
+
+                with (
+                    patch.object(
+                        report_service,
+                        "generate_overall_summary",
+                        return_value="# Atomic Summary",
+                    ),
+                    patch.object(
+                        report_service, "LATEST_SUMMARY_FILE", str(latest_path)
+                    ),
+                ):
+                    result = report_service.generate_summary_report([{"title": "A"}])
+
+                self.assertTrue(result["success"])
+                self.assertEqual(
+                    Path(result["summary_file"]).read_text(encoding="utf-8"),
+                    "# Atomic Summary",
+                )
+                self.assertEqual(
+                    latest_path.read_text(encoding="utf-8"),
+                    "# Atomic Summary",
+                )
+            finally:
+                os.chdir(old_cwd)
+
 
 if __name__ == "__main__":
     unittest.main()
