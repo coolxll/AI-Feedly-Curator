@@ -16,7 +16,7 @@
   "content_scripts": [
     {
       "matches": ["https://feedly.com/*", "https://cloud.feedly.com/*"],
-      "js": ["lib/marked.min.js", "content.js"],
+      "js": ["lib/marked.min.js", "lib/sanitize.js", "content.js"],
       "run_at": "document_idle"
     }
   ],

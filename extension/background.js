@@ -4,6 +4,7 @@ const USE_MOCK = false;
 
 const CACHE_TTL_MS = 30 * 1000;
 const REQUEST_TIMEOUT_MS = 120 * 1000;
+const SESSION_STATE_PREFIX = 'summaryState:';
 const cache = new Map();
 const summaryStates = new Map();
 
@@ -29,14 +30,41 @@ function registerAsyncHandler(type, handler) {
   });
 }
 
-function updateSidePanelState(windowId, state) {
-  if (!windowId) {
+async function persistSummaryState(windowId, state) {
+  if (!chrome.storage?.session) {
     return;
   }
-  summaryStates.set(windowId, state);
+  try {
+    await chrome.storage.session.set({ [`${SESSION_STATE_PREFIX}${windowId}`]: state });
+  } catch (err) {
+    console.warn('[Feedly AI] Failed to persist summary state:', err);
+  }
+}
+
+async function loadPersistedSummaryState(windowId) {
+  if (!chrome.storage?.session) {
+    return null;
+  }
+  const key = `${SESSION_STATE_PREFIX}${windowId}`;
+  try {
+    const items = await chrome.storage.session.get(key);
+    return items?.[key] || null;
+  } catch (err) {
+    console.warn('[Feedly AI] Failed to restore summary state:', err);
+    return null;
+  }
+}
+
+function updateSidePanelState(windowId, state) {
+  if (windowId == null) {
+    return;
+  }
+  const stateWithWindow = { ...state, windowId };
+  summaryStates.set(windowId, stateWithWindow);
+  persistSummaryState(windowId, stateWithWindow);
   chrome.runtime.sendMessage({
     type: 'update_sidepanel',
-    ...state
+    ...stateWithWindow
   }).catch(() => {});
 }
 
@@ -89,6 +117,17 @@ async function sendBackendStream(payload, onEvent = () => {}) {
   const settings = await getSettings();
   const baseUrl = (settings.serverBaseUrl || DEFAULT_SETTINGS.serverBaseUrl).replace(/\/$/, '');
 
+  const controller = new AbortController();
+  let timeoutId = null;
+  const resetIdleTimeout = () => {
+    if (timeoutId !== null) {
+      clearTimeout(timeoutId);
+    }
+    timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  };
+
+  resetIdleTimeout();
+
   try {
     const response = await fetch(`${baseUrl}/api/stream`, {
       method: 'POST',
@@ -96,8 +135,11 @@ async function sendBackendStream(payload, onEvent = () => {}) {
         'Content-Type': 'application/json',
         'Accept': 'text/event-stream'
       },
-      body: JSON.stringify(payload)
+      body: JSON.stringify(payload),
+      signal: controller.signal
     });
+
+    resetIdleTimeout();
 
     if (!response.ok || !response.body) {
       const errorText = await response.text();
@@ -140,6 +182,7 @@ async function sendBackendStream(payload, onEvent = () => {}) {
 
     while (true) {
       const { value, done } = await reader.read();
+      resetIdleTimeout();
       buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
       buffer = buffer.replace(/\r\n/g, '\n');
 
@@ -163,10 +206,17 @@ async function sendBackendStream(payload, onEvent = () => {}) {
 
     return finalResult || { error: 'Backend stream ended without a result' };
   } catch (err) {
+    if (err?.name === 'AbortError') {
+      return { error: 'Backend stream timed out' };
+    }
     return {
       error: 'Backend stream failed',
       message: err?.message || String(err)
     };
+  } finally {
+    if (timeoutId !== null) {
+      clearTimeout(timeoutId);
+    }
   }
 }
 
@@ -270,48 +320,59 @@ function getCached(ids) {
 function mergeCache(items) {
   const ts = Date.now();
   for (const [id, value] of Object.entries(items)) {
-    cache.set(id, { ts, value });
+    if (value && value.found && value.status !== 'error') {
+      cache.set(id, { ts, value });
+    }
   }
 }
 
-chrome.runtime.onMessage.addListener((msg, sender) => {
-  if (msg.type !== 'sidepanel_ready') {
-    return;
+registerAsyncHandler('sidepanel_ready', async (msg, sender) => {
+  const windowId = msg.windowId ?? sender.tab?.windowId;
+  if (windowId == null) {
+    return { ok: true };
   }
 
-  const windowId = msg.windowId || sender.tab?.windowId;
-  if (!windowId || !summaryStates.has(windowId)) {
-    return true;
+  let state = summaryStates.get(windowId);
+  if (!state) {
+    state = await loadPersistedSummaryState(windowId);
+    if (state) {
+      summaryStates.set(windowId, state);
+    }
   }
 
-  chrome.runtime.sendMessage({
-    type: 'update_sidepanel',
-    ...summaryStates.get(windowId)
-  }).catch(() => {});
+  if (state) {
+    chrome.runtime.sendMessage({
+      type: 'update_sidepanel',
+      ...state,
+      windowId
+    }).catch(() => {});
+  }
 
-  return true;
+  return { ok: true };
 });
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-  if (msg.type !== 'open_sidepanel') {
+  if (!msg || msg.type !== 'open_sidepanel') {
     return;
   }
 
-  const windowId = sender.tab?.windowId;
-  if (windowId) {
-    updateSidePanelState(windowId, {
-      title: msg.title,
-      content: '',
-      status: 'loading'
-    });
+  const windowId = msg.windowId ?? sender.tab?.windowId;
+  if (windowId == null) {
+    sendResponse({ ok: false, error: 'Unable to determine windowId for side panel' });
+    return;
   }
+
+  updateSidePanelState(windowId, {
+    title: msg.title,
+    content: msg.content ?? '',
+    status: msg.status || 'loading'
+  });
 
   chrome.sidePanel.open({ windowId }).catch((err) => {
     console.error('[Feedly AI] Failed to open side panel:', err);
   });
 
   sendResponse({ ok: true });
-  return true;
 });
 
 registerAsyncHandler('get_scores', async (msg) => {
@@ -342,6 +403,13 @@ registerAsyncHandler('get_scores', async (msg) => {
 
   const missingItems = missing.map((id) => itemsMap.get(id) || { id });
   const resp = await sendBackendStream({ type: 'get_scores', items: missingItems });
+  if (resp?.error) {
+    return {
+      items,
+      error: resp.error,
+      ...(resp.message ? { message: resp.message } : {})
+    };
+  }
   const fetched = resp?.items || {};
   mergeCache(fetched);
   return { items: { ...items, ...fetched } };
@@ -376,9 +444,16 @@ registerAsyncHandler('summarize_article', async (msg, sender) => {
   const windowId = sender.tab?.windowId;
 
   if (USE_MOCK) {
+    const mockSummary = '## Mock Summary\n\n- Point 1: This is a mock summary point.\n- Point 2: Another key detail from the article.\n- Conclusion: This is a test conclusion.';
+    updateSidePanelState(windowId, {
+      title: msg.title,
+      content: mockSummary,
+      status: 'success',
+      id: msg.id
+    });
     return {
       id: msg.id,
-      summary: '## Mock Summary\n\n- Point 1: This is a mock summary point.\n- Point 2: Another key detail from the article.\n- Conclusion: This is a test conclusion.'
+      summary: mockSummary
     };
   }
 

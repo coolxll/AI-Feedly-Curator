@@ -68,6 +68,20 @@ if (!document.getElementById(STYLE_ID)) {
     }
     /* 移除旧的 tooltip 样式 */
     /* .ai-score-badge:hover::after { ... } */
+    #ai-tooltip-container {
+      position: fixed;
+      z-index: 99999;
+      max-width: 360px;
+      background: #1e293b;
+      color: #f8fafc;
+      padding: 10px 12px;
+      border-radius: 8px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.25);
+      font-size: 13px;
+      line-height: 1.5;
+      display: none;
+      white-space: pre-wrap;
+    }
 
     /* 分析按钮样式 */
     .ai-analyze-btn, .ai-summary-btn {
@@ -200,6 +214,19 @@ function ensureBadgeContainer(el) {
 
 // 全局 Tooltip 元素管理
 let tooltipEl = null;
+let tooltipCloseHandler = null;
+let tooltipCloseTimer = null;
+
+function clearTooltipCloseHandler() {
+  if (tooltipCloseTimer !== null) {
+    clearTimeout(tooltipCloseTimer);
+    tooltipCloseTimer = null;
+  }
+  if (tooltipCloseHandler) {
+    document.removeEventListener('click', tooltipCloseHandler);
+    tooltipCloseHandler = null;
+  }
+}
 
 function ensureTooltipEl() {
   if (!tooltipEl) {
@@ -218,6 +245,7 @@ function showTooltip(e, text) {
 }
 
 function hideTooltip() {
+  clearTooltipCloseHandler();
   const el = ensureTooltipEl();
   el.style.display = 'none';
 }
@@ -255,7 +283,7 @@ function renderItem(el, item) {
   container.innerHTML = '';
 
   // 如果没有找到评分，显示"Analyze"按钮
-  if (!item || !item.found) {
+  if (!item || !item.found || typeof item.score !== 'number') {
     const btn = document.createElement('button');
     btn.className = 'ai-analyze-btn';
     btn.innerHTML = '<span class="spinner"></span>Analyze AI';
@@ -282,6 +310,8 @@ function renderItem(el, item) {
       // 优先使用全文，其次摘要
       const contentText = contentEl ? contentEl.innerText.trim() : (summaryEl ? summaryEl.textContent.trim() : '');
       const titleText = titleEl ? titleEl.textContent.trim() : 'Unknown Title';
+      const link = titleEl ? titleEl.getAttribute('href') : null;
+      const url = link ? (link.startsWith('http') ? link : window.location.origin + link) : null;
 
       console.log(`[Feedly AI] Analyzing article: ${id} - ${titleText}`);
 
@@ -289,6 +319,7 @@ function renderItem(el, item) {
         type: 'analyze_article',
         id: id,
         title: titleText,
+        url: url,
         summary: summaryEl ? summaryEl.textContent.trim() : '',
         content: contentText
       }, (resp) => {
@@ -301,7 +332,7 @@ function renderItem(el, item) {
         }
 
         console.log("[Feedly AI] Analysis result:", resp);
-        if (resp && (resp.found || resp.score !== undefined)) {
+        if (resp && resp.found && typeof resp.score === 'number') {
             // 缓存并重新渲染
             const resultItem = {
                 id: id,
@@ -326,6 +357,8 @@ function renderItem(el, item) {
   const score = item.score;
   const verdict = item.data?.verdict || '';
   const summaryContent = item.data?.summary || '无详细总结';
+  const entryTitleEl = el.querySelector('.EntryTitleLink, .entry-title-link, .entry__title, .ArticleTitle');
+  const titleText = (item.data?.title || entryTitleEl?.textContent || '').trim();
 
   const rawReason = item.data?.reason;
   if (rawReason) {
@@ -358,13 +391,18 @@ function renderItem(el, item) {
       if (el.style.display === 'block' && el.textContent === tooltipText) {
           hideTooltip();
       } else {
+          clearTooltipCloseHandler();
           showTooltip(e, tooltipText);
           // 点击其他地方关闭
-          const closeHandler = () => {
+          tooltipCloseHandler = () => {
               hideTooltip();
-              document.removeEventListener('click', closeHandler);
           };
-          setTimeout(() => document.addEventListener('click', closeHandler), 0);
+          tooltipCloseTimer = setTimeout(() => {
+              tooltipCloseTimer = null;
+              if (tooltipCloseHandler) {
+                  document.addEventListener('click', tooltipCloseHandler);
+              }
+          }, 0);
       }
   };
 
@@ -420,7 +458,7 @@ function renderItem(el, item) {
           title.style.color = '#8b5cf6';
 
           const text = document.createElement('div');
-          text.innerHTML = marked.parse(summaryContent);
+          setSanitizedHtml(text, marked.parse(summaryContent));
 
           summaryDiv.appendChild(title);
           summaryDiv.appendChild(text);
@@ -475,16 +513,9 @@ function renderItem(el, item) {
         if (contentText.length < 100 && !url) {
             chrome.runtime.sendMessage({
               type: 'open_sidepanel',
-              title: titleText
-            }, () => {
-              setTimeout(() => {
-                chrome.runtime.sendMessage({
-                  type: 'update_sidepanel',
-                  title: titleText,
-                  content: '无法获取文章内容：页面内容为空且没有可用的URL',
-                  status: 'error'
-                });
-              }, 200);
+              title: titleText,
+              content: '无法获取文章内容：页面内容为空且没有可用的URL',
+              status: 'error'
             });
             summaryBtn.disabled = false;
             spinner.style.display = 'none';
@@ -523,21 +554,7 @@ function renderItem(el, item) {
                 return;
              }
 
-             if (resp && resp.summary) {
-                 chrome.runtime.sendMessage({
-                   type: 'update_sidepanel',
-                   title: titleText,
-                   content: resp.summary,
-                   status: 'success'
-                 });
-             } else if (resp && resp.error) {
-                 chrome.runtime.sendMessage({
-                   type: 'update_sidepanel',
-                   title: titleText,
-                   content: resp.error,
-                   status: 'error'
-                 });
-             } else {
+             if (!resp || (!resp.summary && !resp.error)) {
                  chrome.runtime.sendMessage({
                    type: 'update_sidepanel',
                    title: titleText,
@@ -557,65 +574,60 @@ function renderItem(el, item) {
           // Check if we already have cached related articles for this entry
           const hasRelatedArticles = contentBody.querySelector('.ai-related-articles-results');
 
-          if (!hasRelatedArticles) {
-              // Show loading indicator
-              const loadingDiv = document.createElement('div');
-              loadingDiv.className = 'ai-related-articles-loading';
-              loadingDiv.style.cssText = `
-                  margin-top: 15px;
-                  padding: 15px;
-                  border: 1px solid #e2e8f0;
-                  border-radius: 8px;
-                  background-color: #f8fafc;
-              `;
-
-              const loadingTitle = document.createElement('h3');
-              loadingTitle.textContent = 'Related Articles';
-              loadingTitle.style.cssText = `
-                  margin: 0 0 10px 0;
-                  color: #7c3aed;
-                  font-size: 16px;
-                  font-weight: 600;
-              `;
-
-              const loadingText = document.createElement('div');
-              loadingText.textContent = 'Finding related articles...';
-              loadingText.style.cssText = `
-                  color: #64748b;
-                  font-style: italic;
-              `;
-
-              loadingDiv.appendChild(loadingTitle);
-              loadingDiv.appendChild(loadingText);
-              contentBody.appendChild(loadingDiv);
-
-              // Automatically trigger semantic search
+          if (!hasRelatedArticles && !contentBody.querySelector('.ai-related-articles-loading')) {
               const id = getEntryId(el);
-              if (id) {
+              const searchQuery = (item.data?.summary || titleText || '').trim();
+              if (id && searchQuery) {
+                  // Show loading indicator
+                  const loadingDiv = document.createElement('div');
+                  loadingDiv.className = 'ai-related-articles-loading';
+                  loadingDiv.style.cssText = `
+                      margin-top: 15px;
+                      padding: 15px;
+                      border: 1px solid #e2e8f0;
+                      border-radius: 8px;
+                      background-color: #f8fafc;
+                  `;
+
+                  const loadingTitle = document.createElement('h3');
+                  loadingTitle.textContent = 'Related Articles';
+                  loadingTitle.style.cssText = `
+                      margin: 0 0 10px 0;
+                      color: #7c3aed;
+                      font-size: 16px;
+                      font-weight: 600;
+                  `;
+
+                  const loadingText = document.createElement('div');
+                  loadingText.textContent = 'Finding related articles...';
+                  loadingText.style.cssText = `
+                      color: #64748b;
+                      font-style: italic;
+                  `;
+
+                  loadingDiv.appendChild(loadingTitle);
+                  loadingDiv.appendChild(loadingText);
+                  contentBody.appendChild(loadingDiv);
+
                   console.log(`[Feedly AI] Auto-finding related articles for: ${id}`);
 
                   // Send semantic search request
                   chrome.runtime.sendMessage({
                       type: 'semantic_search',
-                      query: summaryContent || titleText, // Use summary or title as query
+                      query: searchQuery,
                       limit: 5,
                       current_article_id: id
                   }, (resp) => {
                       // Remove loading indicator
-                      const loadingDiv = contentBody.querySelector('.ai-related-articles-loading');
-                      if (loadingDiv) {
-                          loadingDiv.remove();
+                      const activeLoadingDiv = contentBody.querySelector('.ai-related-articles-loading');
+                      if (activeLoadingDiv) {
+                          activeLoadingDiv.remove();
                       }
 
                       if (chrome.runtime.lastError) {
                           console.error("Semantic search error:", chrome.runtime.lastError);
 
-                          // Remove loading indicator
-                          const loadingDiv = contentBody.querySelector('.ai-related-articles-loading');
-                          if (loadingDiv) {
-                              loadingDiv.remove();
-
-                              // Show error message instead
+                          if (!contentBody.querySelector('.ai-related-articles-error')) {
                               const errorDiv = document.createElement('div');
                               errorDiv.className = 'ai-related-articles-error';
                               errorDiv.style.cssText = `
@@ -637,13 +649,19 @@ function renderItem(el, item) {
                               `;
 
                               const errorText = document.createElement('div');
-                              errorText.innerHTML = `
-                                  Semantic search is not available: ${chrome.runtime.lastError.message}.<br>
-                                  Please check that:<br>
-                                  • API key is configured in your environment<br>
-                                  • Native host is properly installed and running<br>
-                                  • Vector database contains articles for semantic search
-                              `;
+                              const errorLines = [
+                                  `Semantic search is not available: ${chrome.runtime.lastError.message || 'Unknown error'}.`,
+                                  'Please check that:',
+                                  '• API key is configured in your environment',
+                                  '• Native host is properly installed and running',
+                                  '• Vector database contains articles for semantic search'
+                              ];
+                              errorLines.forEach((line, idx) => {
+                                  if (idx > 0) {
+                                      errorText.appendChild(document.createElement('br'));
+                                  }
+                                  errorText.appendChild(document.createTextNode(line));
+                              });
                               errorText.style.cssText = `
                                   color: #991b1b;
                                   font-size: 14px;
@@ -658,12 +676,6 @@ function renderItem(el, item) {
                       }
 
                       if (resp && resp.results) {
-                          // Remove loading indicator
-                          const loadingDiv = contentBody.querySelector('.ai-related-articles-loading');
-                          if (loadingDiv) {
-                              loadingDiv.remove();
-                          }
-
                           // Create related articles section with results
                           const relatedSection = document.createElement('div');
                           relatedSection.className = 'ai-related-articles-section';
@@ -702,6 +714,8 @@ function renderItem(el, item) {
                               resp.results.forEach((result, index) => {
                                   if (result.id === id) return; // Skip current article
 
+                                  const meta = result.metadata || {};
+
                                   const relatedItem = document.createElement('div');
                                   relatedItem.style.cssText = `
                                       padding: 8px;
@@ -711,12 +725,12 @@ function renderItem(el, item) {
                                   `;
 
                                   // Create a link to the article if URL is available in metadata
-                                  const url = result.metadata.url || null;
+                                  const safeUrl = sanitizeUrl(meta.url);
                                   let titleElement;
 
-                                  if (url) {
+                                  if (safeUrl) {
                                       const linkElement = document.createElement('a');
-                                      linkElement.href = url;
+                                      linkElement.href = safeUrl;
                                       linkElement.target = '_blank';
                                       linkElement.rel = 'noopener noreferrer';
                                       linkElement.style.cssText = `
@@ -727,7 +741,7 @@ function renderItem(el, item) {
                                           margin-bottom: 4px;
                                           font-size: 14px;
                                       `;
-                                      linkElement.textContent = result.metadata.title || 'Untitled';
+                                      linkElement.textContent = meta.title || 'Untitled';
 
                                       // Add hover effect
                                       linkElement.addEventListener('mouseover', () => {
@@ -740,7 +754,7 @@ function renderItem(el, item) {
                                       titleElement = linkElement;
                                   } else {
                                       titleElement = document.createElement('div');
-                                      titleElement.textContent = result.metadata.title || 'Untitled';
+                                      titleElement.textContent = meta.title || 'Untitled';
                                       titleElement.style.cssText = `
                                           font-weight: 600;
                                           color: #1e293b;
@@ -783,7 +797,7 @@ function renderItem(el, item) {
                                   `;
 
                                   const scoreSpan = document.createElement('span');
-                                  scoreSpan.textContent = `AI Score: ${result.metadata.score || 'N/A'}`;
+                                  scoreSpan.textContent = `AI Score: ${meta.score ?? 'N/A'}`;
                                   scoreSpan.style.fontWeight = '600';
 
                                   const distanceSpan = document.createElement('span');
@@ -806,12 +820,7 @@ function renderItem(el, item) {
                           // Insert after the summary or at the end of content body
                           contentBody.appendChild(relatedSection);
                       } else if (resp && resp.error) {
-                          // Remove loading indicator
-                          const loadingDiv = contentBody.querySelector('.ai-related-articles-loading');
-                          if (loadingDiv) {
-                              loadingDiv.remove();
-
-                              // Show error message
+                          if (!contentBody.querySelector('.ai-related-articles-error')) {
                               const errorDiv = document.createElement('div');
                               errorDiv.className = 'ai-related-articles-error';
                               errorDiv.style.cssText = `

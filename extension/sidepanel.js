@@ -1,15 +1,37 @@
+let currentWindowId = null;
+const currentWindowIdPromise = (chrome.windows && chrome.windows.getCurrent)
+  ? new Promise((resolve) => {
+      chrome.windows.getCurrent((win) => {
+        currentWindowId = win?.id ?? null;
+        resolve(currentWindowId);
+      });
+    })
+  : Promise.resolve(null);
+
 // Listen for messages from content script via background
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-  if (msg.type === 'update_sidepanel') {
-    // Switch to summary tab automatically when update comes in
-    switchTab('summary');
-    updatePanel(msg.title, msg.content, msg.status);
+  if (msg && msg.type === 'update_sidepanel') {
+    const applyUpdate = (winId) => {
+      if (msg.windowId != null && winId != null && msg.windowId !== winId) {
+        return;
+      }
 
-    // If we have an article ID and the summary is done/streaming, try to fetch tags
-    if (msg.status === 'success' || msg.status === 'streaming') {
-        if (msg.id) {
-            fetchArticleTags(msg.id);
-        }
+      // Switch to summary tab automatically when update comes in
+      switchTab('summary');
+      updatePanel(msg.title, msg.content, msg.status);
+
+      // If we have an article ID and the summary is done/streaming, try to fetch tags
+      if (msg.status === 'success' || msg.status === 'streaming') {
+          if (msg.id) {
+              fetchArticleTags(msg.id);
+          }
+      }
+    };
+
+    if (currentWindowId != null || msg.windowId == null) {
+      applyUpdate(currentWindowId);
+    } else {
+      currentWindowIdPromise.then(applyUpdate);
     }
   }
 });
@@ -125,7 +147,11 @@ function loadTrendingTopics() {
     limit: 10
   }, (resp) => {
     if (chrome.runtime.lastError) {
-      contentEl.innerHTML = `<div class="error">Error: ${chrome.runtime.lastError.message}</div>`;
+      contentEl.textContent = '';
+      const errorDiv = document.createElement('div');
+      errorDiv.className = 'error';
+      errorDiv.textContent = `Error: ${chrome.runtime.lastError.message || 'Unknown error'}`;
+      contentEl.appendChild(errorDiv);
       return;
     }
 
@@ -150,26 +176,44 @@ function displayTrendingTopics(topics) {
   const list = document.createElement('div');
 
   // Find max frequency for bar scaling
-  const maxFreq = Math.max(...topics.map(t => t.frequency));
+  const maxFreq = Math.max(1, ...topics.map(t => Number(t.frequency) || 0));
 
   topics.forEach(t => {
     const item = document.createElement('div');
     item.className = 'trending-item';
 
     // Calculate width percentage relative to max
-    const widthPercent = Math.max(5, (t.frequency / maxFreq) * 100);
+    const freq = Number(t.frequency) || 0;
+    const widthPercent = maxFreq > 0 ? Math.min(100, Math.max(5, Math.round((freq / maxFreq) * 100))) : 0;
 
-    item.innerHTML = `
-      <div style="width: 100%">
-        <div style="display: flex; justify-content: space-between; align-items: center;">
-          <span class="trending-topic">${t.topic}</span>
-          <span class="trending-count">${t.frequency}</span>
-        </div>
-        <div class="trending-bar">
-          <div class="trending-fill" style="width: ${widthPercent}%"></div>
-        </div>
-      </div>
-    `;
+    const wrapper = document.createElement('div');
+    wrapper.style.width = '100%';
+
+    const headerRow = document.createElement('div');
+    headerRow.style.cssText = 'display: flex; justify-content: space-between; align-items: center;';
+
+    const topicSpan = document.createElement('span');
+    topicSpan.className = 'trending-topic';
+    topicSpan.textContent = String(t.topic ?? '');
+
+    const countSpan = document.createElement('span');
+    countSpan.className = 'trending-count';
+    countSpan.textContent = String(t.frequency ?? 0);
+
+    headerRow.appendChild(topicSpan);
+    headerRow.appendChild(countSpan);
+
+    const bar = document.createElement('div');
+    bar.className = 'trending-bar';
+
+    const fill = document.createElement('div');
+    fill.className = 'trending-fill';
+    fill.style.width = `${widthPercent}%`;
+
+    bar.appendChild(fill);
+    wrapper.appendChild(headerRow);
+    wrapper.appendChild(bar);
+    item.appendChild(wrapper);
 
     // Clicking a topic could trigger a search
     item.style.cursor = 'pointer';
@@ -188,24 +232,40 @@ function displayTrendingTopics(topics) {
 // --- Management & Stats ---
 function loadStats() {
   const statsEl = document.getElementById('stats-display');
-  statsEl.innerHTML = 'Loading stats...';
+  statsEl.textContent = 'Loading stats...';
 
   chrome.runtime.sendMessage({
     type: 'get_vector_store_stats'
   }, (resp) => {
     if (chrome.runtime.lastError) {
-      statsEl.innerHTML = `<span style="color:red">Error: ${chrome.runtime.lastError.message}</span>`;
+      statsEl.textContent = '';
+      const errorSpan = document.createElement('span');
+      errorSpan.style.color = 'red';
+      errorSpan.textContent = `Error: ${chrome.runtime.lastError.message || 'Unknown error'}`;
+      statsEl.appendChild(errorSpan);
       return;
     }
 
     if (resp) {
-      statsEl.innerHTML = `
-        <div style="font-size: 24px; font-weight: 700; color: #111827;">${resp.article_count || 0}</div>
-        <div>Articles in Vector Store</div>
-        ${resp.last_updated ? `<div style="font-size: 11px; margin-top: 4px; color: #9ca3af;">Last updated: ${new Date(resp.last_updated).toLocaleString()}</div>` : ''}
-      `;
+      statsEl.textContent = '';
+
+      const countDiv = document.createElement('div');
+      countDiv.style.cssText = 'font-size: 24px; font-weight: 700; color: #111827;';
+      countDiv.textContent = String(resp.article_count || 0);
+      statsEl.appendChild(countDiv);
+
+      const labelDiv = document.createElement('div');
+      labelDiv.textContent = 'Articles in Vector Store';
+      statsEl.appendChild(labelDiv);
+
+      if (resp.last_updated) {
+        const updatedDiv = document.createElement('div');
+        updatedDiv.style.cssText = 'font-size: 11px; margin-top: 4px; color: #9ca3af;';
+        updatedDiv.textContent = `Last updated: ${new Date(resp.last_updated).toLocaleString()}`;
+        statsEl.appendChild(updatedDiv);
+      }
     } else {
-      statsEl.innerHTML = 'No stats available.';
+      statsEl.textContent = 'No stats available.';
     }
   });
 }
@@ -224,6 +284,11 @@ function cleanupInvalidEntries() {
 
     if (chrome.runtime.lastError) {
       alert(`Error: ${chrome.runtime.lastError.message}`);
+      return;
+    }
+
+    if (!resp || resp.error) {
+      alert(`Error: ${resp?.message || resp?.error || 'Unknown error'}`);
       return;
     }
 
@@ -250,6 +315,11 @@ function clearVectorStore() {
 
     if (chrome.runtime.lastError) {
       alert(`Error: ${chrome.runtime.lastError.message}`);
+      return;
+    }
+
+    if (!resp || resp.error) {
+      alert(`Error: ${resp?.message || resp?.error || 'Unknown error'}`);
       return;
     }
 
@@ -374,10 +444,10 @@ function displaySearchResults(results, query) {
 
   results.forEach((result, index) => {
     const title = result.metadata?.title || 'Untitled Article';
-    const score = result.metadata?.score || 'N/A';
-    const distance = result.distance ? result.distance.toFixed(3) : 'N/A';
+    const score = result.metadata?.score != null ? result.metadata.score : 'N/A';
+    const distance = result.distance != null ? Number(result.distance).toFixed(3) : 'N/A';
     const preview = result.text ? result.text.substring(0, 200) + '...' : '';
-    const url = result.metadata?.url || null;
+    const safeUrl = sanitizeUrl(result.metadata?.url);
 
     const resultCard = document.createElement('div');
     resultCard.style.cssText = `
@@ -398,9 +468,9 @@ function displaySearchResults(results, query) {
       `;
 
     let titleEl;
-    if (url) {
+    if (safeUrl) {
       titleEl = document.createElement('a');
-      titleEl.href = url;
+      titleEl.href = safeUrl;
       titleEl.target = '_blank';
       titleEl.rel = 'noopener noreferrer';
       titleEl.style.cssText = `
@@ -478,7 +548,7 @@ function displaySearchResults(results, query) {
     distanceSpan.textContent = `Distance: ${distance}`;
 
     const idSpan = document.createElement('span');
-    idSpan.textContent = `ID: ${result.id.substring(0, 8)}...`;
+    idSpan.textContent = `ID: ${String(result.id || '').substring(0, 8)}...`;
 
     cardFooter.appendChild(distanceSpan);
     cardFooter.appendChild(idSpan);
@@ -516,17 +586,25 @@ function _renderPanel(title, content, status) {
   }
 
   if (status === 'error') {
-    contentEl.innerHTML = `<div class="error">${content}</div>`;
+    contentEl.textContent = '';
+    const errorDiv = document.createElement('div');
+    errorDiv.className = 'error';
+    errorDiv.textContent = content || '';
+    contentEl.appendChild(errorDiv);
     return;
   }
 
   if (status === 'streaming' || content) {
     // Use marked.parse for markdown rendering (throttled during streaming)
     try {
-      contentEl.innerHTML = `<div class="summary-content">${marked.parse(content || '')}</div>`;
+      contentEl.textContent = '';
+      const summaryDiv = document.createElement('div');
+      summaryDiv.className = 'summary-content';
+      setSanitizedHtml(summaryDiv, marked.parse(content || ''));
+      contentEl.appendChild(summaryDiv);
     } catch (e) {
       console.error("Markdown parse error:", e);
-      contentEl.textContent = content;
+      contentEl.textContent = content || '';
     }
   }
 }
@@ -579,10 +657,9 @@ function updatePanel(title, content, status) {
 console.log('[Feedly AI] Side panel loaded');
 
 // Notify background that we are ready to receive data
-if (chrome.windows && chrome.windows.getCurrent) {
-  chrome.windows.getCurrent((win) => {
-    chrome.runtime.sendMessage({ type: 'sidepanel_ready', windowId: win.id });
-  });
-} else {
-  chrome.runtime.sendMessage({ type: 'sidepanel_ready' });
-}
+currentWindowIdPromise.then((winId) => {
+  const readyMsg = winId != null
+    ? { type: 'sidepanel_ready', windowId: winId }
+    : { type: 'sidepanel_ready' };
+  chrome.runtime.sendMessage(readyMsg).catch(() => {});
+});
