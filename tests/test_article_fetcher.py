@@ -183,15 +183,67 @@ class TestArticleFetcher(unittest.TestCase):
 
     @patch("rss_analyzer.article_fetcher.requests.get")
     def test_ssrf_blocks_redirect_to_private_ip(self, mock_get):
-        """测试重定向目标为私网地址时被拦截"""
+        """测试重定向目标为私网地址时在发起第二跳请求前被拦截"""
         mock_response = Mock()
-        mock_response.status_code = 200
-        mock_response.url = "http://127.0.0.1/internal"
-        mock_response.headers = {"Content-Type": "text/html"}
+        mock_response.status_code = 302
+        mock_response.headers = {"Location": "http://127.0.0.1/internal"}
         mock_get.return_value = mock_response
 
         result = fetch_article_content("https://example.com/redirect")
         self.assertIn("安全限制", result)
+        mock_get.assert_called_once()
+        self.assertFalse(mock_get.call_args.kwargs["allow_redirects"])
+        mock_response.close.assert_called_once()
+
+    @patch("rss_analyzer.article_fetcher.requests.get")
+    def test_valid_public_redirect_succeeds(self, mock_get):
+        """测试合法公网重定向（含相对路径）正常跟随并提取正文"""
+        redirect_resp = Mock()
+        redirect_resp.status_code = 301
+        redirect_resp.headers = {"Location": "/final-article"}
+
+        final_resp = Mock()
+        final_resp.status_code = 200
+        final_resp.headers = {"Content-Type": "text/html; charset=utf-8"}
+        final_resp.iter_content.return_value = iter([b"<html><body>Final</body></html>"])
+
+        mock_get.side_effect = [redirect_resp, final_resp]
+
+        with patch("trafilatura.extract", return_value="Final extracted"):
+            result = fetch_article_content("https://example.com/old")
+
+        self.assertEqual(result, "Final extracted")
+        self.assertEqual(mock_get.call_count, 2)
+        self.assertEqual(mock_get.call_args_list[0].args[0], "https://example.com/old")
+        self.assertEqual(mock_get.call_args_list[1].args[0], "https://example.com/final-article")
+        redirect_resp.close.assert_called_once()
+        final_resp.close.assert_called_once()
+
+    @patch("rss_analyzer.article_fetcher.requests.get")
+    def test_too_many_redirects_returns_error(self, mock_get):
+        """测试超过最大重定向次数时返回错误"""
+        def make_redirect(*args, **kwargs):
+            resp = Mock()
+            resp.status_code = 302
+            resp.headers = {"Location": "https://example.com/loop"}
+            return resp
+
+        mock_get.side_effect = make_redirect
+
+        result = fetch_article_content("https://example.com/start")
+        self.assertEqual(result, "获取失败: 重定向次数过多")
+        self.assertEqual(mock_get.call_count, 6)
+
+    @patch("rss_analyzer.article_fetcher.requests.get")
+    def test_malformed_port_returns_invalid_url_without_raising(self, mock_get):
+        """测试非法端口 URL 返回错误字符串而不抛出 ValueError"""
+        for bad_url in (
+            "http://example.com:99999/post",
+            "http://example.com:abc/post",
+        ):
+            result = fetch_article_content(bad_url)
+            self.assertEqual(result, "错误: 无效的 URL")
+        mock_get.assert_not_called()
 
     @patch("rss_analyzer.article_fetcher.requests.get")
     def test_blocks_binary_content_type(self, mock_get):

@@ -191,8 +191,8 @@ def rebuild_vector_store(
                     rebuilt_count=rebuilt_count,
                     failed_count=len(failed_ids),
                 )
-        except Exception:
-            executor.shutdown(wait=False, cancel_futures=True)
+        except BaseException:
+            executor.shutdown(wait=True, cancel_futures=True)
             raise
         else:
             executor.shutdown(wait=True)

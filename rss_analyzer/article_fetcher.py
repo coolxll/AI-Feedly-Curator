@@ -7,7 +7,7 @@ import os
 import socket
 from collections.abc import Mapping
 from typing import Callable
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 import requests
 
@@ -16,6 +16,8 @@ from .config import PROJ_CONFIG, get_max_content_chars
 logger = logging.getLogger(__name__)
 
 DEFAULT_MAX_RESPONSE_BYTES = 5 * 1024 * 1024  # 5 MB
+MAX_REDIRECTS = 5
+_REDIRECT_STATUS_CODES = frozenset({301, 302, 303, 307, 308})
 _BLOCKED_CONTENT_TYPE_PREFIXES = ("audio/", "video/", "image/")
 _BLOCKED_CONTENT_TYPES = frozenset(
     {
@@ -150,6 +152,11 @@ def _validate_fetch_url(url: str) -> str | None:
     if not hostname:
         return "错误: URL 缺少主机名"
 
+    try:
+        parsed_port = parsed.port
+    except ValueError:
+        return "错误: 无效的 URL"
+
     if (
         hostname == "localhost"
         or hostname.endswith(".local")
@@ -170,7 +177,7 @@ def _validate_fetch_url(url: str) -> str | None:
         return None
 
     # Resolve domain name; tolerate DNS failure gracefully (e.g. offline/mocked tests).
-    port = parsed.port or (443 if scheme == "https" else 80)
+    port = parsed_port or (443 if scheme == "https" else 80)
     try:
         addr_info = socket.getaddrinfo(hostname, port, type=socket.SOCK_STREAM)
     except (socket.gaierror, OSError):
@@ -294,20 +301,44 @@ def fetch_article_content(url: str) -> str:
 
         max_bytes = _get_max_response_bytes()
 
-        # 直接使用 requests 获取，确保代理生效
+        # 直接使用 requests 获取，确保代理生效；手动处理重定向以在发起下一跳请求前校验 SSRF
         response = None
+        current_url = url
         try:
-            response = requests.get(
-                url, headers=headers, proxies=proxies, timeout=15, stream=True
-            )
+            for hop in range(MAX_REDIRECTS + 1):
+                response = requests.get(
+                    current_url,
+                    headers=headers,
+                    proxies=proxies,
+                    timeout=15,
+                    stream=True,
+                    allow_redirects=False,
+                )
+                if response.status_code in _REDIRECT_STATUS_CODES:
+                    resp_headers = getattr(response, "headers", None)
+                    location = None
+                    if isinstance(resp_headers, Mapping):
+                        location = resp_headers.get("Location") or resp_headers.get("location")
+                    if isinstance(location, str) and location.strip():
+                        close_fn = getattr(response, "close", None)
+                        if callable(close_fn):
+                            close_fn()
+                        response = None
+                        if hop >= MAX_REDIRECTS:
+                            return "获取失败: 重定向次数过多"
+                        next_url = urljoin(current_url, location.strip())
+                        redirect_error = _validate_fetch_url(next_url)
+                        if redirect_error:
+                            return redirect_error
+                        current_url = next_url
+                        continue
+                break
+
+            if response is None:
+                return "获取失败: 重定向次数过多"
+
             if response.status_code != 200:
                 return f"获取失败: HTTP {response.status_code}"
-
-            final_url = getattr(response, "url", None)
-            if isinstance(final_url, str) and final_url.strip():
-                redirect_error = _validate_fetch_url(final_url.strip())
-                if redirect_error:
-                    return redirect_error
 
             content_type = _extract_content_type(response)
             if _is_blocked_content_type(content_type):

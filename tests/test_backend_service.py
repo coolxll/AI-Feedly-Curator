@@ -1105,7 +1105,7 @@ class TestBackendService(unittest.TestCase):
             with self.assertRaises(BrokenPipeError):
                 vector_service.rebuild_vector_store(progress_callback=failing_callback)
 
-        fake_executor.shutdown.assert_called_once_with(wait=False, cancel_futures=True)
+        fake_executor.shutdown.assert_called_once_with(wait=True, cancel_futures=True)
         # Lock must be released after failure
         self.assertTrue(vector_service._REBUILD_LOCK.acquire(blocking=False))
         vector_service._REBUILD_LOCK.release()
