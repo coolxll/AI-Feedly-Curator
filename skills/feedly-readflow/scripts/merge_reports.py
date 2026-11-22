@@ -96,6 +96,7 @@ def load_reports(report_glob: str, *, stage: str = "triage", allow_empty: bool =
         raise SystemExit(f"No worker reports matched: {report_glob}")
 
     by_id: dict[str, dict] = {}
+    no_id_idx = 0
     for path in paths:
         items = json.loads(path.read_text(encoding="utf-8"))
         if not isinstance(items, list):
@@ -104,7 +105,11 @@ def load_reports(report_glob: str, *, stage: str = "triage", allow_empty: bool =
             if not isinstance(item, dict):
                 continue
             item = normalize_item(item, stage=stage)
-            entry_id = item.get("id", "")
+            entry_id = item.get("id") or ""
+            if not entry_id:
+                by_id[f"__no_id_{no_id_idx}"] = item
+                no_id_idx += 1
+                continue
             existing = by_id.get(entry_id)
             if existing is None or _score(item) > _score(existing):
                 by_id[entry_id] = item
@@ -112,9 +117,17 @@ def load_reports(report_glob: str, *, stage: str = "triage", allow_empty: bool =
 
 
 def merge_report_items(triage_items: list[dict], deep_items: list[dict]) -> list[dict]:
-    by_id = {item.get("id", ""): item for item in triage_items}
+    by_id: dict[str, dict] = {}
+    no_id_idx = 0
+    for item in triage_items:
+        entry_id = item.get("id") or ""
+        if not entry_id:
+            by_id[f"__no_id_{no_id_idx}"] = item
+            no_id_idx += 1
+        else:
+            by_id[entry_id] = item
     for item in deep_items:
-        entry_id = item.get("id", "")
+        entry_id = item.get("id") or ""
         if not entry_id:
             continue
         merged = dict(by_id.get(entry_id, {}))
@@ -126,7 +139,16 @@ def merge_report_items(triage_items: list[dict], deep_items: list[dict]) -> list
 
 def _score(item: dict) -> float:
     value = item.get("score")
-    return float(value) if isinstance(value, (int, float)) else 0.0
+    if isinstance(value, bool) or value is None:
+        return 0.0
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value.strip())
+        except ValueError:
+            return 0.0
+    return 0.0
 
 
 def load_json_list(path: Path | None) -> list[dict]:
@@ -343,8 +365,8 @@ def main() -> int:
     )
     parser.add_argument(
         "--low-quality",
-        default="/tmp/feedly_prefiltered_low_quality.json",
-        help="Prefiltered low-quality articles JSON (optional)",
+        default=None,
+        help="Prefiltered low-quality articles JSON (optional; defaults to next to --data)",
     )
     parser.add_argument(
         "--output",
@@ -358,14 +380,14 @@ def main() -> int:
     triage_items = load_reports(args.report_glob, stage="triage")
     deep_items = load_reports(args.deep_report_glob, stage="deep", allow_empty=True)
     items = merge_report_items(triage_items, deep_items)
-    prefiltered = load_json_list(Path(args.low_quality))
 
-    # If --data was given but --low-quality was not, still try the default
-    # prefiltered path next to the candidate file for convenience.
-    if not args.low_quality:
+    # If --low-quality was not explicitly given, try the default prefiltered
+    # path next to --data for convenience.
+    if args.low_quality:
+        prefiltered = load_json_list(Path(args.low_quality))
+    else:
         default_low = Path(args.data).parent / "feedly_prefiltered_low_quality.json"
-        if default_low.exists():
-            prefiltered = load_json_list(default_low)
+        prefiltered = load_json_list(default_low)
 
     report = render_report(items, prefiltered, report_paths + deep_paths)
     output = Path(args.output)

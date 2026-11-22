@@ -7,6 +7,7 @@ import argparse
 import json
 import re
 from collections import Counter
+from difflib import SequenceMatcher
 from pathlib import Path
 
 
@@ -38,33 +39,57 @@ def fix_tmtpost(report: str) -> str:
     )
 
 
+def _normalize_title(title: str) -> str:
+    return re.sub(r"\s+", " ", clean_title(title)).strip().lower()
+
+
 def find_link_for_title(title: str, title_to_link: dict[str, str], domain_hint: str = "") -> str | None:
     cleaned = clean_title(title)
+    if not cleaned:
+        return None
     if cleaned in title_to_link:
         candidate = title_to_link[cleaned]
         if not domain_hint or domain_hint in candidate:
             return candidate
 
-    for length in (20, 15, 10, 8, 5):
-        prefix = cleaned[:length]
-        if len(prefix) < 2:
+    norm_cleaned = _normalize_title(cleaned)
+    best_link: str | None = None
+    best_score = 0.0
+
+    for known_title, link in title_to_link.items():
+        if domain_hint and domain_hint not in link:
             continue
-        for known_title, link in title_to_link.items():
-            if domain_hint and domain_hint not in link:
-                continue
-            if prefix in known_title or known_title[:length] in cleaned:
-                return link
-    return None
+        norm_known = _normalize_title(known_title)
+        if not norm_known:
+            continue
+        if norm_cleaned == norm_known:
+            return link
+        if len(norm_cleaned) < 10 or len(norm_known) < 10:
+            continue
+        is_prefix_match = (
+            len(norm_cleaned) >= 12 and norm_known.startswith(norm_cleaned)
+        ) or (
+            len(norm_known) >= 12 and norm_cleaned.startswith(norm_known)
+        )
+        ratio = SequenceMatcher(None, norm_cleaned, norm_known).ratio()
+        if is_prefix_match or ratio >= 0.85:
+            score = max(ratio, 0.85) if is_prefix_match else ratio
+            if score > best_score:
+                best_score = score
+                best_link = link
+
+    return best_link
 
 
 def rewrite_markdown_links(report: str, title_to_link: dict[str, str]) -> tuple[str, int]:
-    pattern = re.compile(r"^(\s*[-*]\s+\[)(.+?)(\]\((https?://[^)]+)\))$", re.MULTILINE)
-    counts = Counter(re.findall(r"\]\((https?://[^)]+)\)", report))
+    url_re = r"https?://(?:[^)\s]|\([^)\s]*\))+"
+    pattern = re.compile(rf"\[((?:[^\[\]\n]|\[[^\[\]\n]*\])+)\]\(({url_re})\)")
+    counts = Counter(re.findall(rf"\]\(({url_re})\)", report))
     fixes = 0
 
     def replace(match: re.Match) -> str:
         nonlocal fixes
-        prefix, title, suffix, url = match.groups()
+        title, url = match.groups()
         base_url = url.split("#")[0]
         domain_hint = ""
         if "v2ex.com" in base_url:
@@ -87,7 +112,7 @@ def rewrite_markdown_links(report: str, title_to_link: dict[str, str]) -> tuple[
         if "v2ex.com" in correct:
             correct += "#reply0"
         fixes += 1
-        return f"{prefix}{title}]({correct})"
+        return f"[{title}]({correct})"
 
     return pattern.sub(replace, report), fixes
 
@@ -97,7 +122,7 @@ def fix_broken_markdown(report: str) -> tuple[str, int]:
     lines = report.splitlines()
     for index, line in enumerate(lines):
         match = re.match(r"^(\s*[-*]\s+\[)(.+?)(\(https?://[^)]+\))$", line)
-        if match and "]" not in line[: line.index("(")]:
+        if match and not match.group(2).endswith("]"):
             prefix, title, paren_url = match.groups()
             lines[index] = f"{prefix}{title}]{paren_url}"
             fixes += 1

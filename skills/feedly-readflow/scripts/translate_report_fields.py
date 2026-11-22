@@ -18,8 +18,8 @@ import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-# Ensure the repo root (cwd when run) is importable as a package path.
-_REPO_ROOT = os.getcwd()
+# Ensure the repo root is importable as a package path regardless of cwd.
+_REPO_ROOT = str(Path(__file__).resolve().parents[3])
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
@@ -100,34 +100,31 @@ def parse_translation(text: str, field_order: list) -> dict:
         if not m:
             continue
         field, idx, val = m.group(1), m.group(2), m.group(3).strip()
-        if idx:
-            out.setdefault(field, {})[int(idx)] = val
+        if idx is not None:
+            if not isinstance(out.get(field), dict):
+                out[field] = {}
+            out[field][int(idx)] = val
         else:
             out[field] = val
-    # Reconstruct lists preserving original order
+    # Reconstruct lists preserving original indices (gaps filled with None)
     result: dict = {}
-    seen_lists: dict = {}
+    seen_lists: dict[str, dict[int, str | None]] = {}
     for field, idx in field_order:
         if idx is None:
             if field in out:
                 result[field] = out[field]
         else:
-            if field not in seen_lists:
-                seen_lists[field] = []
-            # Only append if we have this index; gaps kept from original
-            if field in out and idx in out[field]:
-                seen_lists[field].append(out[field][idx])
+            field_map = seen_lists.setdefault(field, {})
+            if isinstance(out.get(field), dict) and idx in out[field]:
+                field_map[idx] = out[field][idx]
             else:
-                seen_lists[field].append(None)
-    for field, lst in seen_lists.items():
-        # Preserve original list length: replace None with original values
-        orig = None
-        for k, v in field_order:
-            if k == field:
-                orig = v
-                break
-        # Fallback: if any None, keep them so length matches
-        result[field] = lst
+                field_map[idx] = None
+    for field, idx_map in seen_lists.items():
+        if not idx_map:
+            result[field] = []
+        else:
+            size = max(idx_map) + 1
+            result[field] = [idx_map.get(i) for i in range(size)]
     return result
 
 
@@ -156,35 +153,26 @@ def translate_item(client: OpenAI, cfg, item: dict) -> dict:
         if val is None:
             continue
         if isinstance(val, list):
-            # Merge translated entries with original (preserve None positions)
+            # Merge translated entries with original, preserving original indices and length
             orig = item.get(field) or []
-            merged = []
+            merged = list(orig)
             for i, v in enumerate(val):
-                if v is not None and i < len(orig):
-                    merged.append(v)
-                elif i < len(orig):
-                    merged.append(orig[i])
-            new_item[field] = merged if merged else orig
+                if v is not None and i < len(merged):
+                    merged[i] = v
+            new_item[field] = merged
         else:
             new_item[field] = val
     return new_item
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--report-glob", default="tmp/readflow/fb_report_*.json")
     parser.add_argument("--default-model", default="gpt-4o-mini")
     parser.add_argument("--limit", type=int, default=0, help="0 = all")
     parser.add_argument("--workers", type=int, default=8, help="concurrent LLM calls")
     parser.add_argument("--dry-run", action="store_true")
-    args = parser.parse_args()
-
-    cfg = get_openai_task_config("translate", args.default_model)
-    client = OpenAI(
-        api_key=cfg.api_key,
-        base_url=cfg.base_url,
-        default_headers={"User-Agent": "feedly-readflow-translate"},
-    ) if cfg.base_url else OpenAI(api_key=cfg.api_key)
+    args = parser.parse_args(argv)
 
     paths = sorted(glob.glob(args.report_glob))
     # Collect (path, index, item) jobs for all English-heavy items.
@@ -198,6 +186,25 @@ def main() -> int:
     if args.limit:
         jobs = jobs[: args.limit]
     print(f"jobs to translate: {len(jobs)} with {args.workers} workers", flush=True)
+
+    if args.dry_run:
+        affected_files = sorted({path for path, _, _ in jobs})
+        print(
+            f"[dry-run] would translate {len(jobs)} items across {len(affected_files)} files "
+            f"(scanned {len(paths)} files); no API calls made and no files modified",
+            flush=True,
+        )
+        for path in affected_files:
+            count = sum(1 for p, _, _ in jobs if p == path)
+            print(f"  {path}: {count} items", flush=True)
+        return 0
+
+    cfg = get_openai_task_config("translate", args.default_model)
+    client = OpenAI(
+        api_key=cfg.api_key,
+        base_url=cfg.base_url,
+        default_headers={"User-Agent": "feedly-readflow-translate"},
+    ) if cfg.base_url else OpenAI(api_key=cfg.api_key)
 
     # Translate concurrently; group results by path.
     by_path: dict[str, dict[int, dict]] = {}

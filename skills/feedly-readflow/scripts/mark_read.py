@@ -19,14 +19,78 @@ def load_articles(path: Path) -> list[dict]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+_HEADING_RE = re.compile(r"^(#{1,6})\s+(.*)$")
+_EXCLUDED_HEADING_RE = re.compile(
+    r"(?:低质量|可清理|已过滤|预过滤|"
+    r"^(?:clear|prefiltered?|low[\s_-]*quality|filtered|noise)"
+    r"(?:\s*[/(\-–—:].*|\s+(?:items?|articles?|samples?|entries?|sections?|low[\s_-]*quality))?$)",
+    re.IGNORECASE,
+)
+
+
+def _filter_selected_sections(text: str) -> str:
+    kept_lines: list[str] = []
+    excluded_level: int | None = None
+    for line in text.splitlines():
+        match = _HEADING_RE.match(line.strip())
+        if match:
+            level = len(match.group(1))
+            heading_text = match.group(2).strip()
+            if excluded_level is not None and level <= excluded_level:
+                excluded_level = None
+            if excluded_level is None and _EXCLUDED_HEADING_RE.search(heading_text):
+                excluded_level = level
+                continue
+        if excluded_level is None:
+            kept_lines.append(line)
+    return "\n".join(kept_lines)
+
+
+def extract_markdown_urls(text: str) -> list[str]:
+    """Extract http(s) URLs from Markdown links, preserving balanced parentheses."""
+    urls: list[str] = []
+    pos = 0
+    length = len(text)
+    while True:
+        start = text.find("](", pos)
+        if start == -1:
+            break
+        url_start = start + 2
+        if not (text.startswith("http://", url_start) or text.startswith("https://", url_start)):
+            pos = url_start
+            continue
+        depth = 0
+        i = url_start
+        while i < length:
+            ch = text[i]
+            if ch == "(":
+                depth += 1
+            elif ch == ")":
+                if depth == 0:
+                    break
+                depth -= 1
+            elif ch in " \t" and depth == 0:
+                break
+            elif ch in "\r\n":
+                break
+            i += 1
+        if i < length and text[i] in (")", " ", "\t"):
+            urls.append(text[url_start:i])
+            pos = i + 1
+        else:
+            pos = i
+    return urls
+
+
 def report_urls(path: Path) -> set[str]:
-    text = path.read_text(encoding="utf-8")
-    return {normalize_url(url) for url in re.findall(r"\]\((https?://[^)]+)\)", text)}
+    text = _filter_selected_sections(path.read_text(encoding="utf-8"))
+    return {normalize_url(url) for url in extract_markdown_urls(text)}
 
 
 def normalize_url(url: str) -> str:
     cleaned = (url or "").split("#")[0]
-    cleaned = re.sub(r"(https://www\.tmtpost\.com/\d+)(?:\.html)?$", r"\1", cleaned)
+    cleaned = re.sub(r"(\.html)\d+\.html", r"\1", cleaned)
+    cleaned = re.sub(r"(https://www\.tmtpost\.com/\d+)(?:\.html)?(?=[?#/]|$)", r"\1", cleaned)
     return cleaned
 
 
@@ -36,6 +100,7 @@ def normalize_decision(decision: str | None) -> str:
         "low_quality": "clear",
         "noise": "clear",
         "optional": "skim",
+        "recommend": "must_read",
         "strong_recommend": "must_read",
     }.get(value, value)
 
@@ -114,15 +179,47 @@ def cmd_unselected(args: argparse.Namespace) -> int:
     return mark_ids(ids, batch_size=args.batch_size, dry_run=args.dry_run)
 
 
+def _score(item: dict) -> float:
+    value = item.get("score")
+    return float(value) if isinstance(value, (int, float)) else 0.0
+
+
+def _load_report_by_id(pattern: str) -> dict[str, dict]:
+    by_id: dict[str, dict] = {}
+    for path in sorted(glob.glob(pattern)):
+        for item in load_articles(Path(path)):
+            if not isinstance(item, dict):
+                continue
+            entry_id = item.get("id", "")
+            if not entry_id:
+                continue
+            existing = by_id.get(entry_id)
+            if existing is None or _score(item) > _score(existing):
+                by_id[entry_id] = dict(item)
+    return by_id
+
+
 def cmd_clear(args: argparse.Namespace) -> int:
-    ids: list[str] = []
-    for pattern in [args.report_glob, args.deep_report_glob]:
-        for path in sorted(glob.glob(pattern)):
-            for item in load_articles(Path(path)):
-                if normalize_decision(item.get("decision")) == "clear":
-                    ids.append(item.get("id", ""))
+    by_id = _load_report_by_id(args.report_glob)
+    deep_by_id = _load_report_by_id(args.deep_report_glob)
+    for entry_id, item in deep_by_id.items():
+        merged = dict(by_id.get(entry_id, {}))
+        merged.update(item)
+        by_id[entry_id] = merged
+
+    ids: list[str] = [
+        entry_id
+        for entry_id, item in by_id.items()
+        if normalize_decision(item.get("decision")) == "clear"
+    ]
     if args.low_quality and Path(args.low_quality).exists():
-        ids.extend(item.get("id", "") for item in load_articles(Path(args.low_quality)))
+        for item in load_articles(Path(args.low_quality)):
+            entry_id = item.get("id", "")
+            if entry_id and (
+                entry_id not in by_id
+                or normalize_decision(by_id[entry_id].get("decision")) == "clear"
+            ):
+                ids.append(entry_id)
     return mark_ids(ids, batch_size=args.batch_size, dry_run=args.dry_run)
 
 
