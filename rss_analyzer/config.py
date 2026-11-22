@@ -139,6 +139,14 @@ def setup_logging(debug_mode: bool = False) -> None:
     logging.getLogger("openai").setLevel(logging.WARNING)
 
 
+def _get_env(key: str) -> str | None:
+    val = os.getenv(key)
+    if val is None:
+        return None
+    stripped = val.strip()
+    return stripped if stripped else None
+
+
 def get_config(key: str, default=None, task: str | None = None):
     """
     获取配置项。
@@ -149,11 +157,14 @@ def get_config(key: str, default=None, task: str | None = None):
     3. default
     """
     if task:
-        val = os.getenv(f"{task.upper()}_{key}")
+        val = _get_env(f"{task.upper()}_{key}")
         if val is not None:
             return val
 
-    return os.getenv(key, default)
+    val = _get_env(key)
+    if val is not None:
+        return val
+    return default
 
 
 def _parse_bool(value, default: bool) -> bool:
@@ -205,9 +216,9 @@ def is_vector_store_enabled() -> bool:
     2. ENABLE_VECTOR_STORE (legacy-friendly alias)
     3. PROJ_CONFIG default
     """
-    env_value = os.getenv("RSS_ENABLE_VECTOR_STORE")
+    env_value = _get_env("RSS_ENABLE_VECTOR_STORE")
     if env_value is None:
-        env_value = os.getenv("ENABLE_VECTOR_STORE")
+        env_value = _get_env("ENABLE_VECTOR_STORE")
     return _parse_bool(env_value, bool(PROJ_CONFIG.get("enable_vector_store", True)))
 
 
@@ -287,24 +298,24 @@ def get_embedding_config() -> EmbeddingConfig:
     """
     return EmbeddingConfig(
         api_key=(
-            os.getenv("EMBEDDING_API_KEY")
-            or os.getenv("DASHSCOPE_API_KEY")
-            or os.getenv("ALIYUN_OPENAI_API_KEY")
-            or os.getenv("OPENAI_API_KEY")
+            _get_env("EMBEDDING_API_KEY")
+            or _get_env("DASHSCOPE_API_KEY")
+            or _get_env("ALIYUN_OPENAI_API_KEY")
+            or _get_env("OPENAI_API_KEY")
         ),
         base_url=(
-            os.getenv("EMBEDDING_BASE_URL")
-            or os.getenv("DASHSCOPE_BASE_URL")
-            or os.getenv("ALIYUN_OPENAI_BASE_URL")
+            _get_env("EMBEDDING_BASE_URL")
+            or _get_env("DASHSCOPE_BASE_URL")
+            or _get_env("ALIYUN_OPENAI_BASE_URL")
             or EMBEDDING_DEFAULT_BASE_URL
         ),
-        model=os.getenv("EMBEDDING_MODEL", EMBEDDING_DEFAULT_MODEL),
+        model=_get_env("EMBEDDING_MODEL") or EMBEDDING_DEFAULT_MODEL,
         default_headers={
             key: value
             for key, value in {
                 "User-Agent": (
-                    os.getenv("EMBEDDING_USER_AGENT")
-                    or os.getenv("OPENAI_USER_AGENT")
+                    _get_env("EMBEDDING_USER_AGENT")
+                    or _get_env("OPENAI_USER_AGENT")
                     or DEFAULT_OPENAI_USER_AGENT
                 ),
             }.items()
@@ -321,7 +332,7 @@ def get_vector_store_config() -> VectorStoreConfig:
     - embedded: local PersistentClient(path=...)
     - http: Docker/self-hosted Chroma HTTP server
     """
-    backend = os.getenv("RSS_VECTOR_BACKEND", "embedded").strip().lower() or "embedded"
+    backend = (_get_env("RSS_VECTOR_BACKEND") or "embedded").lower()
     if backend not in {"embedded", "http"}:
         logger.warning(
             "Unsupported RSS_VECTOR_BACKEND=%r; falling back to embedded.",
@@ -329,27 +340,39 @@ def get_vector_store_config() -> VectorStoreConfig:
         )
         backend = "embedded"
 
-    persist_dir = os.getenv("RSS_VECTOR_DB_DIR", os.path.join(os.getcwd(), "chroma_db"))
-    state_dir = os.getenv(
-        "RSS_VECTOR_STATE_DIR", os.path.join(os.getcwd(), "vector_store_state")
+    persist_dir = _get_env("RSS_VECTOR_DB_DIR") or os.path.join(os.getcwd(), "chroma_db")
+    state_dir = _get_env("RSS_VECTOR_STATE_DIR") or os.path.join(
+        os.getcwd(), "vector_store_state"
     )
 
-    raw_url = os.getenv("RSS_VECTOR_HTTP_URL", "http://127.0.0.1:8000").strip()
-    parsed = urlparse(raw_url)
+    raw_url = _get_env("RSS_VECTOR_HTTP_URL") or ""
+    parsed = urlparse(raw_url) if raw_url else None
 
-    if parsed.scheme and parsed.hostname:
+    if parsed and parsed.scheme and parsed.hostname:
         http_ssl = parsed.scheme == "https"
         http_host = parsed.hostname
-        http_port = parsed.port or (443 if http_ssl else 80)
+        try:
+            parsed_port = parsed.port
+        except ValueError:
+            logger.warning(
+                "Invalid port in RSS_VECTOR_HTTP_URL=%r; using default port.",
+                raw_url,
+            )
+            parsed_port = None
+        http_port = parsed_port or (443 if http_ssl else 80)
         http_url = f"{parsed.scheme}://{http_host}:{http_port}"
     else:
-        http_host = os.getenv("RSS_VECTOR_HTTP_HOST", "127.0.0.1")
-        http_port = int(os.getenv("RSS_VECTOR_HTTP_PORT", "8000"))
-        http_ssl = os.getenv("RSS_VECTOR_HTTP_SSL", "").lower() in (
-            "1",
-            "true",
-            "yes",
-        )
+        http_host = _get_env("RSS_VECTOR_HTTP_HOST") or "127.0.0.1"
+        raw_port = _get_env("RSS_VECTOR_HTTP_PORT") or "8000"
+        try:
+            http_port = int(raw_port)
+        except ValueError:
+            logger.warning(
+                "Invalid RSS_VECTOR_HTTP_PORT=%r; falling back to 8000.",
+                raw_port,
+            )
+            http_port = 8000
+        http_ssl = _parse_bool(_get_env("RSS_VECTOR_HTTP_SSL"), False)
         scheme = "https" if http_ssl else "http"
         http_url = f"{scheme}://{http_host}:{http_port}"
 

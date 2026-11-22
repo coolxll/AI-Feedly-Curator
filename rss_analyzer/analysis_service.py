@@ -69,8 +69,8 @@ def _article_url(article: dict) -> str:
         return article["link"]
     if article.get("canonicalUrl"):
         return article["canonicalUrl"]
-    alternate = article.get("alternate") or []
-    if alternate and isinstance(alternate[0], dict):
+    alternate = article.get("alternate")
+    if isinstance(alternate, list) and alternate and isinstance(alternate[0], dict):
         return alternate[0].get("href", "")
     return ""
 
@@ -103,9 +103,9 @@ class ArticleAnalysisService:
             if len(summary) > 500:
                 content = summary
             elif url:
-                content = self._fetch_content(url) or summary
+                content = self._fetch_content(url) or content or summary
             else:
-                content = summary
+                content = content or summary
 
         return PreparedArticle(
             article_id=str(article.get("id") or ""),

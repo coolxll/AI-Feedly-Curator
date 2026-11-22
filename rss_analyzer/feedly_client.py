@@ -3,7 +3,10 @@ Feedly API 客户端模块
 处理与 Feedly 服务的所有交互
 """
 
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 import logging
+import math
 import time
 from typing import Optional
 
@@ -55,9 +58,18 @@ def _calculate_backoff_delay(
     if retry_after:
         try:
             val = float(retry_after)
-            return min(max(val, 0.5), max_delay)
+            if math.isfinite(val):
+                return min(max(val, 0.5), max_delay)
         except (ValueError, TypeError):
-            pass
+            try:
+                retry_dt = parsedate_to_datetime(str(retry_after))
+                if retry_dt.tzinfo is None:
+                    retry_dt = retry_dt.replace(tzinfo=timezone.utc)
+                delta = (retry_dt - datetime.now(timezone.utc)).total_seconds()
+                if math.isfinite(delta):
+                    return min(max(delta, 0.5), max_delay)
+            except (ValueError, TypeError, OverflowError):
+                pass
     return min(base_delay * (2 ** attempt), max_delay)
 
 
@@ -79,6 +91,8 @@ def _request_with_token_refresh(
         FeedlyAuthError: the token is expired/invalid and re-authorization is
             required. This is reported separately from connection errors
             (``requests.RequestException``) so the two are never conflated.
+        requests.RequestException: connection/timeout error on the request or
+            during token refresh.
     """
     request_func = getattr(requests, method.lower())
     kwargs["headers"] = get_feedly_headers(config["token"])
@@ -142,7 +156,12 @@ def feedly_fetch_unread(
         logger.error("Feedly未配置，无法获取未读文章")
         return None
 
-    user_id = config["user_id"]
+    token = config.get("token")
+    user_id = config.get("user_id")
+    if not token or (not stream_id and not user_id):
+        logger.error("Feedly配置缺少必要字段 (token/user_id)，无法获取未读文章")
+        return None
+
     base_url = "https://cloud.feedly.com/v3"
 
     target_stream = stream_id or f"user/{user_id}/category/global.all"
@@ -192,16 +211,33 @@ def feedly_fetch_unread(
 
             if "items" in data:
                 for entry in data["items"]:
+                    alternate = entry.get("alternate")
+                    first_alt = (
+                        alternate[0]
+                        if isinstance(alternate, list)
+                        and alternate
+                        and isinstance(alternate[0], dict)
+                        else {}
+                    )
+                    summary_obj = entry.get("summary")
+                    content_obj = entry.get("content")
+                    origin_obj = entry.get("origin")
                     article = {
                         "title": entry.get("title", "No Title"),
-                        "link": entry.get("alternate", [{}])[0].get("href", "")
-                        if entry.get("alternate")
-                        else "",
+                        "link": first_alt.get("href", ""),
                         "published": entry.get("published", 0),
-                        "summary": entry.get("summary", {}).get("content", "")
-                        or entry.get("content", {}).get("content", ""),
+                        "summary": (
+                            (summary_obj if isinstance(summary_obj, dict) else {}).get(
+                                "content", ""
+                            )
+                            or (
+                                content_obj if isinstance(content_obj, dict) else {}
+                            ).get("content", "")
+                        ),
                         "id": entry.get("id", ""),
-                        "origin": entry.get("origin", {}).get("title", ""),
+                        "origin": (
+                            origin_obj if isinstance(origin_obj, dict) else {}
+                        ).get("title", ""),
                     }
                     articles.append(article)
 

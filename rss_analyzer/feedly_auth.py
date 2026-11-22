@@ -8,6 +8,8 @@ import json
 import logging
 import os
 import secrets
+import tempfile
+import threading
 import time
 from pathlib import Path
 from urllib.parse import urlencode
@@ -70,8 +72,35 @@ def save_feedly_config(
     config_path: str | os.PathLike[str] | None = None,
 ) -> None:
     path = Path(config_path or FEEDLY_CONFIG_FILE)
-    with path.open("w", encoding="utf-8") as config_file:
-        json.dump(config, config_file, indent=2, ensure_ascii=False)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path: str | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=str(path.parent),
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as tmp_file:
+            tmp_path = tmp_file.name
+            json.dump(config, tmp_file, indent=2, ensure_ascii=False)
+            tmp_file.flush()
+            os.fsync(tmp_file.fileno())
+
+        try:
+            os.chmod(tmp_path, 0o600)
+        except OSError:
+            pass
+
+        os.replace(tmp_path, path)
+    except Exception:
+        if tmp_path:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+        raise
 
 
 def get_feedly_headers(token: str) -> dict:
@@ -199,36 +228,54 @@ def persist_token_data(
     return updated
 
 
+_REFRESH_LOCK = threading.Lock()
+
+
 def refresh_feedly_config(
     config: dict,
     config_path: str | os.PathLike[str] | None = None,
 ) -> dict | None:
-    refresh_token = config.get("refresh_token")
-    if not refresh_token:
-        logger.error(
-            "Feedly 登录已失效：token 过期且没有可用的 refresh_token，"
-            "请运行 `uv run python feedly_token.py init` 重新授权"
-        )
-        return None
+    with _REFRESH_LOCK:
+        disk_config = load_feedly_config(config_path)
+        if isinstance(disk_config, dict):
+            disk_token = disk_config.get("token")
+            current_token = config.get("token")
+            disk_expires_at = disk_config.get("token_expires_at") or 0
+            current_expires_at = config.get("token_expires_at") or 0
+            if disk_token and (
+                disk_token != current_token or disk_expires_at > current_expires_at
+            ):
+                config.clear()
+                config.update(disk_config)
+                logger.info("Feedly access_token already refreshed by another thread")
+                return config
 
-    try:
-        token_data = refresh_access_token(refresh_token)
-    except FeedlyAuthError as exc:
-        # Surface a single complete, actionable message: the refresh_token
-        # itself was rejected, so retrying will not help.
-        message = (
-            "Feedly 登录已失效：refresh_token 已被拒绝，"
-            "请运行 `uv run python feedly_token.py init` 重新授权"
-        )
-        logger.error(message)
-        raise FeedlyAuthError(message) from exc
-    except requests.RequestException as exc:
-        logger.error("Feedly token 刷新失败（网络/连接问题）: %s", exc)
-        return None
+        refresh_token = config.get("refresh_token")
+        if not refresh_token:
+            logger.error(
+                "Feedly 登录已失效：token 过期且没有可用的 refresh_token，"
+                "请运行 `uv run python feedly_token.py init` 重新授权"
+            )
+            return None
 
-    updated = apply_token_data(config, token_data)
-    config.clear()
-    config.update(updated)
-    save_feedly_config(config, config_path)
-    logger.info("Feedly access_token refreshed successfully")
-    return config
+        try:
+            token_data = refresh_access_token(refresh_token)
+        except FeedlyAuthError as exc:
+            # Surface a single complete, actionable message: the refresh_token
+            # itself was rejected, so retrying will not help.
+            message = (
+                "Feedly 登录已失效：refresh_token 已被拒绝，"
+                "请运行 `uv run python feedly_token.py init` 重新授权"
+            )
+            logger.error(message)
+            raise FeedlyAuthError(message) from exc
+        except requests.RequestException as exc:
+            logger.error("Feedly token 刷新失败（网络/连接问题）: %s", exc)
+            raise
+
+        updated = apply_token_data(config, token_data)
+        config.clear()
+        config.update(updated)
+        save_feedly_config(config, config_path)
+        logger.info("Feedly access_token refreshed successfully")
+        return config

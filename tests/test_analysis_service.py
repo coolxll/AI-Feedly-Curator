@@ -80,6 +80,48 @@ class TestArticleAnalysisService(unittest.TestCase):
         )
         self.cache_save.assert_called_once()
 
+    def test_prepare_handles_non_list_alternate(self):
+        prepared = self.service.prepare(
+            {
+                "id": "a-non-list",
+                "title": "Title",
+                "summary": "Short summary",
+                "content": "Existing short content",
+                "alternate": {"href": "https://example.com/not-a-list"},
+            }
+        )
+        self.assertEqual(prepared.url, "")
+        self.assertEqual(prepared.content, "Existing short content")
+
+    def test_prepare_preserves_short_content_when_fetch_fails_or_url_missing(self):
+        failing_service = ArticleAnalysisService(
+            fetch_content=Mock(return_value=""),
+            analyze_one=self.analyze_one,
+            analyze_batch=self.analyze_batch,
+            cache_get=self.cache_get,
+            cache_save=self.cache_save,
+        )
+        prepared_with_url = failing_service.prepare(
+            {
+                "id": "a-url",
+                "title": "Title",
+                "url": "https://example.com/post",
+                "summary": "Short summary",
+                "content": "Existing short content",
+            }
+        )
+        self.assertEqual(prepared_with_url.content, "Existing short content")
+
+        prepared_no_url = failing_service.prepare(
+            {
+                "id": "a-no-url",
+                "title": "Title",
+                "summary": "Short summary",
+                "content": "Existing short content",
+            }
+        )
+        self.assertEqual(prepared_no_url.content, "Existing short content")
+
 
 if __name__ == "__main__":
     unittest.main()

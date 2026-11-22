@@ -5,12 +5,14 @@ LLM 分析模块
 
 import json
 import logging
+import os
 import sys
 import traceback
 
 from openai import OpenAI
 
 from .config import (
+    _parse_bool,
     build_chat_completion_kwargs,
     build_openai_client_kwargs,
     get_openai_task_config,
@@ -206,7 +208,9 @@ Output Format: Markdown.
             )
         )
 
-        content = response.choices[0].message.content
+        if not response.choices:
+            return "Summarization failed: Model returned empty content"
+        content = getattr(response.choices[0].message, "content", None)
         if not content:
             return "Summarization failed: Model returned empty content"
         return content
@@ -237,12 +241,20 @@ def generate_overall_summary(analyzed_articles: list) -> str:
 
             score = analysis.get("score")
             if score is None:
-                score = article.get("score", 0.0)
+                score = article.get("score")
+            if score is None:
+                score = 0.0
+            try:
+                score = float(score)
+            except (TypeError, ValueError):
+                score = 0.0
 
             detailed_scores = analysis.get("detailed_scores")
             if not isinstance(detailed_scores, dict):
-                detailed_scores = article.get("detailed_scores", {})
-            red_flags = detailed_scores.get("red_flags") or article.get("red_flags", [])
+                detailed_scores = article.get("detailed_scores")
+            if not isinstance(detailed_scores, dict):
+                detailed_scores = {}
+            red_flags = detailed_scores.get("red_flags") or article.get("red_flags") or []
 
             if score < 3.0 or red_flags:
                 skipped_count += 1
@@ -321,82 +333,49 @@ def generate_overall_summary(analyzed_articles: list) -> str:
 """
 
         temperature = 0.7
-        extra_body = {"enable_thinking": True}
+        enable_thinking = _parse_bool(os.getenv("SUMMARY_ENABLE_THINKING"), False)
+        request_kwargs: dict = {
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": temperature,
+        }
+        if enable_thinking:
+            request_kwargs["extra_body"] = {"enable_thinking": True}
 
-        print(f"\n{'=' * 60}")
-        print("OpenAI API 请求信息:")
-        print(f"{'=' * 60}")
-        print(f"Base URL: {openai_config.base_url}")
-        print(f"Model: {openai_config.model}")
-        print(f"Temperature: {temperature}")
-        print(f"Extra Body: {json.dumps(extra_body, ensure_ascii=False)}")
-        print(
-            f"API Key: {'*' * 20}{openai_config.api_key[-8:] if openai_config.api_key else 'NOT SET'}"
+        logger.debug(
+            "Generating overall summary: base_url=%s model=%s articles=%d skipped=%d enable_thinking=%s",
+            openai_config.base_url,
+            openai_config.model,
+            len(articles_info),
+            skipped_count,
+            enable_thinking,
         )
-        print(f"\n提示词 (Prompt):\n{'-' * 60}\n{prompt}\n{'-' * 60}\n")
-
-        print("正在发送请求到 OpenAI API...")
         response = client.chat.completions.create(
-            **build_chat_completion_kwargs(
-                openai_config,
-                messages=[{"role": "user", "content": prompt}],
-                extra_body=extra_body,
-                temperature=temperature,
-            )
+            **build_chat_completion_kwargs(openai_config, **request_kwargs)
         )
 
-        print(f"\n{'=' * 60}")
-        print("OpenAI API 响应信息:")
-        print(f"{'=' * 60}")
-        print(f"Response ID: {response.id if hasattr(response, 'id') else 'N/A'}")
-        print(f"Model: {response.model if hasattr(response, 'model') else 'N/A'}")
-        print(f"Created: {response.created if hasattr(response, 'created') else 'N/A'}")
+        usage = getattr(response, "usage", None)
+        logger.debug(
+            "Overall summary response received: id=%s model=%s prompt_tokens=%s completion_tokens=%s",
+            getattr(response, "id", "N/A"),
+            getattr(response, "model", "N/A"),
+            getattr(usage, "prompt_tokens", "N/A") if usage else "N/A",
+            getattr(usage, "completion_tokens", "N/A") if usage else "N/A",
+        )
 
-        if hasattr(response, "usage") and response.usage:
-            print("\nToken 使用统计:")
-            print(
-                f"  - Prompt Tokens: {response.usage.prompt_tokens if hasattr(response.usage, 'prompt_tokens') else 'N/A'}"
-            )
-            print(
-                f"  - Completion Tokens: {response.usage.completion_tokens if hasattr(response.usage, 'completion_tokens') else 'N/A'}"
-            )
-            print(
-                f"  - Total Tokens: {response.usage.total_tokens if hasattr(response.usage, 'total_tokens') else 'N/A'}"
-            )
+        if not response.choices:
+            return "生成总结失败: 模型未返回内容"
 
-        if response.choices and len(response.choices) > 0:
-            choice = response.choices[0]
-            print("\n响应详情:")
-            print(
-                f"  - Finish Reason: {choice.finish_reason if hasattr(choice, 'finish_reason') else 'N/A'}"
-            )
-            print(f"  - Index: {choice.index if hasattr(choice, 'index') else 'N/A'}")
-
-            content = choice.message.content if hasattr(choice.message, "content") else None
-            if content:
-                print(f"\n响应内容 (前500字符):\n{'-' * 60}")
-                print(content[:500])
-                if len(content) > 500:
-                    print(f"... (总共 {len(content)} 字符)")
-                print(f"{'-' * 60}")
-            else:
-                print("\n⚠️ 警告: 响应内容为空!")
-        else:
-            print("\n⚠️ 警告: 没有返回任何选择 (choices)!")
-
-        print(f"{'=' * 60}\n")
-
-        content = response.choices[0].message.content
+        if not response.choices:
+            return "生成总结失败: 模型未返回内容"
+        content = getattr(response.choices[0].message, "content", None)
         if not content:
             return "生成总结失败: 模型未返回内容"
         return content
     except Exception as e:
-        print(f"\n{'=' * 60}")
-        print("❌ OpenAI API 调用失败:")
-        print(f"{'=' * 60}")
-        print(f"错误类型: {type(e).__name__}")
-        print(f"错误信息: {str(e)}")
-        print("\n完整堆栈跟踪:")
-        traceback.print_exc(file=sys.stderr)
-        print(f"{'=' * 60}\n")
+        logger.error(
+            "Overall summary OpenAI API call failed (%s): %s",
+            type(e).__name__,
+            e,
+            exc_info=True,
+        )
         return f"生成总结失败: {str(e)}"

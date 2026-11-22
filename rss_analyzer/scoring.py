@@ -4,6 +4,7 @@
 """
 
 import json
+import math
 import re
 import time
 import random
@@ -248,6 +249,29 @@ def build_batch_scoring_prompt(articles: list[dict]) -> str:
 """
 
 
+def _coerce_score(value: Any, default: float = 0.0) -> float:
+    """Safely coerce an LLM score value to a finite float."""
+    if isinstance(value, bool) or value is None:
+        return default
+    try:
+        coerced = float(value)
+    except (TypeError, ValueError):
+        return default
+    return coerced if math.isfinite(coerced) else default
+
+
+def _normalize_str_list(value: Any) -> list[str]:
+    """Normalize LLM list-of-strings fields (handles str, list, None, or invalid types)."""
+    if value is None:
+        return []
+    if isinstance(value, str):
+        stripped = value.strip()
+        return [stripped] if stripped else []
+    if isinstance(value, (list, tuple, set)):
+        return [item.strip() for item in value if isinstance(item, str) and item.strip()]
+    return []
+
+
 def calculate_weighted_score(
     scores: Dict[str, int], article_type: str, red_flags: list
 ) -> float:
@@ -259,14 +283,21 @@ def calculate_weighted_score(
     2. 相关性熔断机制：如果相关性过低，一票否决
     3. 优化的惩罚机制：Soft Flags 惩罚降低至0.5/项
     """
+    scores_dict = scores if isinstance(scores, dict) else {}
+    normalized_red_flags = _normalize_str_list(red_flags)
+
     # 1. 获取权重配置（现在是百分比形式）
     weights_config = PROJ_CONFIG.get("scoring_weights", {})
     weights = weights_config.get(article_type, weights_config.get("default", {}))
+    known_keys = set(SCORING_DIMENSIONS.keys()) | set(weights.keys())
 
-    # 2. 计算加权分（百分比权重，总和为1.0）
+    # 2. 计算加权分（仅计入已知维度，忽略 LLM 幻觉字段）
     weighted_score = 0.0
-    for key, score in scores.items():
-        w = weights.get(key, 0.2)  # 默认20%权重
+    for key in known_keys:
+        if key not in scores_dict:
+            continue
+        score = _coerce_score(scores_dict.get(key), default=0.0)
+        w = _coerce_score(weights.get(key, 0.2), default=0.2)
         weighted_score += score * w
         logger.debug(f"  {key}: {score} × {w} = {score * w}")
 
@@ -274,7 +305,11 @@ def calculate_weighted_score(
 
     # 3. 相关性熔断机制（一票否决）
     relevance_threshold = PROJ_CONFIG.get("relevance_threshold", 2.5)
-    relevance_score = scores.get("relevance", 5)
+    relevance_score = (
+        _coerce_score(scores_dict["relevance"], default=0.0)
+        if "relevance" in scores_dict
+        else 5.0
+    )
 
     if relevance_score < relevance_threshold:
         original_score = weighted_score
@@ -285,18 +320,18 @@ def calculate_weighted_score(
         )
 
     # 4. 负面清单处理
-    if red_flags:
+    if normalized_red_flags:
         # Hard Flags: 直接打入冷宫（最高1.0分）
-        if any(flag in HARD_RED_FLAGS for flag in red_flags):
-            logger.warning(f"🚫 Hard Flag触发: {red_flags}, 总分锁定为1.0")
+        if any(flag in HARD_RED_FLAGS for flag in normalized_red_flags):
+            logger.warning(f"🚫 Hard Flag触发: {normalized_red_flags}, 总分锁定为1.0")
             return 1.0
 
         # Soft Flags: 每项扣0.5分（原来是1.0，过于严格）
-        penalty = len(red_flags) * 0.5
+        penalty = len(normalized_red_flags) * 0.5
         original_score = weighted_score
         weighted_score = max(1.0, weighted_score - penalty)
         logger.info(
-            f"🚩 Soft Flags惩罚: {red_flags}, 扣{penalty}分, {original_score:.1f} → {weighted_score:.1f}"
+            f"🚩 Soft Flags惩罚: {normalized_red_flags}, 扣{penalty}分, {original_score:.1f} → {weighted_score:.1f}"
         )
 
     return round(weighted_score, 1)
@@ -311,26 +346,37 @@ def calibrate_score_distribution(
     why_not_higher: str,
 ) -> float:
     """压缩高分通胀，让 4.2+ 变成真正稀缺分数。"""
-    calibrated = weighted_score
-    if weighted_score >= DEFAULT_SCORE_ANCHOR:
+    normalized_red_flags = _normalize_str_list(red_flags)
+    if any(flag in HARD_RED_FLAGS for flag in normalized_red_flags):
+        return 1.0
+
+    normalized_negative_signals = _normalize_str_list(negative_signals)
+    scores_dict = scores if isinstance(scores, dict) else {}
+
+    calibrated = _coerce_score(weighted_score, default=1.0)
+    if calibrated >= DEFAULT_SCORE_ANCHOR:
         calibrated = DEFAULT_SCORE_ANCHOR + (
-            weighted_score - DEFAULT_SCORE_ANCHOR
+            calibrated - DEFAULT_SCORE_ANCHOR
         ) * 0.72
     else:
         calibrated = DEFAULT_SCORE_ANCHOR - (
-            DEFAULT_SCORE_ANCHOR - weighted_score
+            DEFAULT_SCORE_ANCHOR - calibrated
         ) * 0.9
 
-    if negative_signals:
-        calibrated -= min(1.2, len(negative_signals) * NEGATIVE_SIGNAL_PENALTY)
+    if normalized_negative_signals:
+        calibrated -= min(
+            1.2, len(normalized_negative_signals) * NEGATIVE_SIGNAL_PENALTY
+        )
 
-    if why_not_higher and why_not_higher.strip():
+    if isinstance(why_not_higher, str) and why_not_higher.strip():
         calibrated -= 0.1
 
-    relevance = scores.get("relevance", 0)
-    informativeness = scores.get("informativeness_accuracy", 0)
-    depth = scores.get("depth_opinion", 0)
-    non_redundancy = scores.get("non_redundancy", 0)
+    relevance = _coerce_score(scores_dict.get("relevance"), default=0.0)
+    informativeness = _coerce_score(
+        scores_dict.get("informativeness_accuracy"), default=0.0
+    )
+    depth = _coerce_score(scores_dict.get("depth_opinion"), default=0.0)
+    non_redundancy = _coerce_score(scores_dict.get("non_redundancy"), default=0.0)
 
     if informativeness <= 3:
         calibrated = min(calibrated, 3.8)
@@ -341,14 +387,18 @@ def calibrate_score_distribution(
     if relevance <= 3:
         calibrated = min(calibrated, 3.5)
 
+    relevance_threshold = PROJ_CONFIG.get("relevance_threshold", 2.5)
+    if relevance < relevance_threshold:
+        calibrated = min(calibrated, relevance_threshold)
+
     if weighted_score >= 4.5:
         qualifies_rare_high_score = (
             relevance >= 5
             and informativeness >= 5
             and non_redundancy >= 4
             and (depth >= 4 or article_type == "news")
-            and not red_flags
-            and not negative_signals
+            and not normalized_red_flags
+            and not normalized_negative_signals
         )
         if not qualifies_rare_high_score:
             calibrated = min(calibrated, 4.3)
@@ -369,43 +419,72 @@ def extract_json_from_response(response_text: str) -> str | None:
     2. Markdown 代码块中的 JSON
     3. 思维链后面跟着的 JSON
     """
-    # 策略1: 尝试提取 Markdown 代码块中的 JSON
-    code_block_match = re.search(
+    # 策略1: 尝试提取 Markdown 代码块中的有效 JSON（优先包含 "scores" 的对象）
+    valid_block_objects: list[tuple[str, dict]] = []
+    for match in re.finditer(
         r"```(?:json)?\s*(\{.*?\})\s*```", response_text, re.DOTALL
-    )
-    if code_block_match:
-        return code_block_match.group(1)
+    ):
+        candidate = match.group(1)
+        try:
+            parsed = json.loads(candidate)
+            if isinstance(parsed, dict):
+                valid_block_objects.append((candidate, parsed))
+        except json.JSONDecodeError:
+            continue
+
+    if valid_block_objects:
+        for candidate, parsed in reversed(valid_block_objects):
+            if "scores" in parsed:
+                return candidate
+        return valid_block_objects[-1][0]
 
     # 策略2: 找到所有完整的 JSON 对象，取最后一个（通常思维链在前，JSON在后）
-    # 使用非贪婪匹配，找每个独立的 {...} 块
-    json_objects = []
+    # 跟踪字符串与转义状态，避免字符串内部的 { / } 干扰大括号深度，并忽略 depth == 0 时的孤立 }
+    json_objects: list[tuple[str, dict]] = []
     depth = 0
     start_idx = None
+    in_string = False
+    escape = False
 
     for i, char in enumerate(response_text):
-        if char == "{":
+        if in_string:
+            if escape:
+                escape = False
+            elif char == "\\":
+                escape = True
+            elif char == '"':
+                in_string = False
+            continue
+
+        if char == '"':
+            if depth > 0:
+                in_string = True
+        elif char == "{":
             if depth == 0:
                 start_idx = i
             depth += 1
         elif char == "}":
+            if depth == 0:
+                continue
             depth -= 1
             if depth == 0 and start_idx is not None:
                 candidate = response_text[start_idx : i + 1]
-                # 验证是否是有效 JSON
+                # 验证是否是有效 JSON 对象
                 try:
-                    json.loads(candidate)
-                    json_objects.append(candidate)
+                    parsed = json.loads(candidate)
+                    if isinstance(parsed, dict):
+                        json_objects.append((candidate, parsed))
                 except json.JSONDecodeError:
                     pass
                 start_idx = None
 
     if json_objects:
         # 优先返回包含 "scores" 字段的 JSON（这是我们期望的格式）
-        for obj in reversed(json_objects):
-            if '"scores"' in obj:
-                return obj
+        for candidate, parsed in reversed(json_objects):
+            if "scores" in parsed:
+                return candidate
         # 否则返回最后一个有效 JSON
-        return json_objects[-1]
+        return json_objects[-1][0]
 
     # 策略3: 回退到原来的贪婪匹配（兼容性）
     json_match = re.search(r"\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}", response_text, re.DOTALL)
@@ -417,13 +496,18 @@ def extract_json_from_response(response_text: str) -> str | None:
 
 def extract_json_array_from_response(response_text: str) -> str | None:
     """从 LLM 响应中提取 JSON 数组，支持 markdown 代码块和智能边界识别。"""
-    # 策略1: 尝试提取 Markdown 代码块 (更宽松的正则)
-    # 匹配 ```json ... ``` 或 ``` ... ```
-    code_block_match = re.search(r"```(?:json)?\s*(.*?)```", response_text, re.DOTALL)
-    if code_block_match:
+    # 策略1: 尝试提取 Markdown 代码块 (更宽松的正则)，并验证其为有效 JSON 数组
+    for code_block_match in re.finditer(
+        r"```(?:json)?\s*(.*?)```", response_text, re.DOTALL
+    ):
         content = code_block_match.group(1).strip()
         if content.startswith("[") and content.endswith("]"):
-            return content
+            try:
+                parsed = json.loads(content)
+                if isinstance(parsed, list):
+                    return content
+            except json.JSONDecodeError:
+                continue
 
     # 策略2: 智能寻找最外层的 [] 对，且忽略字符串内的括号
     # 这比简单的深度计数更健壮，能处理 [{"title": "文章[1]"}] 这种情况
@@ -460,12 +544,12 @@ def extract_json_array_from_response(response_text: str) -> str | None:
                         candidate = response_text[start : i + 1]
                         try:
                             # 验证是否为有效 JSON
-                            json.loads(candidate)
-                            candidates.append(candidate)
-                            # 找到一个有效的就跳出内层循环，继续找下一个可能的起点（虽然通常只要找到最大的那个就行）
-                            break
+                            parsed = json.loads(candidate)
+                            if isinstance(parsed, list):
+                                candidates.append(candidate)
                         except json.JSONDecodeError:
                             pass
+                        break
 
     if candidates:
         # 返回最长的那个（通常是最外层的）
@@ -476,10 +560,16 @@ def extract_json_array_from_response(response_text: str) -> str | None:
 
 def _score_from_data(data: Dict[str, Any]) -> Dict[str, Any]:
     """从已解析的 JSON 数据生成评分结果。"""
-    scores = data.get("scores", {})
+    if not isinstance(data, dict):
+        raise ValueError("Score payload must be a JSON object")
+    scores = data.get("scores")
+    if not isinstance(scores, dict):
+        raise ValueError("Score payload 'scores' field must be a JSON object")
     article_type = data.get("article_type", "default")
-    red_flags = data.get("red_flags", [])
-    negative_signals = data.get("negative_signals", [])
+    if not isinstance(article_type, str) or not article_type.strip():
+        article_type = "default"
+    red_flags = _normalize_str_list(data.get("red_flags", []))
+    negative_signals = _normalize_str_list(data.get("negative_signals", []))
     analysis_text = data.get("analysis", "")
     why_not_higher = data.get("why_not_higher", "")
 
@@ -507,11 +597,13 @@ def _score_from_data(data: Dict[str, Any]) -> Dict[str, Any]:
 
     return {
         "status": "success",
-        "relevance_score": scores.get("relevance", 0),
-        "informativeness_accuracy_score": scores.get("informativeness_accuracy", 0),
-        "depth_opinion_score": scores.get("depth_opinion", 0),
-        "readability_score": scores.get("readability", 0),
-        "non_redundancy_score": scores.get("non_redundancy", 0),
+        "relevance_score": _coerce_score(scores.get("relevance"), default=0),
+        "informativeness_accuracy_score": _coerce_score(
+            scores.get("informativeness_accuracy"), default=0
+        ),
+        "depth_opinion_score": _coerce_score(scores.get("depth_opinion"), default=0),
+        "readability_score": _coerce_score(scores.get("readability"), default=0),
+        "non_redundancy_score": _coerce_score(scores.get("non_redundancy"), default=0),
         "weighted_score": weighted_score,
         "overall_score": overall_score,
         "verdict": verdict,
@@ -587,6 +679,9 @@ def score_article(title: str, summary: str, content: str) -> Dict[str, Any]:
             )
         )
 
+        if not response.choices:
+            return _default_error_result("模型返回为空")
+
         response_text = response.choices[0].message.content
         log_debug("Scoring Response", response_text)
 
@@ -656,10 +751,24 @@ def parse_batch_score_response(
         for item in data:
             if not isinstance(item, dict):
                 continue
-            index = item.get("index")
-            score_result = _score_from_data(item)
-            if index is not None:
-                results_by_index[index] = score_result
+            raw_index = item.get("index")
+            if raw_index is None or isinstance(raw_index, bool):
+                continue
+            try:
+                index = int(raw_index)
+            except (TypeError, ValueError):
+                logger.warning("Skipping batch item with invalid index: %r", raw_index)
+                continue
+            try:
+                score_result = _score_from_data(item)
+            except Exception as item_err:
+                logger.warning(
+                    "Skipping malformed batch score item at index %d: %s",
+                    index,
+                    item_err,
+                )
+                continue
+            results_by_index[index] = score_result
 
         if not results_by_index:
             return None
@@ -687,20 +796,16 @@ def parse_batch_score_response(
 
 def _robust_parse_objects(text: str) -> list[dict]:
     """
-    从可能截断的文本中尽可能多地提取 JSON 对象。
-    原理：查找所有 {"index": ...} 模式的块，尝试解析。
+    从可能截断的文本中尽可能多地提取包含 "index" 字段的 JSON 对象（不依赖键顺序）。
     """
     objects = []
-    # 查找所有潜在的对象起始点
-    # 假设每个对象都以 {"index": 开头（受 prompt 约束）
-    # 或者通用的 { ... }
-
-    # 简单策略：按 '{"index":' 分割，或者使用非贪婪正则提取
-    # 注意：正则可能无法处理嵌套大括号，所以这里使用一个简单的栈式解析器扫描
-
-    start_indices = [m.start() for m in re.finditer(r'\{\s*"index"', text)]
+    start_indices = [m.start() for m in re.finditer(r"\{", text)]
+    last_end = -1
 
     for start in start_indices:
+        if start < last_end:
+            continue
+
         # 尝试从 start 开始向后寻找合法的闭合 }
         depth = 0
         in_string = False
@@ -727,7 +832,9 @@ def _robust_parse_objects(text: str) -> list[dict]:
                         candidate = text[start : i + 1]
                         try:
                             obj = json.loads(candidate)
-                            objects.append(obj)
+                            if isinstance(obj, dict) and "index" in obj:
+                                objects.append(obj)
+                                last_end = i + 1
                         except Exception:
                             pass
                         break  # 跳出内层循环，处理下一个 start
@@ -763,6 +870,10 @@ def score_articles_batch(
                     max_tokens=16000,  # Explicitly set high limit for Gemini
                 )
             )
+
+            if not response.choices:
+                logger.warning(f"Batch attempt {attempt + 1} failed: Empty choices")
+                continue
 
             response_text = response.choices[0].message.content
             log_debug(f"Batch Scoring Response (Attempt {attempt + 1})", response_text)

@@ -246,6 +246,39 @@ class TestConfig(unittest.TestCase):
             self.assertEqual(config.http_url, "https://chroma.example:9443")
             self.assertEqual(config.state_dir, "state-dir")
 
+    def test_get_vector_store_config_uses_host_port_ssl_when_url_unset(self):
+        with patch.dict(
+            os.environ,
+            {
+                "RSS_VECTOR_BACKEND": "http",
+                "RSS_VECTOR_HTTP_HOST": "chroma.internal",
+                "RSS_VECTOR_HTTP_PORT": "9001",
+                "RSS_VECTOR_HTTP_SSL": "true",
+            },
+            clear=True,
+        ):
+            config = get_vector_store_config()
+            self.assertEqual(config.backend, "http")
+            self.assertEqual(config.http_host, "chroma.internal")
+            self.assertEqual(config.http_port, 9001)
+            self.assertTrue(config.http_ssl)
+            self.assertEqual(config.http_url, "https://chroma.internal:9001")
+
+    def test_get_vector_store_config_guards_invalid_url_port(self):
+        with patch.dict(
+            os.environ,
+            {
+                "RSS_VECTOR_BACKEND": "http",
+                "RSS_VECTOR_HTTP_URL": "http://chroma.example:notaport",
+            },
+            clear=True,
+        ):
+            with self.assertLogs("rss_analyzer.config", level="WARNING"):
+                config = get_vector_store_config()
+            self.assertEqual(config.http_host, "chroma.example")
+            self.assertEqual(config.http_port, 80)
+            self.assertEqual(config.http_url, "http://chroma.example:80")
+
     def test_is_vector_store_enabled_uses_config_default(self):
         with patch.dict(os.environ, {}, clear=True):
             self.assertTrue(is_vector_store_enabled())
@@ -256,6 +289,58 @@ class TestConfig(unittest.TestCase):
 
     def test_is_vector_store_enabled_supports_legacy_alias(self):
         with patch.dict(os.environ, {"ENABLE_VECTOR_STORE": "0"}, clear=True):
+            self.assertFalse(is_vector_store_enabled())
+
+    def test_get_config_treats_blank_env_vars_as_unset(self):
+        with patch.dict(
+            os.environ,
+            {
+                "ANALYSIS_OPENAI_MODEL": "   ",
+                "OPENAI_MODEL": "global-model",
+            },
+            clear=True,
+        ):
+            self.assertEqual(
+                get_config("OPENAI_MODEL", default="fallback", task="analysis"),
+                "global-model",
+            )
+
+        with patch.dict(
+            os.environ,
+            {
+                "ANALYSIS_OPENAI_MODEL": "",
+                "OPENAI_MODEL": "  ",
+            },
+            clear=True,
+        ):
+            self.assertEqual(
+                get_config("OPENAI_MODEL", default="fallback", task="analysis"),
+                "fallback",
+            )
+
+    def test_get_embedding_and_vector_config_treat_blank_env_vars_as_unset(self):
+        with patch.dict(
+            os.environ,
+            {
+                "EMBEDDING_API_KEY": "  ",
+                "OPENAI_API_KEY": "shared-key",
+                "EMBEDDING_BASE_URL": "",
+                "EMBEDDING_MODEL": "   ",
+                "RSS_VECTOR_DB_DIR": "  ",
+                "RSS_VECTOR_STATE_DIR": "",
+                "RSS_ENABLE_VECTOR_STORE": "  ",
+                "ENABLE_VECTOR_STORE": "0",
+            },
+            clear=True,
+        ):
+            emb = get_embedding_config()
+            self.assertEqual(emb.api_key, "shared-key")
+            self.assertEqual(emb.base_url, EMBEDDING_DEFAULT_BASE_URL)
+            self.assertEqual(emb.model, EMBEDDING_DEFAULT_MODEL)
+
+            vec = get_vector_store_config()
+            self.assertTrue(vec.persist_dir.endswith("chroma_db"))
+            self.assertTrue(vec.state_dir.endswith("vector_store_state"))
             self.assertFalse(is_vector_store_enabled())
 
 

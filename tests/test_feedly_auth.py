@@ -128,6 +128,80 @@ class TestFeedlyAuth(unittest.TestCase):
                 feedly_auth.load_feedly_config(config_path)["token"], "new-access"
             )
 
+    def test_save_feedly_config_atomic_leaves_no_temp_files(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "feedly.json"
+            feedly_auth.save_feedly_config({"token": "atomic-token"}, config_path)
+
+            files = [p.name for p in Path(temp_dir).iterdir()]
+            self.assertEqual(files, ["feedly.json"])
+            self.assertEqual(
+                feedly_auth.load_feedly_config(config_path)["token"], "atomic-token"
+            )
+
+    def test_refresh_config_propagates_request_exception(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "feedly.json"
+            original = {
+                "token": "old-access",
+                "refresh_token": "old-refresh",
+                "user_id": "user-1",
+            }
+            config_path.write_text(json.dumps(original), encoding="utf-8")
+
+            with patch(
+                "rss_analyzer.feedly_auth.refresh_access_token",
+                side_effect=requests.ConnectionError("network down"),
+            ):
+                with self.assertRaises(requests.ConnectionError):
+                    feedly_auth.refresh_feedly_config(original, config_path)
+
+    def test_refresh_config_concurrent_deduplicates_refresh(self):
+        import threading
+        import time
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "feedly.json"
+            initial = {
+                "token": "old-access",
+                "refresh_token": "old-refresh",
+                "user_id": "user-1",
+            }
+            config_path.write_text(json.dumps(initial), encoding="utf-8")
+
+            call_count = 0
+            barrier = threading.Barrier(2)
+
+            def slow_refresh(_rt):
+                nonlocal call_count
+                call_count += 1
+                time.sleep(0.05)
+                return {"access_token": "fresh-access", "expires_in": 3600}
+
+            cfg_a = dict(initial)
+            cfg_b = dict(initial)
+            results: list[dict | None] = []
+
+            def worker(cfg):
+                barrier.wait()
+                results.append(feedly_auth.refresh_feedly_config(cfg, config_path))
+
+            with patch(
+                "rss_analyzer.feedly_auth.refresh_access_token",
+                side_effect=slow_refresh,
+            ):
+                t1 = threading.Thread(target=worker, args=(cfg_a,))
+                t2 = threading.Thread(target=worker, args=(cfg_b,))
+                t1.start()
+                t2.start()
+                t1.join()
+                t2.join()
+
+            self.assertEqual(call_count, 1)
+            self.assertEqual(cfg_a["token"], "fresh-access")
+            self.assertEqual(cfg_b["token"], "fresh-access")
+            self.assertEqual(len(results), 2)
+
 
 if __name__ == "__main__":
     unittest.main()

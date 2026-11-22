@@ -124,6 +124,43 @@ class TestFeedlyMarkRead(unittest.TestCase):
             "OAuth new_token",
         )
 
+    @patch("rss_analyzer.feedly_client.refresh_feedly_config")
+    @patch("rss_analyzer.feedly_client.load_feedly_config")
+    @patch("rss_analyzer.feedly_client.requests.post")
+    def test_mark_read_does_not_convert_refresh_network_error_to_auth_error(
+        self, mock_post, mock_config, mock_refresh
+    ):
+        """Transient RequestException during 401 refresh must not become FeedlyAuthError."""
+        import requests
+
+        mock_config.return_value = {
+            "token": "old_token",
+            "refresh_token": "refresh_token",
+            "user_id": "user_id",
+        }
+        mock_post.return_value = MagicMock(status_code=401, text="Unauthorized")
+        mock_refresh.side_effect = requests.Timeout("refresh timed out")
+
+        # feedly_mark_read catches RequestException and returns False (does NOT raise FeedlyAuthError)
+        result = feedly_mark_read("article_id")
+        self.assertFalse(result)
+
+    @patch("rss_analyzer.feedly_client.refresh_feedly_config")
+    @patch("rss_analyzer.feedly_client.requests.get")
+    def test_request_with_token_refresh_propagates_request_exception(
+        self, mock_get, mock_refresh
+    ):
+        import requests
+        from rss_analyzer.feedly_client import _request_with_token_refresh
+
+        mock_get.return_value = MagicMock(status_code=401, text="Unauthorized")
+        mock_refresh.side_effect = requests.ConnectionError("dns failure")
+
+        with self.assertRaises(requests.ConnectionError):
+            _request_with_token_refresh(
+                "GET", "https://example.com/api", {"token": "old_token"}
+            )
+
     @patch("rss_analyzer.feedly_client.load_feedly_config")
     @patch("rss_analyzer.feedly_client.requests.post")
     def test_mark_read_logs_success(self, mock_post, mock_config):
@@ -164,6 +201,39 @@ class TestFeedlyFetchUnread(unittest.TestCase):
         self.assertEqual(articles[1]["id"], "entry-2")
         self.assertEqual(mock_request.call_count, 2)
 
+    @patch("rss_analyzer.feedly_client.load_feedly_config")
+    @patch("rss_analyzer.feedly_client._request_with_token_refresh")
+    def test_fetch_unread_handles_null_entry_fields(self, mock_request, mock_config):
+        mock_config.return_value = {"user_id": "u123", "token": "tok"}
+        resp = MagicMock(status_code=200)
+        resp.json.return_value = {
+            "items": [
+                {
+                    "id": "entry-null",
+                    "title": "Null Fields",
+                    "alternate": None,
+                    "summary": None,
+                    "content": None,
+                    "origin": None,
+                }
+            ]
+        }
+        mock_request.return_value = resp
+
+        articles = feedly_fetch_unread(limit=5)
+        self.assertEqual(len(articles), 1)
+        self.assertEqual(articles[0]["link"], "")
+        self.assertEqual(articles[0]["summary"], "")
+        self.assertEqual(articles[0]["origin"], "")
+
+    @patch("rss_analyzer.feedly_client.load_feedly_config")
+    def test_fetch_unread_validates_missing_user_id_or_token(self, mock_config):
+        mock_config.return_value = {"token": "tok"}
+        self.assertIsNone(feedly_fetch_unread())
+
+        mock_config.return_value = {"user_id": "u123"}
+        self.assertIsNone(feedly_fetch_unread())
+
 
 class TestFeedlyRateLimitAndBackoff(unittest.TestCase):
     """测试 429 限流重试与退避机制"""
@@ -193,6 +263,27 @@ class TestFeedlyRateLimitAndBackoff(unittest.TestCase):
         resp.headers = {}
         delay = _calculate_backoff_delay(resp, attempt=10, base_delay=2.0, max_delay=30.0)
         self.assertEqual(delay, 30.0)
+
+    def test_calculate_backoff_delay_rejects_nan_and_inf(self):
+        from rss_analyzer.feedly_client import _calculate_backoff_delay
+
+        for bad_val in ("nan", "inf", "-inf", "Infinity"):
+            resp = MagicMock()
+            resp.headers = {"Retry-After": bad_val}
+            delay = _calculate_backoff_delay(resp, attempt=1, base_delay=2.0, max_delay=30.0)
+            self.assertEqual(delay, 4.0)
+
+    def test_calculate_backoff_delay_supports_http_date(self):
+        from datetime import datetime, timedelta, timezone
+        from email.utils import format_datetime
+        from rss_analyzer.feedly_client import _calculate_backoff_delay
+
+        future_dt = datetime.now(timezone.utc) + timedelta(seconds=12)
+        resp = MagicMock()
+        resp.headers = {"Retry-After": format_datetime(future_dt, usegmt=True)}
+        delay = _calculate_backoff_delay(resp, attempt=0, base_delay=2.0, max_delay=60.0)
+        self.assertGreaterEqual(delay, 8.0)
+        self.assertLessEqual(delay, 15.0)
 
     @patch("rss_analyzer.feedly_client.time.sleep")
     @patch("rss_analyzer.feedly_client.requests.get")

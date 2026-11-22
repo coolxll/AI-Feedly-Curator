@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 import concurrent.futures
+import ipaddress
 import logging
 import os
+import socket
+from collections.abc import Mapping
 from typing import Callable
+from urllib.parse import urlparse
 
 import requests
 
@@ -11,7 +15,19 @@ from .config import PROJ_CONFIG, get_max_content_chars
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_MAX_RESPONSE_BYTES = 5 * 1024 * 1024  # 5 MB
+_BLOCKED_CONTENT_TYPE_PREFIXES = ("audio/", "video/", "image/")
+_BLOCKED_CONTENT_TYPES = frozenset(
+    {
+        "application/octet-stream",
+        "application/pdf",
+        "application/zip",
+        "application/gzip",
+    }
+)
+
 __all__ = [
+    "DEFAULT_MAX_RESPONSE_BYTES",
     "fetch_article_content",
     "fetch_articles_content_concurrently",
 ]
@@ -82,6 +98,155 @@ def _truncate_content(content: str, url: str) -> str:
     return content[:limit]
 
 
+def _get_max_response_bytes() -> int:
+    default = int(PROJ_CONFIG.get("max_fetch_bytes", DEFAULT_MAX_RESPONSE_BYTES))
+    raw = os.getenv("RSS_MAX_FETCH_BYTES")
+    if raw is None or not str(raw).strip():
+        return default
+    try:
+        value = int(str(raw).strip())
+        return value if value > 0 else default
+    except (TypeError, ValueError):
+        return default
+
+
+_FAKE_IP_NETWORK = ipaddress.ip_network("198.18.0.0/15")
+
+
+def _is_blocked_ip(
+    ip: ipaddress.IPv4Address | ipaddress.IPv6Address,
+    *,
+    allow_fake_ip: bool = False,
+) -> bool:
+    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
+        ip = ip.ipv4_mapped
+    if allow_fake_ip and isinstance(ip, ipaddress.IPv4Address) and ip in _FAKE_IP_NETWORK:
+        return False
+    return (
+        ip.is_private
+        or ip.is_loopback
+        or ip.is_link_local
+        or ip.is_multicast
+        or ip.is_reserved
+        or ip.is_unspecified
+    )
+
+
+def _validate_fetch_url(url: str) -> str | None:
+    """Validate URL scheme and guard against SSRF to private/reserved hosts.
+
+    Returns an error message string if rejected, or None if allowed.
+    """
+    try:
+        parsed = urlparse(url)
+    except ValueError:
+        return "错误: 无效的 URL"
+
+    scheme = (parsed.scheme or "").lower()
+    if scheme not in ("http", "https"):
+        return f"安全限制: 仅支持 http/https 协议 ({scheme or 'empty'})"
+
+    hostname = (parsed.hostname or "").strip().lower().rstrip(".")
+    if not hostname:
+        return "错误: URL 缺少主机名"
+
+    if (
+        hostname == "localhost"
+        or hostname.endswith(".local")
+        or hostname.endswith(".localhost")
+        or hostname.endswith(".internal")
+    ):
+        return f"安全限制: 禁止访问本地或内网地址 ({hostname})"
+
+    # If hostname is an IP literal, reject blocked ranges immediately.
+    try:
+        ip = ipaddress.ip_address(hostname)
+    except ValueError:
+        ip = None
+
+    if ip is not None:
+        if _is_blocked_ip(ip):
+            return f"安全限制: 禁止访问内网或保留 IP ({hostname})"
+        return None
+
+    # Resolve domain name; tolerate DNS failure gracefully (e.g. offline/mocked tests).
+    port = parsed.port or (443 if scheme == "https" else 80)
+    try:
+        addr_info = socket.getaddrinfo(hostname, port, type=socket.SOCK_STREAM)
+    except (socket.gaierror, OSError):
+        return None
+
+    for _family, _type, _proto, _canonname, sockaddr in addr_info:
+        if not sockaddr:
+            continue
+        try:
+            resolved_ip = ipaddress.ip_address(sockaddr[0])
+        except ValueError:
+            continue
+        if _is_blocked_ip(resolved_ip, allow_fake_ip=True):
+            return f"安全限制: 目标域名解析到内网或保留地址 ({hostname} -> {resolved_ip})"
+
+    return None
+
+
+def _extract_content_type(response: object) -> str:
+    headers = getattr(response, "headers", None)
+    if not isinstance(headers, Mapping):
+        return ""
+    raw_ct = headers.get("Content-Type") or headers.get("content-type") or ""
+    if not isinstance(raw_ct, str):
+        return ""
+    return raw_ct.split(";", 1)[0].strip().lower()
+
+
+def _is_blocked_content_type(content_type: str) -> bool:
+    if not content_type:
+        return False
+    return content_type.startswith(_BLOCKED_CONTENT_TYPE_PREFIXES) or (
+        content_type in _BLOCKED_CONTENT_TYPES
+    )
+
+
+def _read_response_bytes(response: object, max_bytes: int) -> bytes:
+    """Stream response body up to max_bytes, raising ValueError if exceeded."""
+    headers = getattr(response, "headers", None)
+    if isinstance(headers, Mapping):
+        raw_len = headers.get("Content-Length") or headers.get("content-length")
+        if raw_len is not None:
+            try:
+                if int(str(raw_len).strip()) > max_bytes:
+                    raise ValueError(f"响应体超过大小限制 ({max_bytes} 字节)")
+            except (TypeError, ValueError) as exc:
+                if "大小限制" in str(exc):
+                    raise
+
+    iter_content = getattr(response, "iter_content", None)
+    if callable(iter_content):
+        chunks_iter = iter_content(chunk_size=65536)
+        try:
+            iterator = iter(chunks_iter)
+        except TypeError:
+            iterator = None
+
+        if iterator is not None:
+            buf = bytearray()
+            for chunk in iterator:
+                if not chunk:
+                    continue
+                buf.extend(chunk)
+                if len(buf) > max_bytes:
+                    raise ValueError(f"响应体超过大小限制 ({max_bytes} 字节)")
+            if buf or isinstance(response, requests.Response):
+                return bytes(buf)
+
+    raw_content = getattr(response, "content", b"")
+    if isinstance(raw_content, (bytes, bytearray)):
+        if len(raw_content) > max_bytes:
+            raise ValueError(f"响应体超过大小限制 ({max_bytes} 字节)")
+        return bytes(raw_content)
+    return b""
+
+
 def fetch_article_content(url: str) -> str:
     """
     获取文章内容 - 使用 trafilatura 增强提取能力
@@ -92,9 +257,17 @@ def fetch_article_content(url: str) -> str:
     Returns:
         文章正文内容
     """
+    if not isinstance(url, str) or not url.strip():
+        return "错误: 无效的 URL"
+    url = url.strip()
+
     # 特定域名跳过抓取
     if "weixin.sogou.com" in url:
         return "内容跳过: 微信链接通常无法直接抓取，仅基于标题摘要分析"
+
+    validation_error = _validate_fetch_url(url)
+    if validation_error:
+        return validation_error
 
     try:
         # 尝试导入 trafilatura
@@ -109,6 +282,8 @@ def fetch_article_content(url: str) -> str:
             or os.getenv("HTTPS_PROXY")
             or PROJ_CONFIG.get("proxy")
         )
+        if proxy and "://" not in proxy:
+            proxy = f"http://{proxy}"
         proxies = {"http": proxy, "https": proxy} if proxy else None
 
         headers = {
@@ -117,15 +292,38 @@ def fetch_article_content(url: str) -> str:
             "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
         }
 
+        max_bytes = _get_max_response_bytes()
+
         # 直接使用 requests 获取，确保代理生效
+        response = None
         try:
-            response = requests.get(url, headers=headers, proxies=proxies, timeout=15)
-            if response.status_code == 200:
-                downloaded = response.content
-            else:
+            response = requests.get(
+                url, headers=headers, proxies=proxies, timeout=15, stream=True
+            )
+            if response.status_code != 200:
                 return f"获取失败: HTTP {response.status_code}"
+
+            final_url = getattr(response, "url", None)
+            if isinstance(final_url, str) and final_url.strip():
+                redirect_error = _validate_fetch_url(final_url.strip())
+                if redirect_error:
+                    return redirect_error
+
+            content_type = _extract_content_type(response)
+            if _is_blocked_content_type(content_type):
+                return f"内容跳过: 不支持的内容类型 ({content_type})"
+
+            try:
+                downloaded = _read_response_bytes(response, max_bytes)
+            except ValueError as size_err:
+                return f"获取失败: {size_err}"
         except Exception as req_err:
             return f"请求异常: {str(req_err)}"
+        finally:
+            if response is not None:
+                close_fn = getattr(response, "close", None)
+                if callable(close_fn):
+                    close_fn()
 
         # 提取正文
         if downloaded:

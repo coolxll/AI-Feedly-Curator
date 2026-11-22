@@ -109,6 +109,109 @@ class TestLLMAnalyzer(unittest.TestCase):
         self.assertEqual(result, "## 测试总结报告\n推荐阅读。")
         self.assertTrue(mock_client.chat.completions.create.called)
 
+    @patch("rss_analyzer.llm_analyzer.OpenAI")
+    def test_generate_overall_summary_extra_body_opt_in_and_no_stdout_leak(
+        self, mock_openai_cls
+    ):
+        import io
+        import os
+        from contextlib import redirect_stdout
+        from unittest.mock import MagicMock
+        from rss_analyzer.llm_analyzer import generate_overall_summary
+
+        mock_client = MagicMock()
+        mock_choice = MagicMock()
+        mock_choice.message.content = "## Report"
+        mock_response = MagicMock(choices=[mock_choice])
+        mock_client.chat.completions.create.return_value = mock_response
+        mock_openai_cls.return_value = mock_client
+
+        articles = [{"title": "Good", "score": 4.2, "summary": "Nice"}]
+
+        buf = io.StringIO()
+        with patch.dict(
+            os.environ, {"OPENAI_API_KEY": "sk-supersecret12345678"}, clear=True
+        ):
+            with redirect_stdout(buf):
+                result = generate_overall_summary(articles)
+
+        self.assertEqual(result, "## Report")
+        self.assertEqual(buf.getvalue(), "")
+        self.assertNotIn("extra_body", mock_client.chat.completions.create.call_args.kwargs)
+
+        with patch.dict(
+            os.environ,
+            {
+                "OPENAI_API_KEY": "sk-supersecret12345678",
+                "SUMMARY_ENABLE_THINKING": "1",
+            },
+            clear=True,
+        ):
+            generate_overall_summary(articles)
+
+        self.assertEqual(
+            mock_client.chat.completions.create.call_args.kwargs.get("extra_body"),
+            {"enable_thinking": True},
+        )
+
+    @patch("rss_analyzer.llm_analyzer.OpenAI")
+    def test_generate_overall_summary_handles_none_score_and_bad_detailed_scores(
+        self, mock_openai_cls
+    ):
+        from unittest.mock import MagicMock
+        from rss_analyzer.llm_analyzer import generate_overall_summary
+
+        mock_client = MagicMock()
+        mock_choice = MagicMock()
+        mock_choice.message.content = "## Clean Report"
+        mock_client.chat.completions.create.return_value = MagicMock(
+            choices=[mock_choice]
+        )
+        mock_openai_cls.return_value = mock_client
+
+        articles = [
+            {
+                "title": "Failed article",
+                "score": None,
+                "detailed_scores": None,
+                "analysis": {"score": None, "detailed_scores": "invalid"},
+            },
+            {
+                "title": "Valid article",
+                "score": 4.1,
+                "detailed_scores": None,
+                "summary": "Solid read",
+            },
+        ]
+        result = generate_overall_summary(articles)
+        self.assertEqual(result, "## Clean Report")
+
+    @patch("rss_analyzer.llm_analyzer.OpenAI")
+    def test_summarize_article_handles_empty_choices(self, mock_openai_cls):
+        from unittest.mock import MagicMock
+        from rss_analyzer.llm_analyzer import summarize_single_article
+
+        mock_client = MagicMock()
+        mock_client.chat.completions.create.return_value = MagicMock(choices=[])
+        mock_openai_cls.return_value = mock_client
+
+        result = summarize_single_article("Some article content")
+        self.assertIn("Summarization failed", result)
+
+    @patch("rss_analyzer.llm_analyzer.OpenAI")
+    def test_generate_overall_summary_handles_empty_choices(self, mock_openai_cls):
+        from unittest.mock import MagicMock
+        from rss_analyzer.llm_analyzer import generate_overall_summary
+
+        mock_client = MagicMock()
+        mock_client.chat.completions.create.return_value = MagicMock(choices=[])
+        mock_openai_cls.return_value = mock_client
+
+        result = generate_overall_summary(
+            [{"title": "Good", "score": 4.2, "summary": "Solid read"}]
+        )
+        self.assertIn("生成总结失败", result)
+
 
 if __name__ == "__main__":
     unittest.main()

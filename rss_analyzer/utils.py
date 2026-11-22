@@ -3,10 +3,12 @@
 通用工具函数
 """
 
+import html
 import json
+import os
 from pathlib import Path
 import re
-import html
+import tempfile
 
 
 def strip_html_tags(text: str) -> str:
@@ -41,7 +43,7 @@ def is_newsflash(article: dict) -> bool:
     判断依据:
     - URL包含 '36kr.com/newsflashes/'
     """
-    url = article.get("link", "")
+    url = article.get("link") or ""
 
     # 36kr 快讯 URL 特征: https://36kr.com/newsflashes/3623085116474372
     return "36kr.com/newsflashes/" in url
@@ -71,5 +73,18 @@ def save_articles(articles: list, json_file: str) -> None:
     """
     output_path = Path(json_file)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    with output_path.open("w", encoding="utf-8") as f:
-        json.dump(articles, f, ensure_ascii=False, indent=2)
+    fd, tmp_path = tempfile.mkstemp(
+        dir=output_path.parent,
+        prefix=f".{output_path.name}.",
+        suffix=".tmp",
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(articles, f, ensure_ascii=False, indent=2)
+        os.replace(tmp_path, output_path)
+    except BaseException:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise

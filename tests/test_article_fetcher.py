@@ -124,6 +124,104 @@ class TestArticleFetcher(unittest.TestCase):
         self.assertIn("处理异常", results["https://example.com/fail"])
         self.assertIn("Network boom", results["https://example.com/fail"])
 
+    def test_invalid_or_empty_url_rejected(self):
+        """测试空或非字符串 URL 安全返回错误"""
+        for bad_url in (None, "", "   ", 123):
+            result = fetch_article_content(bad_url)  # type: ignore[arg-type]
+            self.assertIn("无效", result)
+
+    @patch("rss_analyzer.article_fetcher.requests.get")
+    def test_proxy_normalization_and_stream_enabled(self, mock_get):
+        """测试无协议前缀的代理自动补全 http:// 并启用 stream=True"""
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.url = "https://example.com/post"
+        mock_response.headers = {"Content-Type": "text/html; charset=utf-8"}
+        mock_response.iter_content.return_value = iter([b"<html><body>Hi</body></html>"])
+        mock_get.return_value = mock_response
+
+        with patch.dict(os.environ, {"HTTP_PROXY": "127.0.0.1:7890"}, clear=True):
+            with patch("trafilatura.extract", return_value="Hi"):
+                result = fetch_article_content("https://example.com/post")
+
+        self.assertEqual(result, "Hi")
+        call_kwargs = mock_get.call_args.kwargs
+        self.assertEqual(
+            call_kwargs["proxies"],
+            {"http": "http://127.0.0.1:7890", "https": "http://127.0.0.1:7890"},
+        )
+        self.assertTrue(call_kwargs["stream"])
+
+    @patch("rss_analyzer.article_fetcher.requests.get")
+    def test_ssrf_blocks_non_http_and_private_targets(self, mock_get):
+        """测试 SSRF 防护拦截非 http(s) 协议与私网/回环地址"""
+        blocked_urls = [
+            "file:///etc/passwd",
+            "ftp://example.com/file",
+            "http://127.0.0.1/admin",
+            "http://169.254.169.254/latest/meta-data/",
+            "http://10.0.0.1/internal",
+            "http://[::1]/secret",
+            "http://localhost:8080/health",
+            "http://service.local/api",
+        ]
+        for url in blocked_urls:
+            result = fetch_article_content(url)
+            self.assertIn("安全限制", result, f"Expected SSRF block for {url}")
+        mock_get.assert_not_called()
+
+    @patch("rss_analyzer.article_fetcher.socket.getaddrinfo")
+    @patch("rss_analyzer.article_fetcher.requests.get")
+    def test_ssrf_blocks_dns_resolving_to_private_ip(self, mock_get, mock_getaddrinfo):
+        """测试域名解析到私网 IP 时被拦截"""
+        mock_getaddrinfo.return_value = [
+            (2, 1, 6, "", ("127.0.0.1", 80)),
+        ]
+        result = fetch_article_content("https://rebind.example.com/article")
+        self.assertIn("安全限制", result)
+        mock_get.assert_not_called()
+
+    @patch("rss_analyzer.article_fetcher.requests.get")
+    def test_ssrf_blocks_redirect_to_private_ip(self, mock_get):
+        """测试重定向目标为私网地址时被拦截"""
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.url = "http://127.0.0.1/internal"
+        mock_response.headers = {"Content-Type": "text/html"}
+        mock_get.return_value = mock_response
+
+        result = fetch_article_content("https://example.com/redirect")
+        self.assertIn("安全限制", result)
+
+    @patch("rss_analyzer.article_fetcher.requests.get")
+    def test_blocks_binary_content_type(self, mock_get):
+        """测试跳过二进制/媒体 Content-Type"""
+        for content_type in ("application/pdf", "image/png", "video/mp4", "audio/mpeg", "application/octet-stream"):
+            mock_response = Mock()
+            mock_response.status_code = 200
+            mock_response.url = "https://example.com/file"
+            mock_response.headers = {"Content-Type": f"{content_type}; charset=binary"}
+            mock_get.return_value = mock_response
+
+            result = fetch_article_content("https://example.com/file")
+            self.assertIn("不支持的内容类型", result)
+
+    @patch("rss_analyzer.article_fetcher.requests.get")
+    def test_enforces_max_response_bytes(self, mock_get):
+        """测试流式读取超过最大字节限制时中止并返回错误"""
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.url = "https://example.com/huge"
+        mock_response.headers = {"Content-Type": "text/html"}
+        mock_response.iter_content.return_value = iter([b"a" * 600, b"b" * 600])
+        mock_get.return_value = mock_response
+
+        with patch.dict(os.environ, {"RSS_MAX_FETCH_BYTES": "1000"}, clear=True):
+            result = fetch_article_content("https://example.com/huge")
+
+        self.assertIn("大小限制", result)
+        mock_response.close.assert_called_once()
+
 
 class TestContentTruncation(unittest.TestCase):
     """Truncation must be configurable and must warn when it drops content.
